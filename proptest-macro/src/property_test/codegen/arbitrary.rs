@@ -20,7 +20,11 @@ pub(super) fn gen_arbitrary_impl(
 // If there are custom strategies, we can't write the type, because we're only provided the
 // expression for the strategy (e.g. `#[strategy = my_custom_strategy()]` doesn't tell us the
 // return type of `my_custom_strategy`). In these cases, we just use `BoxedStrategy<Self>`
-fn no_custom_strategies(fn_name: &Ident, args: &[Argument], options: &Options) -> TokenStream {
+fn no_custom_strategies(
+    fn_name: &Ident,
+    args: &[Argument],
+    options: &Options,
+) -> TokenStream {
     let proptest = options.true_proptest_path();
     let arg_types = args.iter().map(|arg| {
         let ty = &arg.pat_ty.ty;
@@ -59,7 +63,11 @@ fn no_custom_strategies(fn_name: &Ident, args: &[Argument], options: &Options) -
 //   }
 // }
 // ```
-fn custom_strategies(fn_name: &Ident, args: &[Argument], options: &Options) -> TokenStream {
+fn custom_strategies(
+    fn_name: &Ident,
+    args: &[Argument],
+    options: &Options,
+) -> TokenStream {
     let proptest = options.true_proptest_path();
     let arg_strategies: TokenStream =
         args.iter()

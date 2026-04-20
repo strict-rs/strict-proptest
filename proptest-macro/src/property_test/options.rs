@@ -1,8 +1,8 @@
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned, ToTokens};
 use syn::{
-    parse::Parse, parse2, parse_str, punctuated::Punctuated, spanned::Spanned,
-    Expr, Ident, Lit, LitStr, MetaNameValue, Path, Token,
+    parse::Parse, punctuated::Punctuated, spanned::Spanned, Expr, Ident,
+    LitStr, MetaNameValue, Path, Token,
 };
 
 /// Options parsed from the attribute itself (e.g. the config from `#[property_test(config = ...)]`)

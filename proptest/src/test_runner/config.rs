@@ -137,12 +137,7 @@ pub fn contextualize_config(mut result: Config) -> Config {
                 RNG_ALGORITHM,
             );
         } else if var == RNG_SEED {
-            parse_or_warn(
-                &value,
-                &mut result.rng_seed,
-                "u64",
-                RNG_SEED,
-            );
+            parse_or_warn(&value, &mut result.rng_seed, "u64", RNG_SEED);
         } else if var == DISABLE_FAILURE_PERSISTENCE {
             result.failure_persistence = None;
         } else if var.starts_with("PROPTEST_") {
@@ -188,11 +183,14 @@ fn default_default_config() -> Config {
 // The default config, computed by combining environment variables and
 // defaults.
 #[cfg(feature = "std")]
-static DEFAULT_CONFIG: std::sync::LazyLock<Config> = std::sync::LazyLock::new(|| {
-    let mut default_config = default_default_config();
-    default_config.failure_persistence = Some(Box::new(crate::test_runner::FileFailurePersistence::default()));
-    contextualize_config(default_config)
-});
+static DEFAULT_CONFIG: std::sync::LazyLock<Config> =
+    std::sync::LazyLock::new(|| {
+        let mut default_config = default_default_config();
+        default_config.failure_persistence = Some(Box::new(
+            crate::test_runner::FileFailurePersistence::default(),
+        ));
+        contextualize_config(default_config)
+    });
 
 /// The seed for the RNG, can either be random or specified as a u64.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -200,7 +198,7 @@ pub enum RngSeed {
     /// Default case, use a random value
     Random,
     /// Use a specific value to generate a seed
-    Fixed(u64)
+    Fixed(u64),
 }
 
 impl str::FromStr for RngSeed {

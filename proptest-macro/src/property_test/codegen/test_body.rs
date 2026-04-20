@@ -103,7 +103,11 @@ fn handle_result(ret_ty: &ReturnType) -> TokenStream {
     }
 }
 
-fn make_config(config: Option<&Expr>, fn_name: &Ident, options: &Options) -> TokenStream {
+fn make_config(
+    config: Option<&Expr>,
+    fn_name: &Ident,
+    options: &Options,
+) -> TokenStream {
     let proptest = options.true_proptest_path();
     let trailing = match config {
         None => quote! { #proptest::test_runner::Config::default() },
