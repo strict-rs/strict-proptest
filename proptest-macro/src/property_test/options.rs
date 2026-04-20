@@ -6,7 +6,7 @@ use syn::{
 };
 
 /// Options parsed from the attribute itself (e.g. the config from `#[property_test(config = ...)]`)
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(super) struct Options {
     /// Collect compiler errors and emit them later, since errors here are largely recoverable
     pub errors: Vec<TokenStream>,
@@ -85,10 +85,8 @@ mod tests {
             errors,
             config,
             proptest_path,
-        } = parse_str(
-            "config = (), random = 123, proptest_path = ::foo::bar",
-        )
-        .unwrap();
+        } = parse_str("config = (), random = 123, proptest_path = ::foo::bar")
+            .unwrap();
 
         let proptest_path = proptest_path.unwrap();
 
@@ -103,5 +101,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["foo", "bar"]
         );
+    }
+    #[test]
+    fn invalid_proptest_path() {
+        parse_str::<Options>("proptest_path = actually::a::function()")
+            .unwrap_err();
     }
 }

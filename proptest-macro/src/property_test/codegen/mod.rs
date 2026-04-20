@@ -187,7 +187,7 @@ mod tests {
 #[cfg(test)]
 mod snapshot_tests {
     use super::*;
-    use syn::{parse::ParseStream, parse_str};
+    use syn::parse_str;
 
     macro_rules! snapshot_test {
         ($name:ident) => {
