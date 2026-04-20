@@ -1,7 +1,8 @@
 use proc_macro2::TokenStream;
-use quote::{quote, quote_spanned};
+use quote::{quote, quote_spanned, ToTokens};
 use syn::{
-    Expr, Ident, Lit, LitStr, MetaNameValue, Path, Token, parse::Parse, parse_str, punctuated::Punctuated, spanned::Spanned
+    parse::Parse, parse2, parse_str, punctuated::Punctuated, spanned::Spanned,
+    Expr, Ident, Lit, LitStr, MetaNameValue, Path, Token,
 };
 
 /// Options parsed from the attribute itself (e.g. the config from `#[property_test(config = ...)]`)
@@ -10,17 +11,14 @@ pub(super) struct Options {
     /// Collect compiler errors and emit them later, since errors here are largely recoverable
     pub errors: Vec<TokenStream>,
     pub config: Option<Expr>,
-    pub proptest_path: Option<LitStr>,
+    pub proptest_path: Option<Path>,
 }
 
 impl Options {
     pub fn true_proptest_path(&self) -> TokenStream {
         match &self.proptest_path {
             None => quote! { ::proptest },
-            Some(s) => {
-                let value: Path = parse_str(&s.value()).unwrap();
-                quote_spanned! { s.span() => #value }
-            }
+            Some(path) => path.to_token_stream(),
         }
     }
 }
@@ -44,19 +42,19 @@ impl Parse for Options {
                 None => errors.push(quote_spanned!(path.span() => compile_error!("unknown argument"))),
                 Some("config") => config = Some(value),
                 Some("proptest_path") => {
-                    let Expr::Lit(lit) = &value else {
+                    let Expr::Path(path) = &value else {
                         errors.push(quote_spanned!(value.span() =>
-                            compile_error!("argument to `proptest_path` must be a string literal containing a path to the proptest crate")
+                            compile_error!("argument to `proptest_path` must be a path to the proptest crate, e.g. `proptest_path = ::path::to::proptest`")
                         ));
                         continue;
                     };
-                    let Lit::Str(s) = &lit.lit else {
+                    if path.qself.is_some() {
                         errors.push(quote_spanned!(value.span() =>
-                            compile_error!("argument to `proptest_path` must be a string literal containing a path to the proptest crate")
+                            compile_error!("argument to `proptest_path` must be a path to the proptest crate, e.g. `proptest_path = ::path::to::proptest`")
                         ));
                         continue;
-                    };
-                    proptest_path = Some(s.clone());
+                    }
+                    proptest_path = Some(path.path.clone());
                 },
                 Some(other) => {
                     let error_message = format!("unknown argument: {other}");
@@ -88,12 +86,22 @@ mod tests {
             config,
             proptest_path,
         } = parse_str(
-            "config = (), random = 123, proptest_path = \"::foo::bar\"",
+            "config = (), random = 123, proptest_path = ::foo::bar",
         )
         .unwrap();
 
+        let proptest_path = proptest_path.unwrap();
+
         assert!(config.is_some());
-        assert_eq!(proptest_path.unwrap().value(), "::foo::bar");
         assert_eq!(errors.len(), 1);
+        assert!(proptest_path.leading_colon.is_some());
+        assert_eq!(
+            proptest_path
+                .segments
+                .iter()
+                .map(|seg| seg.ident.to_string())
+                .collect::<Vec<_>>(),
+            vec!["foo", "bar"]
+        );
     }
 }

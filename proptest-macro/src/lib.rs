@@ -47,13 +47,13 @@ mod property_test;
 /// E.g. running 100 cases:
 ///
 /// ```rust,ignore
-/// #[property_test(config = "ProptestConfig { cases: 100, .. ProptestConfig::default() }")]
+/// #[property_test(config = ProptestConfig { cases: 100, .. ProptestConfig::default() })]
 /// fn foo(x: i32) {
 ///     assert_eq!(x, x);
 /// }
 /// ```
 ///
-/// You can also provide `proptest_path = "::path::to::proptest"`, which tells the macro not to
+/// You can also provide `proptest_path = ::path::to::proptest`, which tells the macro not to
 /// assume that the `proptest` crate is available. This is useful if, for example, you are using a
 /// re-exported version of proptest, such as `my_library::proptest`.
 ///

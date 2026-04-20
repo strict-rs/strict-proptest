@@ -225,7 +225,7 @@ mod snapshot_tests {
         snapshot_test!(
             simple,
             Options {
-                proptest_path: Some(parse_str("\"::hello::world\"").unwrap()),
+                proptest_path: Some(parse_str("::hello::world").unwrap()),
                 ..Options::default()
             }
         );
