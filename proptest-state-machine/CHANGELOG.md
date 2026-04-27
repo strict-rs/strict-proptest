@@ -1,5 +1,9 @@
 ## Unreleased
 
+### Breaking Changes
+
+- The minimum supported Rust version has been increased to 1.86.0.
+
 ## 0.8.0
 
 - Added Send + Sync bounds to `strategy:Sequential` ([\#640](https://github.com/proptest-rs/proptest/pull/640))

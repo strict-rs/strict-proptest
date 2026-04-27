@@ -1,3 +1,9 @@
+## Unreleased
+
+### Breaking Changes
+
+- The minimum supported Rust version has been increased to 1.86.0.
+
 ## 0.8.0
 
 ### Breaking Changes

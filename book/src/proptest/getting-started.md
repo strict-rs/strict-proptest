@@ -56,7 +56,7 @@ In `Cargo.toml`, add
 
 ```toml
 [dev-dependencies]
-proptest = "1.10.0"
+proptest = "1.11.0"
 ```
 
 Now we can add some property tests to our date parser. But how do we test
@@ -210,8 +210,8 @@ proptest! {
 # fn main() { parses_all_valid_dates(); }
 ```
 
-The thing to the right-hand side of `in` is actually a *regular
-expression*, and `s` is chosen from strings which match it. So in our
+The thing to the right-hand side of `in` is actually a _regular
+expression_, and `s` is chosen from strings which match it. So in our
 previous test, `"\\PC*"` was generating arbitrary strings composed of
 arbitrary non-control characters. Now, we generate things in the YYYY-MM-DD
 format.
