@@ -14,6 +14,8 @@ use core::{fmt, str, u8};
 use crate::test_runner::config;
 use rand::{Rng, RngExt, SeedableRng, TryRng};
 #[cfg(feature = "std")]
+use rand::rand_core::UnwrapErr;
+#[cfg(feature = "std")]
 use rand::rngs::SysRng;
 use rand_chacha::ChaChaRng;
 use rand_xorshift::XorShiftRng;
@@ -127,6 +129,12 @@ enum TestRngImpl {
         rng: ChaChaRng,
         record: Vec<u8>,
     },
+}
+
+#[cfg(feature = "std")]
+fn from_sys_rng<R: SeedableRng>() -> R {
+    let mut rng = UnwrapErr(SysRng);
+    R::from_rng(&mut rng)
 }
 
 impl TestRng {
@@ -407,16 +415,14 @@ impl TestRng {
                 rng: match algorithm {
                     RngAlgorithm::XorShift => {
                         let rng = match seed {
-                            config::RngSeed::Random => XorShiftRng::try_from_rng(&mut SysRng)
-                                .expect("SysRng failed while seeding TestRng"),
+                            config::RngSeed::Random => from_sys_rng::<XorShiftRng>(),
                             config::RngSeed::Fixed(seed) => XorShiftRng::seed_from_u64(seed),
                         };
                         TestRngImpl::XorShift(rng)
                     }
                     RngAlgorithm::ChaCha => {
                         let rng = match seed {
-                            config::RngSeed::Random => ChaChaRng::try_from_rng(&mut SysRng)
-                                .expect("SysRng failed while seeding TestRng"),
+                            config::RngSeed::Random => from_sys_rng::<ChaChaRng>(),
                             config::RngSeed::Fixed(seed) => ChaChaRng::seed_from_u64(seed),
                         };
                         TestRngImpl::ChaCha(rng)
@@ -426,8 +432,7 @@ impl TestRng {
                     }
                     RngAlgorithm::Recorder => {
                         let rng =  match seed {
-                            config::RngSeed::Random => ChaChaRng::try_from_rng(&mut SysRng)
-                                .expect("SysRng failed while seeding TestRng"),
+                            config::RngSeed::Random => from_sys_rng::<ChaChaRng>(),
                             config::RngSeed::Fixed(seed) => ChaChaRng::seed_from_u64(seed),
                         };
                         TestRngImpl::Recorder {rng, record: Vec::new()}
