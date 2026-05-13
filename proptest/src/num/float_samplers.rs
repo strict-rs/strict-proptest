@@ -73,7 +73,7 @@ macro_rules! float_sampler {
             pub(crate) struct FloatUniform {
                 low: $typ,
                 high: $typ,
-                intervals: IntervalCollection,
+                intervals: Option<IntervalCollection>,
                 inclusive: bool,
             }
 
@@ -91,7 +91,7 @@ macro_rules! float_sampler {
                     Ok(FloatUniform {
                         low,
                         high,
-                        intervals: split_interval([low, high]),
+                        intervals: Some(split_interval([low, high])),
                         inclusive: false,
                     })
                 }
@@ -104,16 +104,27 @@ macro_rules! float_sampler {
                     let low = low.borrow().0;
                     let high = high.borrow().0;
 
+                    // A single-point inclusive range is well-defined and yields `low`.
+                    let intervals = if low == high {
+                        None
+                    } else {
+                        Some(split_interval([low, high]))
+                    };
+
                     Ok(FloatUniform {
                         low,
                         high,
-                        intervals: split_interval([low, high]),
+                        intervals,
                         inclusive: true,
                     })
                 }
 
                 fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Self::X {
-                    let mut intervals = self.intervals;
+                    let initial = match self.intervals {
+                        Some(i) => i,
+                        None => return $wrapper(self.low),
+                    };
+                    let mut intervals = initial;
                     while intervals.count > 1 {
                         let new_interval = intervals.get(rng.random_range(0..intervals.count));
                         intervals = split_interval(new_interval);
@@ -125,10 +136,10 @@ macro_rules! float_sampler {
                     // overshoot one of the bounds. We could resample in this
                     // case but for testing data this is not a problem.
                     let clamped_result = if result < self.low {
-                        debug_assert!(self.low - result < self.intervals.step);
+                        debug_assert!(self.low - result < initial.step);
                         self.low
                     } else if result > self.high{
-                        debug_assert!(result - self.high < self.intervals.step);
+                        debug_assert!(result - self.high < initial.step);
                         self.high
                     } else {
                         result
@@ -311,6 +322,28 @@ macro_rules! float_sampler {
                     let mut samples = (0..100)
                         .map(|_| $typ::from(uniform.sample(&mut test_rng)));
                     assert!(samples.any(|x| x == 1. + $typ::EPSILON));
+                }
+
+                #[test]
+                fn inclusive_range_single_point() {
+                    use crate::test_runner::{RngAlgorithm, TestRng};
+
+                    let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
+                    let point: $typ = 0.0;
+                    let uniform = FloatUniform::new_inclusive($wrapper(point), $wrapper(point)).expect("not uniform");
+                    for _ in 0..16 {
+                        assert_eq!($typ::from(uniform.sample(&mut test_rng)), point);
+                    }
+                }
+
+                #[test]
+                fn inclusive_range_single_point_strategy() {
+                    use crate::test_runner::TestRunner;
+                    use crate::strategy::{Strategy, ValueTree};
+
+                    let mut runner = TestRunner::default();
+                    let tree = (1.5 as $typ ..= 1.5 as $typ).new_tree(&mut runner).unwrap();
+                    assert_eq!(tree.current(), 1.5 as $typ);
                 }
 
                 #[test]
