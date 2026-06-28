@@ -1,8 +1,8 @@
 use proc_macro2::TokenStream;
-use quote::{quote, quote_spanned, ToTokens};
+use quote::{ToTokens, quote, quote_spanned};
 use syn::{
-    parse::Parse, punctuated::Punctuated, spanned::Spanned, Expr, Ident,
-    LitStr, MetaNameValue, Path, Token,
+    Expr, Ident, LitStr, MetaNameValue, Path, Token, parse::Parse,
+    punctuated::Punctuated, spanned::Spanned,
 };
 
 /// Options parsed from the attribute itself (e.g. the config from `#[property_test(config = ...)]`)
@@ -104,7 +104,8 @@ mod tests {
     }
     #[test]
     fn invalid_proptest_path() {
-        let res = parse_str::<Options>("proptest_path = actually::a::function()");
+        let res =
+            parse_str::<Options>("proptest_path = actually::a::function()");
         if res.is_err() {
             panic!();
         }

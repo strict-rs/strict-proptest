@@ -8,4 +8,3 @@ fn attr_macro_does_not_clobber_mutability(mut x: i32, (mut y, _z): (i32, i32)) {
     y = 0;
     assert_eq!(x, y);
 }
-

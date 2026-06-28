@@ -2,7 +2,7 @@
 
 ### Breaking Changes
 
-- The minimum supported Rust version has been increased to 1.86.0.
+- The minimum supported Rust version has been increased to 1.96.0.
 
 ### New Features
 

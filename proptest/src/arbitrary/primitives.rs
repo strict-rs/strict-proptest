@@ -12,10 +12,12 @@
 use crate::bool;
 use crate::char;
 use crate::num::{
-    f32, f64, i128, i16, i32, i64, i8, isize, u128, u16, u32, u64, u8, usize,
+    f32, f64, i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize,
 };
 
-arbitrary!(bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, i128, u128);
+arbitrary!(
+    bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, i128, u128
+);
 
 // Note that for floating point types we limit the space since a lot of code
 // isn't prepared for (and is not intended to be) things like NaN and infinity.

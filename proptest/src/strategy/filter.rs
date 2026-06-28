@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{fmt, Arc};
+use crate::std_facade::{Arc, fmt};
 
 use crate::strategy::traits::*;
 use crate::test_runner::*;

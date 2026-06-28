@@ -15,7 +15,7 @@ use std::env;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::string::{String, ToString};
+use std::string::String;
 use std::sync::RwLock;
 use std::vec::Vec;
 
@@ -32,6 +32,7 @@ use crate::test_runner::failure_persistence::{
 /// In all cases, if a derived path references a directory which does not yet
 /// exist, proptest will attempt to create all necessary parent directories.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum FileFailurePersistence {
     /// Completely disables persistence of failing test cases.
     ///
@@ -69,9 +70,6 @@ pub enum FileFailurePersistence {
     /// The string given in this option is directly used as a file path without
     /// any further processing.
     Direct(&'static str),
-    #[doc(hidden)]
-    #[allow(missing_docs)]
-    _NonExhaustive,
 }
 
 impl Default for FileFailurePersistence {
@@ -85,12 +83,9 @@ impl FailurePersistence for FileFailurePersistence {
         &self,
         source_file: Option<&'static str>,
     ) -> Vec<PersistedSeed> {
-        let p = self.resolve(
-            source_file
-                .and_then(|s| absolutize_source_file(Path::new(s)))
-                .as_ref()
-                .map(|cow| &**cow),
-        );
+        let source =
+            source_file.and_then(|s| absolutize_source_file(Path::new(s)));
+        let p = self.resolve(source.as_deref());
 
         let path: Option<&PathBuf> = p.as_ref();
         let result: io::Result<Vec<PersistedSeed>> = path.map_or_else(
@@ -113,7 +108,7 @@ impl FailurePersistence for FileFailurePersistence {
             if io::ErrorKind::NotFound != err.kind() {
                 eprintln!(
                     "proptest: failed to open {}: {}",
-                    &path.map(|x| &**x)
+                    path.map(PathBuf::as_path)
                         .unwrap_or_else(|| Path::new("??"))
                         .display(),
                     err
@@ -157,8 +152,13 @@ impl FailurePersistence for FileFailurePersistence {
                      wish to add the following line to your copy of the file.{}\n\
                      {}",
                     path.display(),
-                    if is_new { " (You may need to create it.)" } else { "" },
-                    seed);
+                    if is_new {
+                        " (You may need to create it.)"
+                    } else {
+                        ""
+                    },
+                    seed
+                );
             }
         }
     }
@@ -171,7 +171,7 @@ impl FailurePersistence for FileFailurePersistence {
         other
             .as_any()
             .downcast_ref::<Self>()
-            .map_or(false, |x| x == self)
+            .is_some_and(|x| x == self)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -259,9 +259,9 @@ fn parse_seed_line(
         line.truncate(comment_start);
     }
 
-    if line.len() > 0 {
+    if !line.is_empty() {
         let ret = line.parse::<PersistedSeed>().ok();
-        if !ret.is_some() {
+        if ret.is_none() {
             eprintln!(
                 "proptest: {}:{}: unparsable line, ignoring",
                 path.display(),
@@ -280,7 +280,7 @@ fn write_seed_line(
     shrunken_value: &dyn Debug,
 ) -> io::Result<()> {
     // Write the seed itself
-    write!(buf, "{}", seed.to_string())?;
+    write!(buf, "{}", seed)?;
 
     // Write out comment:
     let debug_start = buf.len();
@@ -351,7 +351,7 @@ impl FileFailurePersistence {
                             "proptest: FileFailurePersistence::SourceParallel set, \
                              but failed to find lib.rs or main.rs"
                         );
-                        WithSource(sibling).resolve(Some(&*source_path))
+                        WithSource(sibling).resolve(Some(source_path.as_ref()))
                     } else {
                         let suffix = source_path
                             .strip_prefix(&dir)
@@ -394,10 +394,6 @@ impl FileFailurePersistence {
             },
 
             Direct(path) => Some(Path::new(path).to_owned()),
-
-            _NonExhaustive => {
-                panic!("FailurePersistence set to _NonExhaustive")
-            }
         }
     }
 }
@@ -421,20 +417,21 @@ mod tests {
         misplaced_file: PathBuf,
     }
 
-    static TEST_PATHS: std::sync::LazyLock<TestPaths> = std::sync::LazyLock::new(|| {
-        let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let lib_root = crate_root.join("src");
-        let src_subdir = lib_root.join("strategy");
-        let src_file = lib_root.join("foo.rs");
-        let subdir_file = src_subdir.join("foo.rs");
-        let misplaced_file = crate_root.join("foo.rs");
-        TestPaths {
-            crate_root,
-            src_file,
-            subdir_file,
-            misplaced_file,
-        }
-    });
+    static TEST_PATHS: std::sync::LazyLock<TestPaths> =
+        std::sync::LazyLock::new(|| {
+            let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+            let lib_root = crate_root.join("src");
+            let src_subdir = lib_root.join("strategy");
+            let src_file = lib_root.join("foo.rs");
+            let subdir_file = src_subdir.join("foo.rs");
+            let misplaced_file = crate_root.join("foo.rs");
+            TestPaths {
+                crate_root,
+                src_file,
+                subdir_file,
+                misplaced_file,
+            }
+        });
 
     #[test]
     fn persistence_file_location_resolved_correctly() {
@@ -498,29 +495,30 @@ mod tests {
     #[test]
     fn relative_source_files_absolutified() {
         const TEST_RUNNER_PATH: &[&str] = &["src", "test_runner", "mod.rs"];
-        static TEST_RUNNER_RELATIVE: std::sync::LazyLock<PathBuf> = std::sync::LazyLock::new(|| TEST_RUNNER_PATH.iter().collect());
+        static TEST_RUNNER_RELATIVE: std::sync::LazyLock<PathBuf> =
+            std::sync::LazyLock::new(|| TEST_RUNNER_PATH.iter().collect());
         const CARGO_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
         let expected = ::std::iter::once(CARGO_DIR)
-            .chain(TEST_RUNNER_PATH.iter().map(|s| *s))
+            .chain(TEST_RUNNER_PATH.iter().copied())
             .collect::<PathBuf>();
 
         // Running from crate root
         assert_eq!(
-            &*expected,
+            expected.as_path(),
             absolutize_source_file_with_cwd(
                 || Ok(Path::new(CARGO_DIR).to_owned()),
-                &*TEST_RUNNER_RELATIVE
+                TEST_RUNNER_RELATIVE.as_path()
             )
             .unwrap()
         );
 
         // Running from test subdirectory
         assert_eq!(
-            &*expected,
+            expected.as_path(),
             absolutize_source_file_with_cwd(
                 || Ok(Path::new(CARGO_DIR).join("target")),
-                &*TEST_RUNNER_RELATIVE
+                TEST_RUNNER_RELATIVE.as_path()
             )
             .unwrap()
         );

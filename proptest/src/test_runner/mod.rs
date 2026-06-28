@@ -21,6 +21,7 @@ mod replay;
 mod result_cache;
 mod rng;
 mod runner;
+#[cfg(feature = "std")]
 mod scoped_panic_hook;
 
 pub use self::config::*;

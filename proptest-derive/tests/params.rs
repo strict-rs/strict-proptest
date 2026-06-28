@@ -7,7 +7,7 @@
 // except according to those terms.
 
 use proptest::prelude::{
-    any_with, prop_assert, prop_assert_eq, proptest, Arbitrary,
+    Arbitrary, any_with, prop_assert, prop_assert_eq, proptest,
 };
 use proptest_derive::Arbitrary;
 
@@ -44,7 +44,7 @@ struct InnerNoParams {
 
 #[derive(Debug, Arbitrary)]
 #[proptest(params(u64))]
-struct TPIS {
+struct Tpis {
     #[proptest(strategy = "\"a+\"")]
     string: String,
     #[proptest(strategy = "3..=params")]
@@ -85,7 +85,7 @@ proptest! {
     }
 
     #[test]
-    fn top_param_inner_strat(inner in any_with::<TPIS>(6)) {
+    fn top_param_inner_strat(inner in any_with::<Tpis>(6)) {
         prop_assert!(inner.int <= 6);
         prop_assert!(inner.int >= 3);
         prop_assert_eq!(
@@ -98,14 +98,14 @@ proptest! {
     fn parallel_params(inner in any_with::<Parallel>(("[0-9]", 3))) {
         prop_assert!(inner.int >= 0);
         prop_assert!(inner.int < 3);
-        prop_assert!(inner.string.chars().next().unwrap().is_digit(10));
+        prop_assert!(inner.string.chars().next().unwrap().is_ascii_digit());
     }
 
     #[test]
     fn parallel_params2(inner in any_with::<Parallel>(("[0-9]", 3))) {
         prop_assert!(inner.int >= 0);
         prop_assert!(inner.int < 3);
-        prop_assert!(inner.string.chars().next().unwrap().is_digit(10));
+        prop_assert!(inner.string.chars().next().unwrap().is_ascii_digit());
     }
 }
 
@@ -116,7 +116,7 @@ fn asserting_arbitrary() {
     assert_arbitrary::<TopHasParams>();
     assert_arbitrary::<TopNoParams>();
     assert_arbitrary::<InnerNoParams>();
-    assert_arbitrary::<TPIS>();
+    assert_arbitrary::<Tpis>();
     assert_arbitrary::<Parallel>();
     assert_arbitrary::<Parallel2>();
 }

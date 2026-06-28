@@ -9,7 +9,7 @@
 
 //! Arbitrary implementations for arrays.
 
-use crate::arbitrary::{any_with, Arbitrary};
+use crate::arbitrary::{Arbitrary, any_with};
 use crate::array::UniformArrayStrategy;
 
 impl<A: Arbitrary, const N: usize> Arbitrary for [A; N] {

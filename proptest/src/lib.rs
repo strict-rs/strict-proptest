@@ -17,14 +17,14 @@
 #![forbid(future_incompatible)]
 #![deny(missing_docs, bare_trait_objects)]
 #![no_std]
-#![cfg_attr(clippy, allow(
-    doc_markdown,
+#![allow(
+    clippy::doc_markdown,
     // We have a lot of these lints for associated types... And we don't care.
-    type_complexity
-))]
+    clippy::type_complexity
+)]
 #![cfg_attr(
     feature = "unstable",
-    feature(allocator_api, try_trait_v2, coroutine_trait, never_type)
+    feature(allocator_api, coroutine_trait, never_type)
 )]
 #![cfg_attr(feature = "f16", feature(f16))]
 #![cfg_attr(all(feature = "std", feature = "unstable"), feature(ip))]

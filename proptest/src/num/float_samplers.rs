@@ -23,15 +23,21 @@ pub(crate) use self::f32::F32U;
 pub(crate) use self::f64::F64U;
 
 macro_rules! float_sampler {
-    ($typ: ident, $int_typ: ident, $wrapper: ident) => {
+    (
+        $typ: ident,
+        $int_typ: ident,
+        $wrapper: ident
+        $(, no_std_trait = $no_std_trait:path)?
+    ) => {
         pub mod $typ {
             use rand::prelude::*;
             use rand::distr::uniform::{
                 SampleBorrow, SampleUniform, UniformSampler,
             };
-            #[cfg(not(feature = "std"))]
-            use num_traits::float::Float;
-
+            $(
+                #[cfg(not(feature = "std"))]
+                use $no_std_trait;
+            )?
             #[must_use]
             // Returns the previous float value. In other words the greatest value representable
             // as a float such that `next_down(a) < a`. `-0.` is treated as `0.`.
@@ -496,5 +502,5 @@ macro_rules! float_sampler {
 
 #[cfg(feature = "f16")]
 float_sampler!(f16, u16, F16U);
-float_sampler!(f32, u32, F32U);
-float_sampler!(f64, u64, F64U);
+float_sampler!(f32, u32, F32U, no_std_trait = num_traits::float::Float);
+float_sampler!(f64, u64, F64U, no_std_trait = num_traits::float::Float);

@@ -202,7 +202,7 @@ mod test {
         for _ in 0..2048 {
             let value = input.new_tree(&mut runner).unwrap().current();
             // Generated the correct number of items
-            assert!(value.len() >= 3 && value.len() < 7);
+            assert!((3..7).contains(&value.len()));
             // Chose distinct items
             assert_eq!(
                 value.len(),
@@ -217,18 +217,18 @@ mod test {
             }
         }
 
-        for i in 3..7 {
+        for (i, count) in size_counts.iter().enumerate().take(7).skip(3) {
             assert!(
-                size_counts[i] >= 256 && size_counts[i] < 1024,
+                (256..1024).contains(count),
                 "size {} was chosen {} times",
                 i,
-                size_counts[i]
+                count
             );
         }
 
         for (ix, &v) in value_counts.iter().enumerate() {
             assert!(
-                v >= 1024 && v < 1500,
+                (1024..1500).contains(&v),
                 "Value {} was chosen {} times",
                 ix,
                 v

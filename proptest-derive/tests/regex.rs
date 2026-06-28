@@ -6,7 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use proptest::prelude::{proptest, Arbitrary, BoxedStrategy, Strategy};
+use proptest::prelude::{Arbitrary, BoxedStrategy, Strategy, proptest};
 use proptest::string::StrategyFromRegex;
 use proptest_derive::Arbitrary;
 
@@ -121,16 +121,14 @@ fn assert_adherence(
 
     assert!(x2.parse::<u8>().unwrap() < 100);
 
-    assert!(y0.len() > 0);
-    assert!(y0.iter().all(|c: &u8| [b'a', b'b'].contains(c)));
+    assert!(!y0.is_empty());
+    assert!(y0.iter().all(|c: &u8| b"ab".contains(c)));
 
-    assert!(y1.len() > 0 && y1.len() < 4);
-    assert!(y1.iter().all(|c: &u8| [b'a', b'b', b'c'].contains(c)));
+    assert!(!y1.is_empty() && y1.len() < 4);
+    assert!(y1.iter().all(|c: &u8| b"abc".contains(c)));
 
-    assert!(y2.len() > 0);
-    let test = y2
-        .iter()
-        .all(|c: &u8| if let b'0'..=b'9' = c { true } else { false });
+    assert!(!y2.is_empty());
+    let test = y2.iter().all(u8::is_ascii_digit);
     assert!(test);
 }
 

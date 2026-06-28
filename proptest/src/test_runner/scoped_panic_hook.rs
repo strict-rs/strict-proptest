@@ -23,7 +23,7 @@ mod internal {
     //!     via drop guard. Then, normal body closure is executed.
     use std::boxed::Box;
     use std::cell::Cell;
-    use std::panic::{set_hook, take_hook, PanicInfo};
+    use std::panic::{PanicInfo, set_hook, take_hook};
     use std::sync::Once;
     use std::{mem, ptr};
 

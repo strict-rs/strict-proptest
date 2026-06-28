@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
-use quote::{quote_spanned, ToTokens};
-use syn::{spanned::Spanned, FnArg, ItemFn, Meta};
+use quote::{ToTokens, quote_spanned};
+use syn::{FnArg, ItemFn, Meta, spanned::Spanned};
 
 use super::utils::is_strategy;
 
@@ -80,11 +80,7 @@ fn validate_parameter_attrs(f: &mut ItemFn) -> Result<(), TokenStream> {
         pat_ty.attrs = final_attrs;
     }
 
-    if error.is_empty() {
-        Ok(())
-    } else {
-        Err(error)
-    }
+    if error.is_empty() { Ok(()) } else { Err(error) }
 }
 
 /// Helper function to generate `compile_error!()` outputs

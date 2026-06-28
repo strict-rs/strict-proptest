@@ -6,7 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use proptest::prelude::{proptest, Arbitrary, Strategy};
+use proptest::prelude::{Arbitrary, Strategy, proptest};
 use proptest_derive::Arbitrary;
 
 fn make_strategy(start: usize) -> impl Strategy<Value = usize> {
@@ -54,7 +54,7 @@ enum T2 {
 }
 
 fn assert_consistency(start: usize, val: usize) {
-    assert!(val % 2 == 0 && val < 200 && val >= (start * 2));
+    assert!(val.is_multiple_of(2) && val < 200 && val >= (start * 2));
 }
 
 proptest! {

@@ -9,8 +9,8 @@
 
 //! Test declaration helpers and runners for abstract state machine testing.
 
-use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
+use std::sync::atomic::{self, AtomicUsize};
 
 use crate::strategy::ReferenceStateMachine;
 use proptest::test_runner::Config;
@@ -223,7 +223,7 @@ mod tests {
         //! `prop_state_machine!` macro compile cleanly, and hygenically,
         //!  as intended.
 
-        /// Note: no imports here, so as to guarantee hygienic macros
+        // Note: no imports here, so as to guarantee hygienic macros
 
         /// A no-op test. Exists strictly as something to reference
         /// in the macro invocation.
@@ -245,9 +245,7 @@ mod tests {
                 Just(()).boxed()
             }
 
-            fn apply(_: Self::State, _: &Self::Transition) -> Self::State {
-                ()
-            }
+            fn apply(_: Self::State, _: &Self::Transition) -> Self::State {}
         }
 
         impl crate::StateMachineTest for Test {

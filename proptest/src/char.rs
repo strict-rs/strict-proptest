@@ -122,12 +122,11 @@ fn select_range_index(
 
     if !preferred.is_empty() && rnd.random() {
         let range = preferred[rnd.random_range(0..preferred.len())].clone();
-        if let Some(ch) = ::core::char::from_u32(
+        let selected = ::core::char::from_u32(
             rnd.random_range(*range.start() as u32..*range.end() as u32 + 1),
-        ) {
-            if let Some(ret) = in_range(ranges, ch) {
-                return ret;
-            }
+        );
+        if let Some(ret) = selected.and_then(|ch| in_range(ranges, ch)) {
+            return ret;
         }
     }
 
@@ -207,7 +206,7 @@ impl<'a> CharStrategy<'a> {
     }
 }
 
-const WHOLE_RANGE: &[CharRange] = &['\x00'..=char::MAX];
+const WHOLE_RANGE: &[CharRange] = &[RangeInclusive::new('\x00', char::MAX)];
 
 /// Creates a `CharStrategy` which picks from literally any character, with the
 /// default biases.
@@ -225,7 +224,7 @@ pub fn range(start: char, end: char) -> CharStrategy<'static> {
     CharStrategy {
         special: Cow::Borrowed(DEFAULT_SPECIAL_CHARS),
         preferred: Cow::Borrowed(DEFAULT_PREFERRED_RANGES),
-        ranges: Cow::Owned(vec![start..=end]),
+        ranges: Cow::Owned(vec![RangeInclusive::new(start, end)]),
     }
 }
 
@@ -363,7 +362,7 @@ mod test {
             let ch = any().new_tree(&mut runner).unwrap().current();
             if '🕴' == ch {
                 men_in_business_suits_levitating += 1;
-            } else if ch >= ' ' && ch <= '~' {
+            } else if (' '..='~').contains(&ch) {
                 ascii_printable += 1;
             }
         }

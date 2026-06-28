@@ -372,7 +372,7 @@ impl ToTokens for Strategy {
             Map(strats) => {
                 let types = self.types();
                 let field_tys = NestedTuple(&types);
-                let strats = NestedTuple(&strats);
+                let strats = NestedTuple(strats);
                 quote_append!(tokens,
                     _proptest::strategy::Map< ( #strats ),
                         fn( #field_tys ) -> Self
@@ -414,7 +414,7 @@ pub enum ToReg {
     ///
     /// To change the name this linearises to is considered a breaking change
     /// wrt. semver.
-    API,
+    Api,
 }
 
 /// Models an expression that generates a proptest `Strategy`.
@@ -455,7 +455,7 @@ pub fn extract_all(c: Ctor, to: usize, from: FromReg) -> Ctor {
 /// (literally named like that) from `FromReg`. This is used when the given
 /// `c` expects `params` to be there.
 pub fn extract_api(c: Ctor, from: FromReg) -> Ctor {
-    extract(c, ToReg::API, from)
+    extract(c, ToReg::Api, from)
 }
 
 impl ToTokens for FromReg {
@@ -470,12 +470,12 @@ impl ToTokens for FromReg {
 impl ToTokens for ToReg {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match *self {
-            ToReg::Range(to) if to == 1 => param(0).to_tokens(tokens),
+            ToReg::Range(1) => param(0).to_tokens(tokens),
             ToReg::Range(to) => {
                 let params: Vec<_> = (0..to).map(param).collect();
                 NestedTuple(&params).to_tokens(tokens)
             }
-            ToReg::API => call_site_ident(API_PARAM_NAME).to_tokens(tokens),
+            ToReg::Api => call_site_ident(API_PARAM_NAME).to_tokens(tokens),
         }
     }
 }
@@ -516,7 +516,7 @@ impl ToTokens for Ctor {
                     _proptest::strategy::LazyJust::new(move || #expr)
                 )
             ),
-            Map(ctors, closure) => map_ctor_to_tokens(tokens, &ctors, closure),
+            Map(ctors, closure) => map_ctor_to_tokens(tokens, ctors, closure),
             #[cfg(not(feature = "boxed_union"))]
             Union(ctors) => union_ctor_to_tokens(tokens, ctors),
             #[cfg(feature = "boxed_union")]

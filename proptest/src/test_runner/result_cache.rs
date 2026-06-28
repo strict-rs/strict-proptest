@@ -7,8 +7,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::fmt;
 use crate::std_facade::Box;
+use crate::std_facade::fmt;
 #[cfg(feature = "std")]
 use std::collections::HashMap;
 

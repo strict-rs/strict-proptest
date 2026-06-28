@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{fmt, BTreeMap, BTreeSet, Box, Vec};
+use crate::std_facade::{BTreeMap, BTreeSet, Box, Vec, fmt};
 use core::any::Any;
 
 use crate::test_runner::failure_persistence::FailurePersistence;
@@ -44,7 +44,7 @@ impl FailurePersistence for MapFailurePersistence {
             Some(sf) => sf,
             None => return,
         };
-        let set = self.map.entry(s).or_insert_with(BTreeSet::new);
+        let set = self.map.entry(s).or_default();
         set.insert(seed);
     }
 
@@ -56,7 +56,7 @@ impl FailurePersistence for MapFailurePersistence {
         other
             .as_any()
             .downcast_ref::<Self>()
-            .map_or(false, |x| x == self)
+            .is_some_and(|x| x == self)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -71,9 +71,11 @@ mod tests {
 
     #[test]
     fn initial_map_is_empty() {
-        assert!(MapFailurePersistence::default()
-            .load_persisted_failures2(HI_PATH)
-            .is_empty())
+        assert!(
+            MapFailurePersistence::default()
+                .load_persisted_failures2(HI_PATH)
+                .is_empty()
+        )
     }
 
     #[test]

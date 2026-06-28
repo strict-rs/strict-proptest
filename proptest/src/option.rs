@@ -9,7 +9,7 @@
 
 //! Strategies for generating `std::Option` values.
 
-#![cfg_attr(clippy, allow(expl_impl_clone_on_copy))]
+#![allow(clippy::expl_impl_clone_on_copy)]
 
 use core::fmt;
 use core::marker::PhantomData;
@@ -47,7 +47,7 @@ impl Probability {
     ///
     /// Panics if the probability is outside interval `[0.0, 1.0]`.
     pub fn new(prob: f64) -> Self {
-        assert!(prob >= 0.0 && prob <= 1.0);
+        assert!((0.0..=1.0).contains(&prob));
         Probability(prob)
     }
 

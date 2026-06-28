@@ -22,8 +22,8 @@ use proptest::test_runner::Config;
 use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
 
 use system_under_test::{
-    init_client, init_server, run_client, run_server, ClientDialer, Msg,
-    ServerDialer, Transport,
+    ClientDialer, Msg, ServerDialer, Transport, init_client, init_server,
+    run_client, run_server,
 };
 
 // Setup the state machine test using the `prop_state_machine!` macro
@@ -328,13 +328,13 @@ impl StateMachineTest for EchoServerTest {
 
 mod system_under_test {
     pub use message_io::network::Transport;
-    use message_io::network::{Endpoint, NetEvent, ResourceId, ToRemoteAddr};
+    use message_io::network::{Endpoint, NetEvent, ToRemoteAddr};
     use message_io::node::{self, NodeEvent, NodeHandler, NodeListener};
 
     use std::net::{SocketAddr, ToSocketAddrs};
 
-    use std::sync::atomic::{self, AtomicBool};
     use std::sync::Arc;
+    use std::sync::atomic::{self, AtomicBool};
 
     const ATOMIC_ORDER: atomic::Ordering = atomic::Ordering::SeqCst;
 
@@ -349,7 +349,6 @@ mod system_under_test {
 
     pub struct ServerDialer {
         pub address: SocketAddr,
-        pub resource_id: ResourceId,
         pub handler: NodeHandler<()>,
     }
 
@@ -363,7 +362,6 @@ mod system_under_test {
     }
 
     pub struct ClientDialer {
-        pub address: SocketAddr,
         pub server: Endpoint,
         pub handler: NodeHandler<()>,
         /// Server connection status, shared with the [`ClientListener`].
@@ -376,14 +374,13 @@ mod system_under_test {
     ) -> (ServerDialer, ServerListener) {
         let (handler, listener) = node::split::<()>();
 
-        let (resource_id, address) =
+        let (_resource_id, address) =
             handler.network().listen(transport, addr).unwrap();
         println!("Server is running at {address} with {transport}.");
 
         (
             ServerDialer {
                 address,
-                resource_id,
                 handler: handler.clone(),
             },
             ServerListener { listener, handler },
@@ -430,7 +427,6 @@ mod system_under_test {
                 is_connected: is_connected.clone(),
             },
             ClientDialer {
-                address,
                 server,
                 handler,
                 is_connected,
@@ -494,6 +490,6 @@ mod system_under_test {
             println!("Waiting for the server to be ready.");
         }
 
-        dialer.handler.network().send(dialer.server, &output_data);
+        dialer.handler.network().send(dialer.server, output_data);
     }
 }

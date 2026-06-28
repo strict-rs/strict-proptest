@@ -9,17 +9,33 @@
 
 //! Strategies used for abstract state machine testing.
 
-use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
+use std::sync::atomic::{self, AtomicUsize};
 
 use proptest::bits::{BitSetLike, VarBitSet};
 use proptest::collection::SizeRange;
 use proptest::num::sample_uniform_incl;
-use proptest::std_facade::fmt::{Debug, Formatter, Result};
 use proptest::std_facade::Vec;
+use proptest::std_facade::fmt::{Debug, Formatter, Result};
 use proptest::strategy::BoxedStrategy;
 use proptest::strategy::{NewTree, Strategy, ValueTree};
 use proptest::test_runner::TestRunner;
+
+/// Default sequential state-machine strategy type.
+pub type SequentialStrategy<State, Transition> = Sequential<
+    State,
+    Transition,
+    BoxedStrategy<State>,
+    BoxedStrategy<Transition>,
+>;
+
+type InitStateFn<StateStrategy> = Arc<dyn Fn() -> StateStrategy + Send + Sync>;
+type PreconditionsFn<State, Transition> =
+    Arc<dyn Fn(&State, &Transition) -> bool + Send + Sync>;
+type TransitionsFn<State, TransitionStrategy> =
+    Arc<dyn Fn(&State) -> TransitionStrategy + Send + Sync>;
+type NextFn<State, Transition> =
+    Arc<dyn Fn(State, &Transition) -> State + Send + Sync>;
 
 /// This trait is used to model system under test as an abstract state machine.
 ///
@@ -96,12 +112,7 @@ pub trait ReferenceStateMachine: 'static {
     /// You typically never need to override this method.
     fn sequential_strategy(
         size: impl Into<SizeRange>,
-    ) -> Sequential<
-        Self::State,
-        Self::Transition,
-        BoxedStrategy<Self::State>,
-        BoxedStrategy<Self::Transition>,
-    > {
+    ) -> SequentialStrategy<Self::State, Self::Transition> {
         Sequential::new(
             size.into(),
             Self::init_state,
@@ -140,10 +151,10 @@ pub trait ReferenceStateMachine: 'static {
 /// any.
 pub struct Sequential<State, Transition, StateStrategy, TransitionStrategy> {
     size: SizeRange,
-    init_state: Arc<dyn Fn() -> StateStrategy + Send + Sync>,
-    preconditions: Arc<dyn Fn(&State, &Transition) -> bool + Send + Sync>,
-    transitions: Arc<dyn Fn(&State) -> TransitionStrategy + Send + Sync>,
-    next: Arc<dyn Fn(State, &Transition) -> State + Send + Sync>,
+    init_state: InitStateFn<StateStrategy>,
+    preconditions: PreconditionsFn<State, Transition>,
+    transitions: TransitionsFn<State, TransitionStrategy>,
+    next: NextFn<State, Transition>,
 }
 
 impl<State, Transition, StateStrategy, TransitionStrategy>
@@ -182,11 +193,11 @@ impl<State, Transition, StateStrategy, TransitionStrategy> Debug
 }
 
 impl<
-        State: Clone + Debug,
-        Transition: Clone + Debug,
-        StateStrategy: Strategy<Value = State>,
-        TransitionStrategy: Strategy<Value = Transition>,
-    > Strategy
+    State: Clone + Debug,
+    Transition: Clone + Debug,
+    StateStrategy: Strategy<Value = State>,
+    TransitionStrategy: Strategy<Value = Transition>,
+> Strategy
     for Sequential<State, Transition, StateStrategy, TransitionStrategy>
 {
     type Tree = SequentialValueTree<
@@ -293,9 +304,9 @@ pub struct SequentialValueTree<
     /// to back to it in case the shrinking is rejected.
     last_valid_initial_state: State,
     /// The pre-conditions predicate
-    preconditions: Arc<dyn Fn(&State, &Transition) -> bool>,
+    preconditions: PreconditionsFn<State, Transition>,
     /// The function from current state and a transition to an updated state
-    next: Arc<dyn Fn(State, &Transition) -> State>,
+    next: NextFn<State, Transition>,
     /// The list of transitions' value trees
     transitions: Vec<TransitionValueTree>,
     /// The sequence of included transitions with their shrinking state
@@ -320,12 +331,11 @@ pub struct SequentialValueTree<
 }
 
 impl<
-        State: Clone + Debug,
-        Transition: Clone + Debug,
-        StateValueTree: ValueTree<Value = State>,
-        TransitionValueTree: ValueTree<Value = Transition>,
-    >
-    SequentialValueTree<State, Transition, StateValueTree, TransitionValueTree>
+    State: Clone + Debug,
+    Transition: Clone + Debug,
+    StateValueTree: ValueTree<Value = State>,
+    TransitionValueTree: ValueTree<Value = Transition>,
+> SequentialValueTree<State, Transition, StateValueTree, TransitionValueTree>
 {
     /// Try to apply the next `self.shrink`. Returns `true` if a shrink has been
     /// applied.
@@ -370,9 +380,8 @@ impl<
                 } else if kept_count == 1 {
                     self.shrink = Transition(0);
                 } else {
-                    self.shrink = DeleteTransition(
-                        kept_count.checked_sub(2).unwrap_or_default(),
-                    );
+                    self.shrink =
+                        DeleteTransition(kept_count.saturating_sub(2));
                 }
             }
 
@@ -570,11 +579,11 @@ impl<
 }
 
 impl<
-        State: Clone + Debug,
-        Transition: Clone + Debug,
-        StateValueTree: ValueTree<Value = State>,
-        TransitionValueTree: ValueTree<Value = Transition>,
-    > ValueTree
+    State: Clone + Debug,
+    Transition: Clone + Debug,
+    StateValueTree: ValueTree<Value = State>,
+    TransitionValueTree: ValueTree<Value = Transition>,
+> ValueTree
     for SequentialValueTree<
         State,
         Transition,
@@ -585,10 +594,10 @@ impl<
     type Value = (State, Vec<Transition>, Option<Arc<AtomicUsize>>);
 
     fn current(&self) -> Self::Value {
-        if let Some(seen_transitions_counter) = &self.seen_transitions_counter {
-            if seen_transitions_counter.load(atomic::Ordering::SeqCst) > 0 {
-                panic!("Unexpected non-zero `seen_transitions_counter`");
-            }
+        if let Some(seen_transitions_counter) = &self.seen_transitions_counter
+            && seen_transitions_counter.load(atomic::Ordering::SeqCst) > 0
+        {
+            panic!("Unexpected non-zero `seen_transitions_counter`");
         }
 
         (
@@ -1046,12 +1055,13 @@ mod test {
                 let result = runner.run(
                     &FailIfLessThan::sequential_strategy(10..50_usize),
                     |(ref_state, transitions, seen_counter)| {
-                        Ok(FailIfLessThanTest::test_sequential(
+                        FailIfLessThanTest::test_sequential(
                             Default::default(),
                             ref_state,
                             transitions,
                             seen_counter,
-                        ))
+                        );
+                        Ok(())
                     },
                 );
                 if let Err(TestError::Fail(
@@ -1085,18 +1095,27 @@ mod test {
         // Call simplify - this should trigger the optimization
         let simplified = value_tree.simplify();
 
-        assert_eq!(value_tree.included_transitions.count(), 0,
-            "All transitions should be removed when none were seen");
-        assert!(matches!(value_tree.shrink, InitialState),
-            "Shrink should be set to InitialState when kept_count == 0");
+        assert_eq!(
+            value_tree.included_transitions.count(),
+            0,
+            "All transitions should be removed when none were seen"
+        );
+        assert!(
+            matches!(value_tree.shrink, InitialState),
+            "Shrink should be set to InitialState when kept_count == 0"
+        );
 
         // The HeapStateMachine uses Just(vec![]) for initial state, which is not shrinkable
         // So simplify() should return false, but the optimization still works correctly
-        assert!(!simplified,
-            "Simplification should return false since initial state (Just(vec![])) is not shrinkable");
+        assert!(
+            !simplified,
+            "Simplification should return false since initial state (Just(vec![])) is not shrinkable"
+        );
 
         let (_, transitions, _) = value_tree.current();
-        assert!(transitions.is_empty(),
-            "No transitions should remain when none were seen");
+        assert!(
+            transitions.is_empty(),
+            "No transitions should remain when none were seen"
+        );
     }
 }

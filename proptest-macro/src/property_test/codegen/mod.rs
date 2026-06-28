@@ -1,12 +1,12 @@
 use proc_macro2::TokenStream;
-use quote::{quote, ToTokens};
+use quote::{ToTokens, quote};
 use syn::{
-    parse_quote, spanned::Spanned, Attribute, Ident, ItemFn, Pat, ReturnType,
+    Attribute, Ident, ItemFn, Pat, ReturnType, parse_quote, spanned::Spanned,
 };
 
 use super::{
     options::Options,
-    utils::{strip_args, Argument},
+    utils::{Argument, strip_args},
 };
 
 mod arbitrary;
@@ -87,7 +87,7 @@ fn struct_name(fn_name: &Ident) -> Ident {
 /// The rule for field names is:
 /// - if the arguments pattern is an ident, we reuse that ident verbatim
 /// - otherwise, we use the name `arg<n>`, where `<n>` is the index of the argument (including
-/// ident arguments)
+///   ident arguments)
 ///
 /// So for example, given the args `foo: i32, (a, b): (i32, bool), baz: bool`, the generated struct
 /// would roughly be:
@@ -115,7 +115,7 @@ fn test_attr() -> Attribute {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use syn::{parse2, parse_quote, parse_str, ItemStruct};
+    use syn::{ItemStruct, parse_quote, parse_str, parse2};
 
     /// Simple helper that parses a function, and validates that the struct name and fields are
     /// correct

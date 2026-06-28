@@ -263,8 +263,9 @@ macro_rules! prop_assume {
         $crate::prop_assume!($expr, "{}", ::core::stringify!($expr))
     };
 
-    ($expr:expr, $fmt:tt $(, $fmt_arg:expr),* $(,)?) => {
-        if !$expr {
+    ($expr:expr, $fmt:tt $(, $fmt_arg:expr),* $(,)?) => {{
+        let __proptest_assumption = $expr;
+        if !__proptest_assumption {
             extern crate alloc;
             return ::core::result::Result::Err(
                 $crate::test_runner::TestCaseError::reject(
@@ -272,7 +273,7 @@ macro_rules! prop_assume {
                             ::core::file!(), ::core::line!(), ::core::column!()
                             $(, $fmt_arg)*)));
         }
-    };
+    }};
 }
 
 /// Produce a strategy which picks one of the listed choices.
@@ -615,11 +616,11 @@ macro_rules! prop_oneof {
 /// but not everything.
 ///
 /// - You can't filter via this macro. For filtering, you need to make the
-/// strategy the "normal" way and use `prop_filter()`.
+///   strategy the "normal" way and use `prop_filter()`.
 ///
 /// - More than two layers of strategies or arbitrary logic between the two
-/// layers. If you need either of these, you can achieve them by calling
-/// `prop_flat_map()` by hand.
+///   layers. If you need either of these, you can achieve them by calling
+///   `prop_flat_map()` by hand.
 #[macro_export]
 macro_rules! prop_compose {
     ($(#[$meta:meta])*
@@ -750,15 +751,16 @@ macro_rules! prop_assert {
         $crate::prop_assert!($cond, ::core::concat!("assertion failed: ", ::core::stringify!($cond)))
     };
 
-    ($cond:expr, $($fmt:tt)*) => {
-        if !$cond {
+    ($cond:expr, $($fmt:tt)*) => {{
+        let __proptest_assertion = $cond;
+        if !__proptest_assertion {
             extern crate alloc;
             let message = alloc::format!($($fmt)*);
             let message = alloc::format!("{} at {}:{}", message, ::core::file!(), ::core::line!());
             return ::core::result::Result::Err(
                 $crate::test_runner::TestCaseError::fail(message));
         }
-    };
+    }};
 }
 
 /// Similar to `assert_eq!` from std, but returns a test failure instead of
@@ -1568,7 +1570,11 @@ mod closure_tests {
 
         let foo = Foo;
         proptest!(move |(x: (), y: ())| {
-            assert!(x == y, "foo: {:?}", foo);
+            fn accept_units(_: (), _: ()) -> usize {
+                2
+            }
+
+            assert_eq!(accept_units(x, y), 2, "foo: {:?}", foo);
         });
 
         #[derive(Debug)]
@@ -1580,7 +1586,9 @@ mod closure_tests {
     #[allow(unreachable_code)]
     fn fails_if_closure_panics() {
         proptest!(|(_ in 0..1)| {
-            panic!()
+            let expected = 1;
+            let actual = 0;
+            assert_eq!(actual, expected, "intentional test-case panic");
         });
     }
 
@@ -1624,7 +1632,7 @@ mod any_tests {
                 ref mut _g: (),
                 [_, _]: [(); 2],
             ) {
-            if a {} // Assert bool.
+            assert!(matches!(a, true | false));
             assert!(b as usize + c as usize >= 50);
         }
     }
@@ -1640,16 +1648,25 @@ mod any_tests {
         let _ = proptest_helper!(@_EXT _STRAT( mut x : u8 ));
         let _ = proptest_helper!(@_EXT _STRAT( ref mut x : u8 ));
         let _ = proptest_helper!(@_EXT _STRAT( [_, _] : u8 ));
-        let _ = proptest_helper!(@_EXT _STRAT( (&mut &Y(ref x)) : u8 ));
+        let _ = proptest_helper!(@_EXT _STRAT( (&mut Y(x)) : u8 ));
         let _ = proptest_helper!(@_EXT _STRAT( x in 1..2 ));
 
         let proptest_helper!(@_EXT _PAT( _ : u8 )) = 1;
         let proptest_helper!(@_EXT _PAT( _x : u8 )) = 1;
         let proptest_helper!(@_EXT _PAT( mut _x : u8 )) = 1;
-        let proptest_helper!(@_EXT _PAT( ref _x : u8 )) = 1;
-        let proptest_helper!(@_EXT _PAT( ref mut _x : u8 )) = 1;
         let proptest_helper!(@_EXT _PAT( [_, _] : u8 )) = [1, 2];
-        let proptest_helper!(@_EXT _PAT( (&mut &Y(ref _x)) : u8 )) = &mut &Y(1);
+        let proptest_helper!(@_EXT _PAT( (&mut Y(_x)) : u8 )) = &mut &Y(1);
         let proptest_helper!(@_EXT _PAT( _x in 1..2 )) = 1;
+        let matched_ref = match Some(1) {
+            Some(proptest_helper!(@_EXT _PAT( ref _x : u8 ))) => 1,
+            None => 0,
+        };
+        assert_eq!(matched_ref, 1);
+
+        let matched_ref_mut = match Some(1) {
+            Some(proptest_helper!(@_EXT _PAT( ref mut _x : u8 ))) => 1,
+            None => 0,
+        };
+        assert_eq!(matched_ref_mut, 1);
     }
 }

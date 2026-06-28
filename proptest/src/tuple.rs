@@ -129,8 +129,6 @@ tuple!(
 
 #[cfg(test)]
 mod test {
-    use crate::strategy::*;
-
     use super::*;
 
     #[test]

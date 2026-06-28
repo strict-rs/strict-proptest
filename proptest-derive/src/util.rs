@@ -10,8 +10,6 @@
 
 use std::borrow::Borrow;
 
-use syn;
-
 //==============================================================================
 // General AST manipulation and types
 //==============================================================================
@@ -85,12 +83,13 @@ pub fn match_pathsegs(path: &syn::Path, against: &[&str]) -> bool {
 fn pseg_has_single_tyvar(pp: &syn::PathSegment) -> bool {
     use syn::GenericArgument::Type;
     use syn::PathArguments::AngleBracketed;
-    if let AngleBracketed(ab) = &pp.arguments {
-        if let Some(Type(_)) = match_singleton(ab.args.iter()) {
-            return true;
-        }
+    if let AngleBracketed(ab) = &pp.arguments
+        && let Some(Type(_)) = match_singleton(ab.args.iter())
+    {
+        true
+    } else {
+        false
     }
-    false
 }
 
 /// Returns true iff the given type is of the form `PhantomData<TY>` where

@@ -9,7 +9,7 @@
 
 //! Arbitrary implementations for `std::ascii`.
 
-use core::ascii::{escape_default, EscapeDefault};
+use core::ascii::{EscapeDefault, escape_default};
 
 use crate::arbitrary::*;
 use crate::strategy::statics::static_map;

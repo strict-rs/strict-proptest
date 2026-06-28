@@ -13,8 +13,6 @@
 use std::borrow::Borrow;
 use std::collections::HashSet;
 
-use syn;
-
 use crate::attr;
 use crate::error::{Ctx, DeriveResult};
 use crate::util;
@@ -75,14 +73,14 @@ impl UseTracker {
     /// If the tracker does not know about the name, it is not
     /// a type variable and this call has no effect.
     fn use_tyvar(&mut self, tyvar: impl Borrow<syn::Ident>) {
-        if self.track {
-            if let Some(used) = self
+        let tyvar = tyvar.borrow();
+        if self.track
+            && let Some(used) = self
                 .used_map
                 .iter_mut()
-                .find_map(|(ty, used)| (ty == tyvar.borrow()).then(|| used))
-            {
-                *used = true;
-            }
+                .find_map(|(ty, used)| (ty == tyvar).then_some(used))
+        {
+            *used = true;
         }
     }
 
@@ -210,11 +208,11 @@ fn matches_prj_tyvar(ut: &mut UseTracker, tpath: &syn::TypePath) -> bool {
         false
     } else {
         // true => $tyvar :: $projection
-        return !util::path_is_global(path)
+        !util::path_is_global(path)
             && segs.len() == 2
             && ut.has_tyvar(&segs[0].ident)
             && segs[0].arguments.is_empty()
-            && segs[1].arguments.is_empty();
+            && segs[1].arguments.is_empty()
     }
 }
 
@@ -223,7 +221,7 @@ fn adjust_simple_prj(tpath: &syn::TypePath) -> syn::TypePath {
         .qself
         .as_ref()
         .filter(|qp| qp.as_token.is_none())
-        .and_then(|qp| extract_path(&*qp.ty))
+        .and_then(|qp| extract_path(&qp.ty))
         .filter(|tp| tp.qself.is_none())
         .map(|tp| &tp.path.segments);
 

@@ -8,14 +8,14 @@
 // except according to those terms.
 
 use core::convert::TryFrom;
+use core::num::{
+    NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroIsize, NonZeroU8,
+    NonZeroU16, NonZeroU32, NonZeroU64, NonZeroUsize,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use core::num::{NonZeroI128, NonZeroU128};
-use core::num::{
-    NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI8, NonZeroIsize, NonZeroU16,
-    NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize,
-};
 
-use crate::arbitrary::{any, Arbitrary, StrategyFor};
+use crate::arbitrary::{Arbitrary, StrategyFor, any};
 use crate::strategy::{FilterMap, Strategy};
 
 macro_rules! non_zero_impl {

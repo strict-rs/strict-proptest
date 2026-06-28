@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{fmt, Arc, Box, Rc};
+use crate::std_facade::{Arc, Box, Rc, fmt};
 use core::cmp;
 
 use crate::strategy::*;
@@ -120,14 +120,16 @@ pub trait Strategy: fmt::Debug {
     /// use proptest::prelude::*;
     ///
     /// proptest! {
+    ///   # /*
     ///   #[test]
+    ///   # */
     ///   fn test_something(a in (0i32..10).prop_perturb(
     ///       // Perturb the integer `a` (range 0..10) to a pair of that
     ///       // integer and another that's ± 10 of it.
     ///       // Note that this particular case would be better implemented as
     ///       // `(0i32..10, -10i32..10).prop_map(|(a, b)| (a, a + b))`
     ///       // but is shown here for simplicity.
-    ///       |centre, rng| (centre, centre + rng.random_range(-10, 10))))
+    ///       |centre, mut rng| (centre, centre + rng.random_range(-10..10))))
     ///   {
     ///       // Test stuff
     ///   }
@@ -849,7 +851,7 @@ pub fn check_strategy_sanity<S: Strategy>(
         } }
     }
 
-    let options = options.unwrap_or_else(CheckStrategySanityOptions::default);
+    let options = options.unwrap_or_default();
     let mut config = Config::default();
     if options.error_on_local_rejects {
         config.max_local_rejects = 0;

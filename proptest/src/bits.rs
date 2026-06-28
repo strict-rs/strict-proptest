@@ -16,7 +16,7 @@
 //! others). For integers treated as numeric values, see the corresponding
 //! modules of the `num` module instead.
 
-use crate::std_facade::{fmt, Vec};
+use crate::std_facade::{Vec, fmt};
 use core::marker::PhantomData;
 use core::mem;
 
@@ -24,7 +24,7 @@ use core::mem;
 use bit_set::BitSet;
 #[cfg(feature = "bit-set")]
 use bit_vec::BitVec;
-use rand::{seq::IteratorRandom, RngExt};
+use rand::{RngExt, seq::IteratorRandom};
 
 use crate::collection::SizeRange;
 use crate::num::sample_uniform_incl;
@@ -32,7 +32,7 @@ use crate::strategy::*;
 use crate::test_runner::*;
 
 /// Trait for types which can be handled with `BitSetStrategy`.
-#[cfg_attr(clippy, allow(len_without_is_empty))]
+#[allow(clippy::len_without_is_empty)]
 pub trait BitSetLike: Clone + fmt::Debug {
     /// Create a new value of `Self` with space for up to `max` bits, all
     /// initialised to zero.
@@ -136,11 +136,7 @@ impl BitSetLike for Vec<bool> {
     }
 
     fn test(&self, bit: usize) -> bool {
-        if bit >= self.len() {
-            false
-        } else {
-            self[bit]
-        }
+        if bit >= self.len() { false } else { self[bit] }
     }
 
     fn set(&mut self, bit: usize) {
@@ -206,7 +202,7 @@ impl<T: BitSetLike> Strategy for BitSetStrategy<T> {
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
         let mut inner = T::new_bitset(self.max);
         for bit in self.min..self.max {
-            if self.mask.as_ref().map_or(true, |mask| mask.test(bit))
+            if self.mask.as_ref().is_none_or(|mask| mask.test(bit))
                 && runner.rng().random()
             {
                 inner.set(bit);
@@ -654,19 +650,19 @@ mod test {
         for _ in 0..2048 {
             let value = input.new_tree(&mut runner).unwrap().current();
             let count = value.count_ones() as usize;
-            assert!(count >= 4 && count < 8);
+            assert!((4..8).contains(&count));
             seen_counts[count] += 1;
 
-            for bit in 0..32 {
+            for (bit, seen_bit) in seen_bits.iter_mut().enumerate() {
                 if 0 != value & (1 << bit) {
-                    assert!(bit >= 10 && bit < 20);
-                    seen_bits[bit] += value;
+                    assert!((10..20).contains(&bit));
+                    *seen_bit += value;
                 }
             }
         }
 
-        for i in 4..8 {
-            assert!(seen_counts[i] >= 256 && seen_counts[i] < 1024);
+        for count in seen_counts.iter().take(8).skip(4) {
+            assert!((256..1024).contains(count));
         }
 
         let least_seen_bit_count =

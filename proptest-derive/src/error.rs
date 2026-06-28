@@ -14,7 +14,6 @@ use proc_macro2::TokenStream;
 use quote::ToTokens;
 
 use crate::attr::ParsedAttributes;
-use syn;
 
 //==============================================================================
 // Item descriptions
@@ -589,9 +588,12 @@ error!(
 );
 
 // See `strategy_on_unit_variant`.
-error!(regex_on_unit_variant, E0029,
+error!(
+    regex_on_unit_variant,
+    E0029,
     "Setting `#[proptest(regex = \"<string>\")]` on a unit variant has no effect \
-    and is redundant because there is nothing to configure.");
+    and is redundant because there is nothing to configure."
+);
 
 // There's only one way to produce a specific unit variant, so setting
 // `#[proptest(params = "<type>")]` would be pointless.
@@ -614,16 +616,22 @@ error!(
 // Occurs when `#[proptest(params = "<type>")]` is specified on a unit
 // struct. There's only one way to produce a unit struct, so specifying
 // `Parameters` would be pointless.
-error!(params_on_unit_struct, E0030,
+error!(
+    params_on_unit_struct,
+    E0030,
     "Setting `#[proptest(params = \"<type>\")]` on a unit struct has no effect \
-    and is redundant because there is nothing to configure.");
+    and is redundant because there is nothing to configure."
+);
 
 // Occurs when `#[proptest(filter = "<expr>")]` is specified on a unit
 // struct. There's only one way to produce a unit struct, so filtering
 // would be pointless.
-error!(filter_on_unit_struct, E0030,
+error!(
+    filter_on_unit_struct,
+    E0030,
     "Setting `#[proptest(filter = \"<expr>\")]` on a unit struct has no effect \
-    and is redundant because there is nothing to filter.");
+    and is redundant because there is nothing to filter."
+);
 
 // Occurs when `#[proptest(no_bound)]` is specified
 // on something that is not a type variable.

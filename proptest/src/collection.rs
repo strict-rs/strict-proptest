@@ -12,10 +12,9 @@
 use core::cmp::Ord;
 use core::hash::Hash;
 use core::ops::{Add, Range, RangeInclusive, RangeTo, RangeToInclusive};
-use core::usize;
 
 use crate::std_facade::{
-    fmt, BTreeMap, BTreeSet, BinaryHeap, LinkedList, Vec, VecDeque,
+    BTreeMap, BTreeSet, BinaryHeap, LinkedList, Vec, VecDeque, fmt,
 };
 
 #[cfg(feature = "std")]
@@ -100,7 +99,7 @@ impl SizeRange {
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = usize> {
-        self.0.clone().into_iter()
+        self.0.clone()
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -693,11 +692,11 @@ mod test {
             // Has correct length
             assert!(start.len() >= 5 && start.len() < 20);
             // Has at least 2 distinct values
-            assert!(start.iter().map(|&v| v).collect::<VarBitSet>().len() >= 2);
+            assert!(start.iter().copied().collect::<VarBitSet>().len() >= 2);
 
             let result = runner.run_one(case, |v| {
                 prop_assert!(
-                    v.iter().map(|&v| v).sum::<usize>() < 9,
+                    v.iter().copied().sum::<usize>() < 9,
                     "greater than 8"
                 );
                 Ok(())
@@ -712,7 +711,7 @@ mod test {
                     assert!(
                         value.len() >= 5
                             && value.len() <= 9
-                            && value.iter().map(|&v| v).sum::<usize>() == 9,
+                            && value.iter().copied().sum::<usize>() == 9,
                         "Unexpected minimal value: {:?}",
                         value
                     );

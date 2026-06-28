@@ -16,14 +16,15 @@
 //==============================================================================
 
 use crate::std_facade::{
-    binary_heap, btree_map, btree_set, fmt, linked_list, vec, vec_deque, Arc,
-    BTreeMap, BTreeSet, BinaryHeap, Box, LinkedList, Rc, Vec, VecDeque,
+    Arc, BTreeMap, BTreeSet, BinaryHeap, Box, LinkedList, Rc, Vec, VecDeque,
+    binary_heap, btree_map, btree_set, fmt, linked_list, vec, vec_deque,
 };
-use core::hash::Hash;
 use core::ops::{Bound, RangeInclusive};
 
 #[cfg(feature = "std")]
-use crate::std_facade::{hash_map, hash_set, HashMap, HashSet};
+use crate::std_facade::{HashMap, HashSet, hash_map, hash_set};
+#[cfg(feature = "std")]
+use core::hash::Hash;
 
 use crate::arbitrary::*;
 use crate::collection::*;

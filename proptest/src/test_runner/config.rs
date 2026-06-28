@@ -8,11 +8,11 @@
 // except according to those terms.
 
 use crate::std_facade::Box;
-use core::{fmt, str, u32};
+use core::{fmt, str};
 
-use crate::test_runner::result_cache::{noop_result_cache, ResultCache};
-use crate::test_runner::rng::RngAlgorithm;
 use crate::test_runner::FailurePersistence;
+use crate::test_runner::result_cache::{ResultCache, noop_result_cache};
+use crate::test_runner::rng::RngAlgorithm;
 
 /// Override the config fields from environment variables, if any are set.
 /// Without the `std` feature this function returns config unchanged.
@@ -218,7 +218,7 @@ impl fmt::Display for RngSeed {
 }
 
 /// Configuration for how a proptest test should be run.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Config {
     /// The number of successful test cases that must execute for the test as a
     /// whole to pass.
@@ -437,6 +437,42 @@ pub struct Config {
     pub _non_exhaustive: (),
 }
 
+fn result_cache_eq(
+    left: fn() -> Box<dyn ResultCache>,
+    right: fn() -> Box<dyn ResultCache>,
+) -> bool {
+    core::ptr::fn_addr_eq(left, right)
+}
+
+impl PartialEq for Config {
+    fn eq(&self, other: &Self) -> bool {
+        let fields_eq = self.cases == other.cases
+            && self.max_local_rejects == other.max_local_rejects
+            && self.max_global_rejects == other.max_global_rejects
+            && self.max_flat_map_regens == other.max_flat_map_regens
+            && self.failure_persistence == other.failure_persistence
+            && self.source_file == other.source_file
+            && self.test_name == other.test_name;
+        #[cfg(feature = "fork")]
+        let fields_eq = fields_eq && self.fork == other.fork;
+        #[cfg(feature = "timeout")]
+        let fields_eq = fields_eq && self.timeout == other.timeout;
+        #[cfg(feature = "std")]
+        let fields_eq =
+            fields_eq && self.max_shrink_time == other.max_shrink_time;
+        let fields_eq = fields_eq
+            && self.max_shrink_iters == other.max_shrink_iters
+            && self.max_default_size_range == other.max_default_size_range
+            && result_cache_eq(self.result_cache, other.result_cache);
+        #[cfg(feature = "std")]
+        let fields_eq = fields_eq && self.verbose == other.verbose;
+
+        fields_eq
+            && self.rng_algorithm == other.rng_algorithm
+            && self.rng_seed == other.rng_seed
+    }
+}
+
 impl Config {
     /// Constructs a `Config` only differing from the `default()` in the
     /// number of test cases required to pass the test successfully.
@@ -596,5 +632,63 @@ impl Default for Config {
 impl Default for Config {
     fn default() -> Self {
         default_default_config()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_runner::errors::TestCaseResult;
+    use crate::test_runner::result_cache::ResultCacheKey;
+
+    #[test]
+    fn config_partial_eq_default_equals_self_and_clone() {
+        let default = Config::default();
+
+        assert_eq!(default, default);
+        assert_eq!(default, default.clone());
+    }
+
+    #[test]
+    fn config_partial_eq_result_cache_factory_uses_explicit_helper() {
+        struct TestResultCache;
+
+        impl ResultCache for TestResultCache {
+            fn key(&self, _: &ResultCacheKey) -> u64 {
+                1
+            }
+
+            fn put(&mut self, _: u64, _: &TestCaseResult) {}
+
+            fn get(&self, _: u64) -> Option<&TestCaseResult> {
+                None
+            }
+        }
+
+        fn test_result_cache() -> Box<dyn ResultCache> {
+            Box::new(TestResultCache)
+        }
+
+        let default = Config::default();
+        let same_factory = Config {
+            result_cache: default.result_cache,
+            ..default.clone()
+        };
+        let different_factory = Config {
+            result_cache: test_result_cache,
+            ..default.clone()
+        };
+
+        assert!(result_cache_eq(
+            default.result_cache,
+            same_factory.result_cache
+        ));
+        assert_eq!(default, same_factory);
+
+        assert!(!result_cache_eq(
+            default.result_cache,
+            different_factory.result_cache
+        ));
+        assert_ne!(default, different_factory);
     }
 }

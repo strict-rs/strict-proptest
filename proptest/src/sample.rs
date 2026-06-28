@@ -17,7 +17,6 @@ use crate::std_facade::{Arc, Cow, Vec};
 use core::fmt;
 use core::mem;
 use core::ops::Range;
-use core::u64;
 
 use rand::RngExt;
 
@@ -27,7 +26,7 @@ use crate::strategy::*;
 use crate::test_runner::*;
 
 /// Re-exported to make usage more ergonomic.
-pub use crate::collection::{size_range, SizeRange};
+pub use crate::collection::{SizeRange, size_range};
 
 /// Sample subsequences whose size are within `size` from the given collection
 /// `values`.
@@ -102,8 +101,7 @@ impl<T: fmt::Debug + Clone + 'static> ValueTree for SubsequenceValueTree<T> {
 
     fn current(&self) -> Self::Value {
         let inner = self.inner.current();
-        let ret = inner.iter().map(|ix| self.values[ix].clone()).collect();
-        ret
+        inner.iter().map(|ix| self.values[ix].clone()).collect()
     }
 
     fn simplify(&mut self) -> bool {
@@ -226,7 +224,7 @@ impl Index {
         // No platforms currently have `usize` wider than 64 bits, so `u128` is
         // sufficient to hold the result of a full multiply, letting us do a
         // simple fixed-point multiply.
-        ((size as u128) * (self.0 as u128) >> (mem::size_of::<usize>() * 8))
+        (((size as u128) * (self.0 as u128)) >> (mem::size_of::<usize>() * 8))
             as usize
     }
 
@@ -437,7 +435,7 @@ mod test {
         for _ in 0..2048 {
             let value = input.new_tree(&mut runner).unwrap().current();
             // Generated the correct number of items
-            assert!(value.len() >= 3 && value.len() < 7);
+            assert!((3..7).contains(&value.len()));
             // Chose distinct items
             assert_eq!(
                 value.len(),
@@ -455,18 +453,18 @@ mod test {
             }
         }
 
-        for i in 3..7 {
+        for (i, count) in size_counts.iter().enumerate().take(7).skip(3) {
             assert!(
-                size_counts[i] >= 256 && size_counts[i] < 1024,
+                (256..1024).contains(count),
                 "size {} was chosen {} times",
                 i,
-                size_counts[i]
+                count
             );
         }
 
         for (ix, &v) in value_counts.iter().enumerate() {
             assert!(
-                v >= 1024 && v < 1500,
+                (1024..1500).contains(&v),
                 "Value {} was chosen {} times",
                 ix,
                 v
@@ -499,7 +497,7 @@ mod test {
 
         for (ix, &count) in counts.iter().enumerate() {
             assert!(
-                count >= 64 && count < 256,
+                (64..256).contains(&count),
                 "Generated value {} {} times",
                 ix,
                 count

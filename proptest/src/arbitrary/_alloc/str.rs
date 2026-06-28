@@ -10,8 +10,7 @@
 //! Arbitrary implementations for `std::str`.
 
 use crate::std_facade::Vec;
-use core::iter::repeat;
-use core::str::{from_utf8, ParseBoolError, Utf8Error};
+use core::str::{ParseBoolError, Utf8Error, from_utf8};
 
 use crate::arbitrary::*;
 use crate::strategy::statics::static_map;
@@ -33,7 +32,7 @@ fn gen_el_seqs() -> ELSeqs {
 
 arbitrary!(Utf8Error, SFnPtrMap<(StrategyFor<u16>, ELSeqs), Utf8Error>;
     static_map((any::<u16>(), gen_el_seqs()), |(vut, elseq)| {
-        let v = repeat(b'_').take(vut as usize)
+        let v = core::iter::repeat_n(b'_', vut as usize)
                     .chain(elseq.iter().cloned())
                     .collect::<Vec<u8>>();
         from_utf8(&v).unwrap_err()

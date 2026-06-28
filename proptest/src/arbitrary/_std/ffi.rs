@@ -64,7 +64,7 @@ arbitrary!(FromBytesWithNulError, SMapped<Option<u16>, Self>; {
             let pos = pos as usize;
             // Allocate pos + 2 so that we never reallocate:
             let mut v = Vec::<u8>::with_capacity(pos + 2);
-            v.extend(::std::iter::repeat(1).take(pos));
+            v.extend(core::iter::repeat_n(1, pos));
             v.push(0);
             v.push(1);
             CStr::from_bytes_with_nul(v.as_slice()).unwrap_err()
