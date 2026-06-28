@@ -14,9 +14,9 @@ use std::path::*;
 use crate::{
     arbitrary::{SMapped, StrategyFor},
     path::PathParams,
-    prelude::{any, any_with, Arbitrary, Strategy},
-    std_facade::{string::ToString, Arc, Box, Rc, String, Vec},
-    strategy::{statics::static_map, MapInto},
+    prelude::{Arbitrary, Strategy, any, any_with},
+    std_facade::{Arc, Box, Rc, String, Vec, string::ToString},
+    strategy::{MapInto, statics::static_map},
 };
 
 arbitrary!(StripPrefixError; Path::new("").strip_prefix("a").unwrap_err());
@@ -81,7 +81,7 @@ impl Arbitrary for PathBuf {
              }| {
                 let mut out = PathBuf::new();
                 if is_absolute {
-                    out.push(&MAIN_SEPARATOR.to_string());
+                    out.push(MAIN_SEPARATOR.to_string());
                 }
 
                 for component in components {

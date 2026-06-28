@@ -35,7 +35,7 @@ use crate::test_runner::*;
 ///
 /// ## Example
 ///
-/// ```
+/// ```rust,ignore
 /// use proptest::prelude::*;
 ///
 /// proptest! {

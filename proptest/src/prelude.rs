@@ -19,18 +19,18 @@
 //! is and will always be a direct reexport; using these in preference to using the
 //! `rand` crate directly will not provide insulation from rand API changes.
 
-pub use crate::arbitrary::{any, any_with, Arbitrary};
+pub use crate::arbitrary::{Arbitrary, any, any_with};
 pub use crate::strategy::{BoxedStrategy, Just, SBoxedStrategy, Strategy};
 pub use crate::test_runner::Config as ProptestConfig;
-pub use crate::test_runner::{TestCaseError, ProptestResultExt};
+pub use crate::test_runner::{ProptestResultExt, TestCaseError};
 pub use crate::{
     prop_assert, prop_assert_eq, prop_assert_ne, prop_assume, prop_compose,
     prop_oneof, proptest,
 };
 
-pub use rand::{Rng, RngExt};
 #[allow(deprecated)]
 pub use rand::rand_core::RngCore;
+pub use rand::{Rng, RngExt};
 
 /// Re-exports the entire public API of proptest so that an import of `prelude`
 /// allows simply writing, for example, `prop::num::i32::ANY` rather than

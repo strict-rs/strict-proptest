@@ -32,10 +32,8 @@ arbitrary!(['a, T: 'a + Clone, A: Arbitrary + Iterator<Item = &'a T>]
     Cloned<A>, SMapped<A, Self>, A::Parameters;
     args => static_map(any_with::<A>(args), Iterator::cloned));
 
-impl<
-        T: 'static + Clone,
-        A: fmt::Debug + 'static + Iterator<Item = &'static T>,
-    > functor::ArbitraryF1<A> for Cloned<A>
+impl<T: 'static + Clone, A: fmt::Debug + 'static + Iterator<Item = &'static T>>
+    functor::ArbitraryF1<A> for Cloned<A>
 {
     type Parameters = ();
 
@@ -100,11 +98,8 @@ lift1!([fmt::Debug + 'static + Iterator<Item = T>,
         (any_with::<B>(args), base).prop_map(|(b, a)| b.chain(a)).boxed()
 );
 
-impl<
-        T,
-        A: fmt::Debug + Iterator<Item = T>,
-        B: fmt::Debug + Iterator<Item = T>,
-    > functor::ArbitraryF2<A, B> for Chain<A, B>
+impl<T, A: fmt::Debug + Iterator<Item = T>, B: fmt::Debug + Iterator<Item = T>>
+    functor::ArbitraryF2<A, B> for Chain<A, B>
 {
     type Parameters = ();
 
@@ -148,7 +143,7 @@ mod test {
     use super::*;
 
     use std::ops::Range;
-    const DUMMY: &'static [u8] = &[0, 1, 2, 3, 4];
+    const DUMMY: &[u8] = &[0, 1, 2, 3, 4];
     #[derive(Debug)]
     struct Dummy(u8);
     arbitrary!(Dummy, SFnPtrMap<Range<u8>, Self>; static_map(0..5, Dummy));

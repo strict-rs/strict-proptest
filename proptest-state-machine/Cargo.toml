@@ -2,14 +2,14 @@
 name = "proptest-state-machine"
 version = "0.8.0"
 authors = ["Tomáš Zemanovič"]
-license = "MIT OR Apache-2.0"
-edition = "2021"
-rust-version = "1.86"
-repository = "https://github.com/proptest-rs/proptest"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
 homepage = "https://proptest-rs.github.io/proptest/proptest/state-machine.html"
 documentation = "https://docs.rs/proptest-state-machine/latest/proptest-state-machine/"
 keywords = ["property", "testing", "quickcheck", "fuzz", "state-machine"]
-categories = ["development-tools::testing"]
+categories.workspace = true
 description = """
 State machine based testing support for proptest.
 """
@@ -21,11 +21,11 @@ default = ["std"]
 std = ["proptest/std"]
 
 [dependencies]
-proptest = { version = "1.11.0", path = "../proptest", default-features = true, features = [
+proptest = { workspace = true, features = [
     "fork",
     "timeout",
     "bit-set",
 ] }
 
 [dev-dependencies]
-message-io = { workspace = true }
+message-io = { workspace = true, features = ["tcp", "udp", "websocket"] }

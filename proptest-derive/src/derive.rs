@@ -46,6 +46,8 @@ struct DeriveData<B> {
     body: B,
 }
 
+type VariantParts = (u32, Ident, Vec<Field>, ParsedAttributes);
+
 /// Entry point for deriving `Arbitrary`.
 fn derive_proptest_arbitrary(
     ctx: Ctx,
@@ -300,12 +302,11 @@ fn derive_product_no_params(
                     product_handle_default_params(ut, ty, span, attrs.strategy)
                 }
                 // params(<type>) set on the field:
-                ParamsMode::Specified(params_ty) =>
-                // We need to extract the param as the binding `params`:
-                {
+                ParamsMode::Specified(params_ty) => {
+                    // We need to extract the param as the binding `params`:
                     extract_nparam(
                         &mut acc,
-                        params_ty,
+                        *params_ty,
                         match attrs.strategy {
                             // Specific strategy - use the given expr and erase the type:
                             StratMode::Strategy(strat) => {
@@ -479,7 +480,7 @@ fn derive_variant_with_fields<C>(
         // params(<type>) set on the variant:
         ParamsMode::Specified(params_ty) => extract_nparam(
             acc,
-            params_ty,
+            *params_ty,
             match attrs.strategy {
                 // Specific strategy - use the given expr and erase the type:
                 StratMode::Strategy(strat) => {
@@ -638,7 +639,7 @@ fn keep_inhabited_variant(
     ctx: Ctx,
     _self: &Ident,
     variant: Variant,
-) -> DeriveResult<Option<(u32, Ident, Vec<Field>, ParsedAttributes)>> {
+) -> DeriveResult<Option<VariantParts>> {
     let attrs = attr::parse_attributes(ctx, &variant.attrs)?;
     let fields = fields_to_vec(variant.fields);
 

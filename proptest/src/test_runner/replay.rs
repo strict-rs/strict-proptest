@@ -17,7 +17,7 @@ use std::vec::Vec;
 
 use crate::test_runner::{Seed, TestCaseError, TestCaseResult};
 
-const SENTINEL: &'static str = "proptest-forkfile";
+const SENTINEL: &str = "proptest-forkfile";
 
 /// A "replay" of a `TestRunner` invocation.
 ///
@@ -177,7 +177,7 @@ impl Replay {
                     return Ok(ReplayFileStatus::Terminated(Replay {
                         seed,
                         steps,
-                    }))
+                    }));
                 }
                 ' ' => (),
                 _ => return Ok(ReplayFileStatus::Corrupt),

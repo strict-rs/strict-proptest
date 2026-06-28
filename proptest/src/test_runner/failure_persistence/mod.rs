@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{fmt, Box, Vec};
+use crate::std_facade::{Box, Vec, fmt};
 use core::any::Any;
 use core::fmt::Display;
 use core::result::Result;
@@ -95,11 +95,8 @@ pub trait FailurePersistence: Send + Sync + fmt::Debug {
         seed: PersistedSeed,
         shrunken_value: &dyn fmt::Debug,
     ) {
-        match seed.0 {
-            Seed::XorShift(seed) => {
-                self.save_persisted_failure(source_file, seed, shrunken_value)
-            }
-            _ => (),
+        if let Seed::XorShift(seed) = seed.0 {
+            self.save_persisted_failure(source_file, seed, shrunken_value);
         }
     }
 

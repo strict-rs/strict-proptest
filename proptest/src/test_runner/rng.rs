@@ -8,15 +8,15 @@
 // except according to those terms.
 
 use crate::std_facade::{Arc, String, ToOwned, Vec};
+use crate::test_runner::config;
 use core::convert::{Infallible, TryInto};
 use core::result::Result;
-use core::{fmt, str, u8};
-use crate::test_runner::config;
-use rand::{Rng, RngExt, SeedableRng, TryRng};
+use core::{fmt, str};
 #[cfg(feature = "std")]
 use rand::rand_core::UnwrapErr;
 #[cfg(feature = "std")]
 use rand::rngs::SysRng;
+use rand::{Rng, RngExt, SeedableRng, TryRng};
 use rand_chacha::ChaChaRng;
 use rand_xorshift::XorShiftRng;
 
@@ -25,7 +25,8 @@ use rand_xorshift::XorShiftRng;
 /// Proptest supports dynamic configuration of algorithms to allow it to
 /// continue operating with persisted regression files and to allow the
 /// configuration to be expressed in the `Config` struct.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RngAlgorithm {
     /// The [XorShift](https://rust-random.github.io/rand/rand_xorshift/struct.XorShiftRng.html)
     /// algorithm. This was the default up through and including Proptest 0.9.0.
@@ -40,6 +41,7 @@ pub enum RngAlgorithm {
     /// algorithm. This became the default with Proptest 0.9.1.
     ///
     /// The seed must be exactly 32 bytes.
+    #[default]
     ChaCha,
     /// This is not an actual RNG algorithm, but instead returns data directly
     /// from its "seed".
@@ -63,15 +65,6 @@ pub enum RngAlgorithm {
     /// `proptest!` macro, as otherwise there is no way to obtain the bytes
     /// this captures.
     Recorder,
-    #[allow(missing_docs)]
-    #[doc(hidden)]
-    _NonExhaustive,
-}
-
-impl Default for RngAlgorithm {
-    fn default() -> Self {
-        RngAlgorithm::ChaCha
-    }
 }
 
 impl RngAlgorithm {
@@ -81,7 +74,6 @@ impl RngAlgorithm {
             RngAlgorithm::ChaCha => "cc",
             RngAlgorithm::PassThrough => "pt",
             RngAlgorithm::Recorder => "rc",
-            RngAlgorithm::_NonExhaustive => unreachable!(),
         }
     }
 
@@ -178,10 +170,11 @@ impl TestRng {
             TestRngImpl::ChaCha(rng) => rng.fill_bytes(dest),
             TestRngImpl::PassThrough { off, end, data } => {
                 let bytes_to_copy = dest.len().min(*end - *off);
-                dest[.. bytes_to_copy].copy_from_slice(&data[*off .. *off + bytes_to_copy]);
+                dest[..bytes_to_copy]
+                    .copy_from_slice(&data[*off..*off + bytes_to_copy]);
                 *off += bytes_to_copy;
-                for i in bytes_to_copy .. dest.len() {
-                    dest[i] = 0;
+                for byte in &mut dest[bytes_to_copy..] {
+                    *byte = 0;
                 }
             }
             TestRngImpl::Recorder { rng, record } => {
@@ -242,8 +235,6 @@ impl Seed {
                 buf.copy_from_slice(seed);
                 Seed::Recorder(buf)
             }
-
-            RngAlgorithm::_NonExhaustive => unreachable!(),
         }
     }
 
@@ -254,7 +245,7 @@ impl Seed {
             }
 
             for (dst_byte, src_pair) in
-                dst.into_iter().zip(src.as_bytes().chunks(2))
+                dst.iter_mut().zip(src.as_bytes().chunks(2))
             {
                 *dst_byte =
                     u8::from_str_radix(str::from_utf8(src_pair).ok()?, 16)
@@ -266,64 +257,58 @@ impl Seed {
 
         let parts =
             string.trim().split(char::is_whitespace).collect::<Vec<_>>();
-        RngAlgorithm::from_persistence_key(&parts[0]).and_then(
-            |alg| match alg {
-                RngAlgorithm::XorShift => {
-                    if 5 != parts.len() {
-                        return None;
-                    }
-
-                    let mut dwords = [0u32; 4];
-                    for (dword, part) in
-                        (&mut dwords[..]).into_iter().zip(&parts[1..])
-                    {
-                        *dword = part.parse().ok()?;
-                    }
-
-                    let mut seed = [0u8; 16];
-                    for (chunk, dword) in seed.chunks_mut(4).zip(dwords) {
-                        chunk.copy_from_slice(&dword.to_le_bytes());
-                    }
-                    Some(Seed::XorShift(seed))
+        RngAlgorithm::from_persistence_key(parts[0]).and_then(|alg| match alg {
+            RngAlgorithm::XorShift => {
+                if 5 != parts.len() {
+                    return None;
                 }
 
-                RngAlgorithm::ChaCha => {
-                    if 2 != parts.len() {
-                        return None;
-                    }
-
-                    let mut seed = [0u8; 32];
-                    from_base16(&mut seed, &parts[1])?;
-                    Some(Seed::ChaCha(seed))
+                let mut dwords = [0u32; 4];
+                for (dword, part) in dwords.iter_mut().zip(&parts[1..]) {
+                    *dword = part.parse().ok()?;
                 }
 
-                RngAlgorithm::PassThrough => {
-                    if 1 == parts.len() {
-                        return Some(Seed::PassThrough(None, vec![].into()));
-                    }
+                let mut seed = [0u8; 16];
+                for (chunk, dword) in seed.chunks_mut(4).zip(dwords) {
+                    chunk.copy_from_slice(&dword.to_le_bytes());
+                }
+                Some(Seed::XorShift(seed))
+            }
 
-                    if 2 != parts.len() {
-                        return None;
-                    }
-
-                    let mut seed = vec![0u8; parts[1].len() / 2];
-                    from_base16(&mut seed, &parts[1])?;
-                    Some(Seed::PassThrough(None, seed.into()))
+            RngAlgorithm::ChaCha => {
+                if 2 != parts.len() {
+                    return None;
                 }
 
-                RngAlgorithm::Recorder => {
-                    if 2 != parts.len() {
-                        return None;
-                    }
+                let mut seed = [0u8; 32];
+                from_base16(&mut seed, parts[1])?;
+                Some(Seed::ChaCha(seed))
+            }
 
-                    let mut seed = [0u8; 32];
-                    from_base16(&mut seed, &parts[1])?;
-                    Some(Seed::Recorder(seed))
+            RngAlgorithm::PassThrough => {
+                if 1 == parts.len() {
+                    return Some(Seed::PassThrough(None, vec![].into()));
                 }
 
-                RngAlgorithm::_NonExhaustive => unreachable!(),
-            },
-        )
+                if 2 != parts.len() {
+                    return None;
+                }
+
+                let mut seed = vec![0u8; parts[1].len() / 2];
+                from_base16(&mut seed, parts[1])?;
+                Some(Seed::PassThrough(None, seed.into()))
+            }
+
+            RngAlgorithm::Recorder => {
+                if 2 != parts.len() {
+                    return None;
+                }
+
+                let mut seed = [0u8; 32];
+                from_base16(&mut seed, parts[1])?;
+                Some(Seed::Recorder(seed))
+            }
+        })
     }
 
     pub(crate) fn to_persistence(&self) -> String {
@@ -408,22 +393,33 @@ impl TestRng {
     }
 
     /// Construct a default TestRng from entropy.
-    pub(crate) fn default_rng(seed: config::RngSeed, algorithm: RngAlgorithm) -> Self {
+    pub(crate) fn default_rng(
+        seed: config::RngSeed,
+        algorithm: RngAlgorithm,
+    ) -> Self {
         #[cfg(feature = "std")]
         {
             Self {
                 rng: match algorithm {
                     RngAlgorithm::XorShift => {
                         let rng = match seed {
-                            config::RngSeed::Random => from_sys_rng::<XorShiftRng>(),
-                            config::RngSeed::Fixed(seed) => XorShiftRng::seed_from_u64(seed),
+                            config::RngSeed::Random => {
+                                from_sys_rng::<XorShiftRng>()
+                            }
+                            config::RngSeed::Fixed(seed) => {
+                                XorShiftRng::seed_from_u64(seed)
+                            }
                         };
                         TestRngImpl::XorShift(rng)
                     }
                     RngAlgorithm::ChaCha => {
                         let rng = match seed {
-                            config::RngSeed::Random => from_sys_rng::<ChaChaRng>(),
-                            config::RngSeed::Fixed(seed) => ChaChaRng::seed_from_u64(seed),
+                            config::RngSeed::Random => {
+                                from_sys_rng::<ChaChaRng>()
+                            }
+                            config::RngSeed::Fixed(seed) => {
+                                ChaChaRng::seed_from_u64(seed)
+                            }
                         };
                         TestRngImpl::ChaCha(rng)
                     }
@@ -431,13 +427,19 @@ impl TestRng {
                         panic!("cannot create default instance of PassThrough")
                     }
                     RngAlgorithm::Recorder => {
-                        let rng =  match seed {
-                            config::RngSeed::Random => from_sys_rng::<ChaChaRng>(),
-                            config::RngSeed::Fixed(seed) => ChaChaRng::seed_from_u64(seed),
+                        let rng = match seed {
+                            config::RngSeed::Random => {
+                                from_sys_rng::<ChaChaRng>()
+                            }
+                            config::RngSeed::Fixed(seed) => {
+                                ChaChaRng::seed_from_u64(seed)
+                            }
                         };
-                        TestRngImpl::Recorder {rng, record: Vec::new()}
-                    },
-                    RngAlgorithm::_NonExhaustive => unreachable!(),
+                        TestRngImpl::Recorder {
+                            rng,
+                            record: Vec::new(),
+                        }
+                    }
                 },
             }
         }
@@ -447,11 +449,19 @@ impl TestRng {
             feature = "hardware-rng"
         ))]
         {
-            return Self::hardware_rng(algorithm);
+            let _ = seed;
+            Self::hardware_rng(algorithm)
         }
-        #[cfg(not(feature = "std"))]
+        #[cfg(all(
+            not(feature = "std"),
+            not(all(
+                any(target_arch = "x86", target_arch = "x86_64"),
+                feature = "hardware-rng"
+            ))
+        ))]
         {
-            return Self::deterministic_rng(algorithm);
+            let _ = seed;
+            Self::deterministic_rng(algorithm)
         }
     }
 
@@ -478,7 +488,7 @@ impl TestRng {
         feature = "hardware-rng"
     ))]
     pub fn hardware_rng(algorithm: RngAlgorithm) -> Self {
-        use x86::random::{rdrand_slice, RdRand};
+        use x86::random::rdrand_slice;
 
         Self::from_seed_internal(match algorithm {
             RngAlgorithm::XorShift => {
@@ -486,7 +496,10 @@ impl TestRng {
                 let mut seed: [u8; 16] = TestRng::SEED_FOR_XOR_SHIFT;
                 unsafe {
                     let r = rdrand_slice(&mut seed);
-                    debug_assert!(r, "hardware_rng should only be called on machines with support for rdrand");
+                    debug_assert!(
+                        r,
+                        "hardware_rng should only be called on machines with support for rdrand"
+                    );
                 }
                 Seed::XorShift(seed)
             }
@@ -495,7 +508,10 @@ impl TestRng {
                 let mut seed: [u8; 32] = TestRng::SEED_FOR_CHA_CHA;
                 unsafe {
                     let r = rdrand_slice(&mut seed);
-                    debug_assert!(r, "hardware_rng should only be called on machines with support for rdrand");
+                    debug_assert!(
+                        r,
+                        "hardware_rng should only be called on machines with support for rdrand"
+                    );
                 }
                 Seed::ChaCha(seed)
             }
@@ -507,11 +523,13 @@ impl TestRng {
                 let mut seed: [u8; 32] = TestRng::SEED_FOR_CHA_CHA;
                 unsafe {
                     let r = rdrand_slice(&mut seed);
-                    debug_assert!(r, "hardware_rng should only be called on machines with support for rdrand");
+                    debug_assert!(
+                        r,
+                        "hardware_rng should only be called on machines with support for rdrand"
+                    );
                 }
                 Seed::Recorder(seed)
             }
-            RngAlgorithm::_NonExhaustive => unreachable!(),
         })
     }
 
@@ -539,7 +557,6 @@ impl TestRng {
                 panic!("deterministic RNG not available for PassThrough")
             }
             RngAlgorithm::Recorder => Seed::Recorder(TestRng::SEED_FOR_CHA_CHA),
-            RngAlgorithm::_NonExhaustive => unreachable!(),
         })
     }
 
@@ -721,22 +738,15 @@ mod test {
     #[test]
     fn seeded_xorshift_output_is_stable() {
         let seed = [
-            0x00, 0x01, 0x02, 0x03,
-            0x04, 0x05, 0x06, 0x07,
-            0x08, 0x09, 0x0a, 0x0b,
-            0x0c, 0x0d, 0x0e, 0x0f,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+            0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
         ];
         let mut rng_u32 = TestRng::from_seed(RngAlgorithm::XorShift, &seed);
         let mut rng_u64 = TestRng::from_seed(RngAlgorithm::XorShift, &seed);
         let mut rng_fill = TestRng::from_seed(RngAlgorithm::XorShift, &seed);
 
         assert_eq!(
-            [
-                471271404,
-                722341711,
-                1880555887,
-                252576780,
-            ],
+            [471271404, 722341711, 1880555887, 252576780,],
             [
                 rng_u32.next_u32(),
                 rng_u32.next_u32(),
@@ -762,7 +772,9 @@ mod test {
         let mut fill = [0u8; 16];
         rng_fill.fill_bytes(&mut fill);
         assert_eq!(
-            [236, 7, 23, 28, 79, 15, 14, 43, 111, 1, 23, 112, 12, 4, 14, 15],
+            [
+                236, 7, 23, 28, 79, 15, 14, 43, 111, 1, 23, 112, 12, 4, 14, 15
+            ],
             fill
         );
     }
@@ -770,26 +782,16 @@ mod test {
     #[test]
     fn seeded_chacha_output_is_stable() {
         let seed = [
-            0x00, 0x01, 0x02, 0x03,
-            0x04, 0x05, 0x06, 0x07,
-            0x08, 0x09, 0x0a, 0x0b,
-            0x0c, 0x0d, 0x0e, 0x0f,
-            0x10, 0x11, 0x12, 0x13,
-            0x14, 0x15, 0x16, 0x17,
-            0x18, 0x19, 0x1a, 0x1b,
-            0x1c, 0x1d, 0x1e, 0x1f,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+            0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
+            0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
         ];
         let mut rng_u32 = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
         let mut rng_u64 = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
         let mut rng_fill = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
 
         assert_eq!(
-            [
-                2100034873,
-                1780073945,
-                1996733837,
-                1229642936,
-            ],
+            [2100034873, 1780073945, 1996733837, 1229642936,],
             [
                 rng_u32.next_u32(),
                 rng_u32.next_u32(),
@@ -815,7 +817,10 @@ mod test {
         let mut fill = [0u8; 16];
         rng_fill.fill_bytes(&mut fill);
         assert_eq!(
-            [57, 253, 43, 125, 217, 197, 25, 106, 141, 189, 3, 119, 184, 220, 74, 73],
+            [
+                57, 253, 43, 125, 217, 197, 25, 106, 141, 189, 3, 119, 184,
+                220, 74, 73
+            ],
             fill
         );
     }
@@ -823,25 +828,15 @@ mod test {
     #[test]
     fn derived_child_rng_output_is_stable() {
         let seed = [
-            0x00, 0x01, 0x02, 0x03,
-            0x04, 0x05, 0x06, 0x07,
-            0x08, 0x09, 0x0a, 0x0b,
-            0x0c, 0x0d, 0x0e, 0x0f,
-            0x10, 0x11, 0x12, 0x13,
-            0x14, 0x15, 0x16, 0x17,
-            0x18, 0x19, 0x1a, 0x1b,
-            0x1c, 0x1d, 0x1e, 0x1f,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+            0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
+            0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
         ];
         let mut parent = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
         let mut child = parent.gen_rng();
 
         assert_eq!(
-            [
-                357635273,
-                1295757006,
-                1334659017,
-                3423482104,
-            ],
+            [357635273, 1295757006, 1334659017, 3423482104,],
             [
                 child.next_u32(),
                 child.next_u32(),
@@ -854,14 +849,9 @@ mod test {
     #[test]
     fn recorder_bytes_used_matches_emitted_bytes() {
         let seed = [
-            0x00, 0x01, 0x02, 0x03,
-            0x04, 0x05, 0x06, 0x07,
-            0x08, 0x09, 0x0a, 0x0b,
-            0x0c, 0x0d, 0x0e, 0x0f,
-            0x10, 0x11, 0x12, 0x13,
-            0x14, 0x15, 0x16, 0x17,
-            0x18, 0x19, 0x1a, 0x1b,
-            0x1c, 0x1d, 0x1e, 0x1f,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+            0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
+            0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
         ];
         let mut rng = TestRng::from_seed(RngAlgorithm::Recorder, &seed);
         let first = rng.next_u32();
@@ -876,5 +866,4 @@ mod test {
 
         assert_eq!(expected, rng.bytes_used());
     }
-
 }

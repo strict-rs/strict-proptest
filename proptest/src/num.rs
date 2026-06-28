@@ -44,17 +44,44 @@ pub fn sample_uniform_incl<X: SampleUniform>(
 
 macro_rules! sample_uniform {
     ($name: ident, $incl:ident, $from:ty, $to:ty) => {
-        fn $name<X>(run: &mut TestRunner, start: $to, end: $to) -> $to {
+        fn $name(run: &mut TestRunner, start: $to, end: $to) -> $to {
             Uniform::<$from>::new(start as $from, end as $from)
                 .expect("not uniform")
                 .sample(run.rng()) as $to
         }
 
-        fn $incl<X>(run: &mut TestRunner, start: $to, end: $to) -> $to {
+        fn $incl(run: &mut TestRunner, start: $to, end: $to) -> $to {
             Uniform::<$from>::new_inclusive(start as $from, end as $from)
                 .expect("not uniform")
                 .sample(run.rng()) as $to
         }
+    };
+}
+
+macro_rules! sample_uniform_value {
+    (
+        generic,
+        $uniform:ident,
+        $sample_typ:ty,
+        $runner:expr,
+        $start:expr,
+        $end:expr $(,)?
+    ) => {
+        $crate::num::$uniform::<$sample_typ>(
+            $runner,
+            $start.into(),
+            $end.into(),
+        )
+    };
+    (
+        plain,
+        $uniform:ident,
+        $sample_typ:ty,
+        $runner:expr,
+        $start:expr,
+        $end:expr $(,)?
+    ) => {
+        $crate::num::$uniform($runner, $start, $end)
     };
 }
 
@@ -118,7 +145,8 @@ macro_rules! numeric_api {
         numeric_api!($typ, $typ, $epsilon);
     };
     ($typ:ident, $sample_typ:ty, $epsilon:expr) => {
-        numeric_api!(
+        numeric_api!(@with_mode
+            generic,
             $typ,
             $sample_typ,
             $epsilon,
@@ -130,6 +158,19 @@ macro_rules! numeric_api {
         numeric_api!($typ, $typ, $epsilon, $uniform, $incl);
     };
     ($typ:ident, $sample_typ:ty, $epsilon:expr, $uniform:ident, $incl:ident) => {
+        numeric_api!(@with_mode generic, $typ, $sample_typ, $epsilon, $uniform, $incl);
+    };
+    (@plain $typ:ident, $epsilon:expr, $uniform:ident, $incl:ident) => {
+        numeric_api!(@with_mode plain, $typ, $typ, $epsilon, $uniform, $incl);
+    };
+    (@with_mode
+        $sample_mode:ident,
+        $typ:ident,
+        $sample_typ:ty,
+        $epsilon:expr,
+        $uniform:ident,
+        $incl:ident
+    ) => {
         impl Strategy for ::core::ops::Range<$typ> {
             type Tree = BinarySearch;
             type Value = $typ;
@@ -144,10 +185,13 @@ macro_rules! numeric_api {
 
                 Ok(BinarySearch::new_clamped(
                     self.start,
-                    $crate::num::$uniform::<$sample_typ>(
+                    sample_uniform_value!(
+                        $sample_mode,
+                        $uniform,
+                        $sample_typ,
                         runner,
-                        self.start.into(),
-                        self.end.into(),
+                        self.start,
+                        self.end,
                     )
                     .into(),
                     self.end - $epsilon,
@@ -170,10 +214,13 @@ macro_rules! numeric_api {
 
                 Ok(BinarySearch::new_clamped(
                     *self.start(),
-                    $crate::num::$incl::<$sample_typ>(
+                    sample_uniform_value!(
+                        $sample_mode,
+                        $incl,
+                        $sample_typ,
                         runner,
-                        (*self.start()).into(),
-                        (*self.end()).into(),
+                        *self.start(),
+                        *self.end(),
                     )
                     .into(),
                     *self.end(),
@@ -188,10 +235,13 @@ macro_rules! numeric_api {
             fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
                 Ok(BinarySearch::new_clamped(
                     self.start,
-                    $crate::num::$incl::<$sample_typ>(
+                    sample_uniform_value!(
+                        $sample_mode,
+                        $incl,
+                        $sample_typ,
                         runner,
-                        self.start.into(),
-                        <$typ>::MAX.into(),
+                        self.start,
+                        <$typ>::MAX,
                     )
                     .into(),
                     <$typ>::MAX,
@@ -206,10 +256,13 @@ macro_rules! numeric_api {
             fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
                 Ok(BinarySearch::new_clamped(
                     <$typ>::MIN,
-                    $crate::num::$uniform::<$sample_typ>(
+                    sample_uniform_value!(
+                        $sample_mode,
+                        $uniform,
+                        $sample_typ,
                         runner,
-                        <$typ>::MIN.into(),
-                        self.end.into(),
+                        <$typ>::MIN,
+                        self.end,
                     )
                     .into(),
                     self.end,
@@ -224,10 +277,13 @@ macro_rules! numeric_api {
             fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
                 Ok(BinarySearch::new_clamped(
                     <$typ>::MIN,
-                    $crate::num::$incl::<$sample_typ>(
+                    sample_uniform_value!(
+                        $sample_mode,
+                        $incl,
+                        $sample_typ,
                         runner,
-                        <$typ>::MIN.into(),
-                        self.end.into(),
+                        <$typ>::MIN,
+                        self.end,
                     )
                     .into(),
                     self.end,
@@ -239,7 +295,8 @@ macro_rules! numeric_api {
 
 macro_rules! signed_integer_bin_search {
     ($typ:ident) => {
-        signed_integer_bin_search!(
+        signed_integer_bin_search!(@with_mode
+            generic,
             $typ,
             supported_int_any,
             sample_uniform,
@@ -247,6 +304,15 @@ macro_rules! signed_integer_bin_search {
         );
     };
     ($typ:ident, $int_any: ident, $uniform: ident, $incl: ident) => {
+        signed_integer_bin_search!(@with_mode plain, $typ, $int_any, $uniform, $incl);
+    };
+    (@with_mode
+        $sample_mode:ident,
+        $typ:ident,
+        $int_any: ident,
+        $uniform: ident,
+        $incl: ident
+    ) => {
         #[allow(missing_docs)]
         pub mod $typ {
             #[allow(unused_imports)]
@@ -343,14 +409,15 @@ macro_rules! signed_integer_bin_search {
                 }
             }
 
-            numeric_api!($typ, 1, $uniform, $incl);
+            numeric_api!(@with_mode $sample_mode, $typ, $typ, 1, $uniform, $incl);
         }
     };
 }
 
 macro_rules! unsigned_integer_bin_search {
     ($typ:ident) => {
-        unsigned_integer_bin_search!(
+        unsigned_integer_bin_search!(@with_mode
+            generic,
             $typ,
             supported_int_any,
             sample_uniform,
@@ -358,6 +425,15 @@ macro_rules! unsigned_integer_bin_search {
         );
     };
     ($typ:ident, $int_any: ident, $uniform: ident, $incl: ident) => {
+        unsigned_integer_bin_search!(@with_mode plain, $typ, $int_any, $uniform, $incl);
+    };
+    (@with_mode
+        $sample_mode:ident,
+        $typ:ident,
+        $int_any: ident,
+        $uniform: ident,
+        $incl: ident
+    ) => {
         #[allow(missing_docs)]
         pub mod $typ {
             #[allow(unused_imports)]
@@ -390,7 +466,7 @@ macro_rules! unsigned_integer_bin_search {
                 /// the given `lo` value.
                 fn new_clamped(lo: $typ, start: $typ, _hi: $typ) -> Self {
                     BinarySearch {
-                        lo: lo,
+                        lo,
                         curr: start,
                         hi: start,
                     }
@@ -440,7 +516,7 @@ macro_rules! unsigned_integer_bin_search {
                 }
             }
 
-            numeric_api!($typ, 1, $uniform, $incl);
+            numeric_api!(@with_mode $sample_mode, $typ, $typ, 1, $uniform, $incl);
         }
     };
 }
@@ -808,9 +884,6 @@ macro_rules! float_bin_search {
             use super::float_samplers::$sample_typ;
 
             use core::ops;
-            #[cfg(not(feature = "std"))]
-            use num_traits::float::FloatCore;
-
             use rand::RngExt;
 
             use super::{FloatLayout, FloatTypes};
@@ -1102,11 +1175,11 @@ mod test {
         for _ in 0..100 {
             let mut state = (-42i32..64i32).new_tree(&mut runner).unwrap();
             let init_value = state.current();
-            assert!(init_value >= -42 && init_value < 64);
+            assert!((-42..64).contains(&init_value));
 
             while state.simplify() {
                 let v = state.current();
-                assert!(v >= -42 && v < 64);
+                assert!((-42..64).contains(&v));
             }
 
             assert_eq!(0, state.current());
@@ -1159,7 +1232,7 @@ mod test {
         for _ in 0..100 {
             let mut state = (42u32..56u32).new_tree(&mut runner).unwrap();
             let init_value = state.current();
-            assert!(init_value >= 42 && init_value < 56);
+            assert!((42..56).contains(&init_value));
 
             while state.simplify() {
                 assert!(
@@ -1281,31 +1354,31 @@ mod test {
 
     #[test]
     fn positive_infinity_simplifies_directly_to_zero() {
-        let mut value = f64::BinarySearch::new(::std::f64::INFINITY);
+        let mut value = f64::BinarySearch::new(f64::INFINITY);
 
         assert!(value.simplify());
         assert_eq!(0.0, value.current());
         assert!(value.complicate());
-        assert_eq!(::std::f64::INFINITY, value.current());
+        assert_eq!(f64::INFINITY, value.current());
         assert!(!value.clone().complicate());
         assert!(!value.clone().simplify());
     }
 
     #[test]
     fn negative_infinity_simplifies_directly_to_zero() {
-        let mut value = f64::BinarySearch::new(::std::f64::NEG_INFINITY);
+        let mut value = f64::BinarySearch::new(f64::NEG_INFINITY);
 
         assert!(value.simplify());
         assert_eq!(0.0, value.current());
         assert!(value.complicate());
-        assert_eq!(::std::f64::NEG_INFINITY, value.current());
+        assert_eq!(f64::NEG_INFINITY, value.current());
         assert!(!value.clone().complicate());
         assert!(!value.clone().simplify());
     }
 
     #[test]
     fn nan_simplifies_directly_to_zero() {
-        let mut value = f64::BinarySearch::new(::std::f64::NAN);
+        let mut value = f64::BinarySearch::new(f64::NAN);
 
         assert!(value.simplify());
         assert_eq!(0.0, value.current());
@@ -1563,7 +1636,9 @@ mod test {
                         assert_eq!(
                             panic::catch_unwind(|| {
                                 let mut runner = TestRunner::deterministic();
-                                let _ = (ONE..=ZERO).new_tree(&mut runner);
+                                let _ =
+                                    core::ops::RangeInclusive::new(ONE, ZERO)
+                                        .new_tree(&mut runner);
                             })
                             .err()
                             .and_then(|a| a

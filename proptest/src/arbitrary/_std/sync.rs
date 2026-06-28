@@ -63,11 +63,7 @@ fn bwr_false() -> BarrierWaitResult {
     let jh = thread::spawn(move || b2.wait());
     let bwr1 = barrier.wait();
     let bwr2 = jh.join().unwrap();
-    if bwr1.is_leader() {
-        bwr2
-    } else {
-        bwr1
-    }
+    if bwr1.is_leader() { bwr2 } else { bwr1 }
 }
 
 fn wtr_false() -> WaitTimeoutResult {

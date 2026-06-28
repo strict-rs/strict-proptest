@@ -6,7 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use proptest::prelude::{prop_assert_eq, proptest, Arbitrary};
+use proptest::prelude::{Arbitrary, prop_assert_eq, proptest};
 use proptest_derive::Arbitrary;
 
 trait Func {

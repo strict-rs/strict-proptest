@@ -7,3 +7,7 @@
 
 [book]: https://proptest-rs.github.io/proptest/intro.html
 [api-docs]: https://docs.rs/proptest/latest/proptest/
+
+## Book
+
+A detailed introduction to proptest can be found in the [book](https://proptest-rs.github.io/proptest/)

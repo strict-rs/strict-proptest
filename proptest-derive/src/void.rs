@@ -53,7 +53,7 @@ impl<P> IsUninhabited for syn::punctuated::Punctuated<syn::Variant, P> {
     }
 }
 
-impl<'a> IsUninhabited for &'a [syn::Variant] {
+impl IsUninhabited for &[syn::Variant] {
     fn is_uninhabited(&self) -> bool {
         self.iter().all(IsUninhabited::is_uninhabited)
     }
@@ -75,7 +75,7 @@ impl IsUninhabited for syn::Fields {
     }
 }
 
-impl<'a> IsUninhabited for &'a [syn::Field] {
+impl IsUninhabited for &[syn::Field] {
     fn is_uninhabited(&self) -> bool {
         self.iter().any(syn::Field::is_uninhabited)
     }
@@ -94,7 +94,7 @@ impl IsUninhabited for syn::Field {
 impl IsUninhabited for syn::Type {
     fn is_uninhabited(&self) -> bool {
         let mut uninhabited = Uninhabited(false);
-        visit::visit_type(&mut uninhabited, &self);
+        visit::visit_type(&mut uninhabited, self);
         uninhabited.0
     }
 }
@@ -140,10 +140,10 @@ impl<'ast> visit::Visit<'ast> for Uninhabited {
     // An array is uninhabited iff: `[T; N]` where uninhabited(T) && N != 0
     // We want to block decent if N == 0.
     fn visit_type_array(&mut self, arr: &'ast syn::TypeArray) {
-        if let Some(len) = interp::eval_expr(&arr.len) {
-            if len > 0 {
-                self.visit_type(&arr.elem);
-            }
+        if let Some(len) = interp::eval_expr(&arr.len)
+            && len > 0
+        {
+            self.visit_type(&arr.elem);
         }
     }
 

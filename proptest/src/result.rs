@@ -26,7 +26,7 @@
 //! "maybe err" since the success case results in an easier to understand code
 //! path.
 
-#![cfg_attr(clippy, allow(expl_impl_clone_on_copy))]
+#![allow(clippy::expl_impl_clone_on_copy)]
 
 use core::fmt;
 use core::marker::PhantomData;
@@ -36,7 +36,7 @@ use crate::strategy::*;
 use crate::test_runner::*;
 
 // Re-export the type for easier usage.
-pub use crate::option::{prob, Probability};
+pub use crate::option::{Probability, prob};
 
 struct WrapOk<T, E>(PhantomData<T>, PhantomData<E>);
 impl<T, E> Clone for WrapOk<T, E> {

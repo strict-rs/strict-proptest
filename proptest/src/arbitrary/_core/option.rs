@@ -14,7 +14,7 @@ use core::ops::RangeInclusive;
 use core::option as opt;
 
 use crate::arbitrary::*;
-use crate::option::{weighted, OptionStrategy, Probability};
+use crate::option::{OptionStrategy, Probability, weighted};
 use crate::strategy::statics::static_map;
 use crate::strategy::*;
 

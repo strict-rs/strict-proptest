@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{fmt, Arc, Box, Vec};
+use crate::std_facade::{Arc, Box, Vec, fmt};
 
 use crate::strategy::traits::*;
 use crate::strategy::unions::float_to_weight;
@@ -48,10 +48,10 @@ impl<T, F> Clone for Recursive<T, F> {
 }
 
 impl<
-        T: fmt::Debug + 'static,
-        R: Strategy<Value = T> + 'static,
-        F: Fn(BoxedStrategy<T>) -> R,
-    > Recursive<T, F>
+    T: fmt::Debug + 'static,
+    R: Strategy<Value = T> + 'static,
+    F: Fn(BoxedStrategy<T>) -> R,
+> Recursive<T, F>
 {
     pub(super) fn new(
         base: impl Strategy<Value = T> + 'static,
@@ -71,10 +71,10 @@ impl<
 }
 
 impl<
-        T: fmt::Debug + 'static,
-        R: Strategy<Value = T> + 'static,
-        F: Fn(BoxedStrategy<T>) -> R,
-    > Strategy for Recursive<T, F>
+    T: fmt::Debug + 'static,
+    R: Strategy<Value = T> + 'static,
+    F: Fn(BoxedStrategy<T>) -> R,
+> Strategy for Recursive<T, F>
 {
     type Tree = Box<dyn ValueTree<Value = T>>;
     type Value = T;

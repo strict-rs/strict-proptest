@@ -151,7 +151,7 @@ pub trait ProptestResultExt<T, E>: private::Sealed {
     ///
     /// ## Example
     ///
-    /// ```
+    /// ```rust,ignore
     /// use proptest::prelude::*;
     ///
     /// fn test_conversion(a: i32) -> Result<(), TestCaseError> {

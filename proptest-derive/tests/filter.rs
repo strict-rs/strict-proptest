@@ -10,11 +10,11 @@ use proptest::prelude::*;
 use proptest_derive::Arbitrary;
 
 fn even(x: &usize) -> bool {
-    x % 2 == 0
+    x.is_multiple_of(2)
 }
 
 fn rem3(x: &usize) -> bool {
-    x % 3 == 0
+    x.is_multiple_of(3)
 }
 
 #[derive(Copy, Clone)]
@@ -80,11 +80,7 @@ struct T3(
 );
 
 fn is_v0(v: &T4) -> bool {
-    if let T4::V0 { .. } = v {
-        true
-    } else {
-        false
-    }
+    matches!(v, T4::V0 { .. })
 }
 
 #[derive(Debug, Arbitrary)]
@@ -99,7 +95,7 @@ enum T4 {
 
 fn t5_v0_rem_3(v: &T5) -> bool {
     if let T5::V0 { field } = v {
-        rem3(&field)
+        rem3(field)
     } else {
         false
     }
@@ -107,7 +103,7 @@ fn t5_v0_rem_3(v: &T5) -> bool {
 
 fn t5_v1_rem_5(v: &T5) -> bool {
     if let T5::V1(field) = v {
-        field % 5 == 0
+        field.is_multiple_of(5)
     } else {
         false
     }
@@ -129,7 +125,7 @@ enum T5 {
 
 fn t6_v0_rem_3(v: &T6) -> bool {
     if let T6::V0 { field } = v {
-        rem3(&field)
+        rem3(field)
     } else {
         false
     }
@@ -137,7 +133,7 @@ fn t6_v0_rem_3(v: &T6) -> bool {
 
 fn t6_v1_rem_5(v: &T6) -> bool {
     if let T6::V1(field) = v {
-        field % 5 == 0
+        field.is_multiple_of(5)
     } else {
         false
     }
@@ -151,10 +147,7 @@ enum T6 {
         #[proptest(filter(even))]
         field: usize,
     },
-    #[proptest(
-        strategy("(0..params.0).prop_map(T6::V1)"),
-        filter(t6_v1_rem_5)
-    )]
+    #[proptest(strategy("(0..params.0).prop_map(T6::V1)"), filter(t6_v1_rem_5))]
     V1(usize),
 }
 

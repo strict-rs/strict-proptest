@@ -8,7 +8,7 @@
 
 #![feature(never_type)]
 
-use proptest::prelude::{prop_assert_eq, proptest, Arbitrary};
+use proptest::prelude::{Arbitrary, prop_assert_eq, proptest};
 use proptest_derive::Arbitrary;
 
 // Various arithmetic and basic things.
@@ -19,15 +19,15 @@ enum Ty1 {
     _V2(!),
     _V3([!; 1]),
     _V4([!; 2 - 1]),
-    _V5([!; 2 * 1]),
-    _V6([!; 2 / 2]),
-    _V7([!; 0b0 ^ 0b1]),
-    _V8([!; 0b1 & 0b1]),
-    _V9([!; 0b1 | 0b0]),
+    _V5([!; 2 * 3]),
+    _V6([!; 4 / 2]),
+    _V7([!; 0b10 ^ 0b11]),
+    _V8([!; 0b11 & 0b01]),
+    _V9([!; 0b10 | 0b01]),
     _V10([!; 0b10 << 1]),
     _V11([!; 0b10 >> 1]),
     _V12([!; !0 - 18446744073709551614]),
-    _V13([!; 1 + 2 * (3 / 3)]),
+    _V13([!; 1 + 2 * (6 / 3)]),
     V1,
 }
 
@@ -76,9 +76,34 @@ enum UsePrj0 {
     V0(<! as Fun>::Prj),
 }
 
+impl UsePrj0 {
+    fn projection(self) -> <! as Fun>::Prj {
+        let Self::V0(value) = self;
+        value
+    }
+}
+
 #[derive(Debug, Arbitrary)]
 enum UsePrj1 {
     V0(<(!, usize, !) as Fun>::Prj),
+}
+
+impl UsePrj1 {
+    fn projection(self) -> <(!, usize, !) as Fun>::Prj {
+        let Self::V0(value) = self;
+        value
+    }
+}
+
+proptest! {
+    #[test]
+    fn associated_projection_fields_are_generated(
+        prj0: UsePrj0,
+        prj1: UsePrj1,
+    ) {
+        let _: u8 = prj0.projection();
+        let _: u8 = prj1.projection();
+    }
 }
 
 #[test]

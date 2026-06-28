@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{fmt, Arc};
+use crate::std_facade::{Arc, fmt};
 use core::mem;
 
 use crate::strategy::fuse::Fuse;
@@ -179,12 +179,14 @@ where
 
         if self.current.complicate() {
             return true;
-        } else if self.meta.complicate() {
-            if let Ok(v) = self.meta.current().new_tree(&mut self.runner) {
-                self.complicate_regen_remaining = self.runner.config().cases;
-                self.current = Fuse::new(v);
-                return true;
-            }
+        }
+
+        if self.meta.complicate()
+            && let Ok(v) = self.meta.current().new_tree(&mut self.runner)
+        {
+            self.complicate_regen_remaining = self.runner.config().cases;
+            self.current = Fuse::new(v);
+            return true;
         }
 
         if let Some(v) = self.final_complication.take() {
@@ -260,8 +262,6 @@ impl<S: Strategy, R: Strategy, F: Fn(S::Value) -> R> Strategy
 #[cfg(test)]
 mod test {
     use super::*;
-
-    use std::u32;
 
     use crate::strategy::just::Just;
     use crate::test_runner::Config;

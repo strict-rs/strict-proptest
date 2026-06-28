@@ -22,6 +22,23 @@ struct Foo<V, T, U> {
     u: PhantomData<U>,
 }
 
+impl<V, T, U> Foo<V, T, U> {
+    fn into_parts(self) -> (V, T) {
+        (self.v, self.t)
+    }
+}
+
+#[test]
+fn foo_fields_are_available_without_u_arbitrary_bound() {
+    let foo = Foo {
+        v: 1,
+        t: 2,
+        u: PhantomData::<NotArbitrary>,
+    };
+
+    assert_eq!(foo.into_parts(), (1, 2));
+}
+
 #[test]
 fn asserting_arbitrary() {
     fn assert_arbitrary<T: Arbitrary>() {}

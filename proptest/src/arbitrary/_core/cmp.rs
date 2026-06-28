@@ -15,8 +15,8 @@ use crate::strategy::{Just, TupleUnion, WA};
 
 wrap_ctor!(Reverse, Reverse);
 
-type WAJO = WA<Just<Ordering>>;
-arbitrary!(Ordering, TupleUnion<(WAJO, WAJO, WAJO)>;
+type Wajo = WA<Just<Ordering>>;
+arbitrary!(Ordering, TupleUnion<(Wajo, Wajo, Wajo)>;
     prop_oneof![
         Just(Ordering::Equal),
         Just(Ordering::Less),

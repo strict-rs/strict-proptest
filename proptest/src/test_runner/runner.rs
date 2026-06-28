@@ -7,7 +7,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{Arc, BTreeMap, Box, String, Vec};
+#[cfg(feature = "std")]
+use crate::std_facade::String;
+use crate::std_facade::{Arc, BTreeMap, Box, Vec};
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering::SeqCst;
 use core::{fmt, iter};
@@ -36,7 +38,7 @@ use crate::test_runner::result_cache::*;
 use crate::test_runner::rng::TestRng;
 
 #[cfg(feature = "fork")]
-const ENV_FORK_FILE: &'static str = "_PROPTEST_FORKFILE";
+const ENV_FORK_FILE: &str = "_PROPTEST_FORKFILE";
 
 const ALWAYS: u32 = 0;
 /// Verbose level 1 to show failures. In state machine tests this level is used
@@ -46,22 +48,23 @@ const TRACE: u32 = 2;
 
 #[cfg(feature = "std")]
 macro_rules! verbose_message {
-    ($runner:expr, $level:expr, $fmt:tt $($arg:tt)*) => { {
+    ($runner:expr, $level:expr, $fmt:tt $($arg:tt)*) => {{
         #[allow(unused_comparisons)]
         {
             if $runner.config.verbose >= $level {
                 eprintln!(concat!("proptest: ", $fmt) $($arg)*);
             }
-        };
-        ()
-    } }
+        }
+    }}
 }
 
 #[cfg(not(feature = "std"))]
 macro_rules! verbose_message {
-    ($runner:expr, $level:expr, $fmt:tt $($arg:tt)*) => {
+    ($runner:expr, $level:expr, $fmt:tt $($arg:tt)*) => {{
+        let _ = &$runner;
         let _ = $level;
-    };
+        let _ = format_args!($fmt $($arg)*);
+    }};
 }
 
 type RejectionDetail = BTreeMap<Reason, u32>;
@@ -165,6 +168,7 @@ struct ForkOutput;
 #[cfg(not(feature = "fork"))]
 impl ForkOutput {
     fn append(&mut self, _result: &TestCaseResult) {}
+    #[cfg(feature = "std")]
     fn ping(&mut self) {}
     fn terminate(&mut self) {}
     fn empty() -> Self {
@@ -252,7 +256,7 @@ where
     #[cfg(feature = "timeout")]
     let time_start = std::time::Instant::now();
 
-    let mut result = unwrap_or!(
+    let result = unwrap_or!(
         super::scoped_panic_hook::with_hook(
             |_| { /* Silence out panic backtrace */ },
             || panic::catch_unwind(AssertUnwindSafe(|| test(case)))
@@ -267,10 +271,12 @@ where
     // consistent behaviour. (The parent process cannot precisely time the test
     // cases itself.)
     #[cfg(feature = "timeout")]
+    let mut result = result;
+    #[cfg(feature = "timeout")]
     if timeout > 0 && result.is_ok() {
         let elapsed = time_start.elapsed();
-        let elapsed_millis = elapsed.as_secs() as u32 * 1000
-            + elapsed.subsec_nanos() / 1_000_000;
+        let elapsed_millis =
+            elapsed.as_secs() as u32 * 1000 + elapsed.subsec_millis();
 
         if elapsed_millis > timeout {
             result = Err(TestCaseError::fail(format!(
@@ -343,11 +349,11 @@ impl TestRunner {
     /// Create a fresh `TestRunner` with the given configuration and RNG.
     pub fn new_with_rng(config: Config, rng: TestRng) -> Self {
         TestRunner {
-            config: config,
+            config,
             successes: 0,
             local_rejects: 0,
             global_rejects: 0,
-            rng: rng,
+            rng,
             flat_map_regens: Arc::new(AtomicUsize::new(0)),
             local_reject_detail: BTreeMap::new(),
             global_reject_detail: BTreeMap::new(),
@@ -481,7 +487,7 @@ impl TestRunner {
                 |child, _| {
                     await_child(
                         child,
-                        &mut forkfile.borrow_mut().as_mut().unwrap(),
+                        forkfile.borrow_mut().as_mut().unwrap(),
                         timeout,
                     )
                 },
@@ -496,7 +502,7 @@ impl TestRunner {
             .expect("Fork failed");
 
             let parsed = replay::Replay::parse_from(
-                &mut forkfile.borrow_mut().as_mut().unwrap(),
+                forkfile.borrow_mut().as_mut().unwrap(),
             )
             .expect("Failed to re-read fork file");
             match parsed {
@@ -532,7 +538,7 @@ impl TestRunner {
             // to timeout. (This is because the child could have appended
             // something to the file after we gave up waiting for it but before
             // we were able to kill it).
-            if last_fork_file_len.map_or(true, |last_fork_file_len| {
+            if last_fork_file_len.is_none_or(|last_fork_file_len| {
                 last_fork_file_len == curr_forkfile_size
             }) {
                 let error = Err(child_error.unwrap_or(TestCaseError::fail(
@@ -625,28 +631,26 @@ impl TestRunner {
                 &mut fork_output,
                 false,
             );
-            if let Err(TestError::Fail(_, ref value)) = result {
-                if let Some(ref mut failure_persistence) =
-                    self.config.failure_persistence
-                {
-                    let source_file = &self.config.source_file;
+            let source_file = self.config.source_file;
 
-                    // Don't update the persistence file if we're a child
-                    // process. The parent relies on it remaining consistent
-                    // and will take care of updating it itself.
-                    if !fork_output.is_in_fork() {
-                        failure_persistence.save_persisted_failure2(
-                            *source_file,
-                            PersistedSeed(seed),
-                            value,
-                        );
-                    }
-                }
+            // Don't update the persistence file if we're a child process. The
+            // parent relies on it remaining consistent and will take care of
+            // updating it itself.
+            if let Err(TestError::Fail(_, ref value)) = result
+                && let Some(ref mut failure_persistence) =
+                    self.config.failure_persistence
+                && !fork_output.is_in_fork()
+            {
+                failure_persistence.save_persisted_failure2(
+                    source_file,
+                    PersistedSeed(seed),
+                    value,
+                );
             }
 
             if let Err(e) = result {
                 fork_output.terminate();
-                return Err(e.into());
+                return Err(e);
             }
         }
 
@@ -711,10 +715,7 @@ impl TestRunner {
             &mut ForkOutput::empty(),
             false,
         )
-        .map(|ok_type| match ok_type {
-            TestCaseOk::Reject => false,
-            _ => true,
-        })
+        .map(|ok_type| !matches!(ok_type, TestCaseOk::Reject))
     }
 
     fn run_one_with_replay<V: ValueTree>(
@@ -774,7 +775,7 @@ impl TestRunner {
                 INFO_LOG,
                 "Shrinking disabled by configuration"
             );
-            return None
+            return None;
         }
 
         #[cfg(all(feature = "std", not(target_arch = "wasm32")))]
@@ -786,14 +787,17 @@ impl TestRunner {
 
         if case.simplify() {
             loop {
+                #[cfg(all(feature = "std", not(target_arch = "wasm32")))]
                 let mut timed_out: Option<u64> = None;
+                #[cfg(not(all(feature = "std", not(target_arch = "wasm32"))))]
+                let timed_out: Option<u64> = None;
                 #[cfg(all(feature = "std", not(target_arch = "wasm32")))]
                 if self.config.max_shrink_time > 0 {
                     let elapsed = start_time.elapsed();
                     let elapsed_ms = elapsed
                         .as_secs()
                         .saturating_mul(1000)
-                        .saturating_add(elapsed.subsec_millis().into());
+                        .saturating_add(u64::from(elapsed.subsec_millis()));
                     if elapsed_ms > self.config.max_shrink_time as u64 {
                         timed_out = Some(elapsed_ms);
                     }
@@ -801,8 +805,7 @@ impl TestRunner {
 
                 let bail = if iterations >= self.config.max_shrink_iters() {
                     #[cfg(feature = "std")]
-                    const CONTROLLER: &str =
-                        "the PROPTEST_MAX_SHRINK_ITERS environment \
+                    const CONTROLLER: &str = "the PROPTEST_MAX_SHRINK_ITERS environment \
                          variable or ProptestConfig.max_shrink_iters";
                     #[cfg(not(feature = "std"))]
                     const CONTROLLER: &str = "ProptestConfig.max_shrink_iters";
@@ -819,8 +822,7 @@ impl TestRunner {
                     true
                 } else if let Some(ms) = timed_out {
                     #[cfg(feature = "std")]
-                    const CONTROLLER: &str =
-                        "the PROPTEST_MAX_SHRINK_TIME environment \
+                    const CONTROLLER: &str = "the PROPTEST_MAX_SHRINK_TIME environment \
                          variable or ProptestConfig.max_shrink_time";
                     #[cfg(feature = "std")]
                     let current = self.config.max_shrink_time;
@@ -948,7 +950,7 @@ impl TestRunner {
 
 #[cfg(feature = "fork")]
 fn init_replay(rng: &mut TestRng) -> (Vec<TestCaseResult>, ForkOutput) {
-    use crate::test_runner::replay::{open_file, Replay, ReplayFileStatus::*};
+    use crate::test_runner::replay::{Replay, ReplayFileStatus::*, open_file};
 
     if let Some(path) = env::var_os(ENV_FORK_FILE) {
         let mut file = open_file(&path).expect("Failed to open replay file");
@@ -1055,9 +1057,9 @@ fn await_child(
         // fail the test and kill the child.
         if current_len <= last_forkfile_len {
             return (
-                Some(TestCaseError::fail(format!(
-                    "Timed out waiting for child process"
-                ))),
+                Some(TestCaseError::fail(
+                    "Timed out waiting for child process",
+                )),
                 Some(current_len),
             );
         } else {
@@ -1133,7 +1135,7 @@ mod test {
 
     #[test]
     fn persisted_cases_do_not_count_towards_total_cases() {
-        const FILE: &'static str = "persistence-test.txt";
+        const FILE: &str = "persistence-test.txt";
         let _ = fs::remove_file(FILE);
 
         let config = Config {
@@ -1176,7 +1178,7 @@ mod test {
 
     #[test]
     fn failing_cases_persisted_and_reloaded() {
-        const FILE: &'static str = "persistence-test.txt";
+        const FILE: &str = "persistence-test.txt";
         let _ = fs::remove_file(FILE);
 
         let max = 10_000_000i32;
@@ -1255,7 +1257,8 @@ mod test {
 
         // create value with recorder rng
         let default_config = Config::default();
-        let recorder_rng = TestRng::default_rng(RngSeed::Random, RngAlgorithm::Recorder);
+        let recorder_rng =
+            TestRng::default_rng(RngSeed::Random, RngAlgorithm::Recorder);
         let mut runner =
             TestRunner::new_with_rng(default_config.clone(), recorder_rng);
         let random_byte_array1 = runner.rng().random::<[u8; 16]>();
@@ -1481,7 +1484,6 @@ mod test {
 
 #[cfg(all(feature = "fork", feature = "timeout", test))]
 mod timeout_tests {
-    use core::u32;
     use std::thread;
     use std::time::Duration;
 

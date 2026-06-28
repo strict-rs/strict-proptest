@@ -6,7 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use proptest::prelude::{prop_assert, prop_assert_eq, proptest, Arbitrary};
+use proptest::prelude::{Arbitrary, prop_assert, prop_assert_eq, proptest};
 use proptest_derive::Arbitrary;
 
 #[derive(Debug, Arbitrary)]
@@ -21,7 +21,7 @@ struct T0 {
     quux: usize,
     #[proptest(value(7331))]
     wibble: usize,
-    #[proptest(value("3 * 2 + 3usize / 3"))]
+    #[proptest(value("2 * 2 + 9usize / 3"))]
     wobble: usize,
 }
 

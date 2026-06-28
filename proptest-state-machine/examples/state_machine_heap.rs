@@ -156,7 +156,10 @@ impl StateMachineTest for MyHeap<i32> {
         _ref_state: &<Self::Reference as ReferenceStateMachine>::State,
     ) {
         // Check that the heap's API gives consistent results
-        assert_eq!(0 == state.len(), state.is_empty());
+        match state.len() {
+            0 => assert!(state.is_empty()),
+            _ => assert!(!state.is_empty()),
+        }
     }
 }
 

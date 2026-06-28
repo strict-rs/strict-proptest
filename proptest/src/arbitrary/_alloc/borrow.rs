@@ -13,7 +13,7 @@ use crate::std_facade::fmt;
 use crate::std_facade::{Cow, ToOwned};
 use core::borrow::Borrow;
 
-use crate::arbitrary::{any_with, Arbitrary, SMapped};
+use crate::arbitrary::{Arbitrary, SMapped, any_with};
 use crate::strategy::statics::static_map;
 
 arbitrary!(

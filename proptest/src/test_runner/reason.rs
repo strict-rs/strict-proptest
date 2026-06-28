@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{fmt, Box, Cow, String};
+use crate::std_facade::{Box, Cow, String, fmt};
 
 /// The reason for why something, such as a generated value, was rejected.
 ///
@@ -25,7 +25,7 @@ impl Reason {
     /// The message is intended for human consumption, and is not guaranteed to
     /// have any format in particular.
     pub fn message(&self) -> &str {
-        &*self.0
+        self.0.as_ref()
     }
 }
 

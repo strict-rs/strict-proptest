@@ -42,7 +42,7 @@ fn jpe() -> JoinPathsError {
 fn make_utf16_invalid(buf: &mut [u16], p: usize) {
     // Verify that length is non-empty.
     // An empty string is always valid UTF-16.
-    assert!(buf.len() > 0);
+    assert!(!buf.is_empty());
 
     // If first elem or previous entry is not a leading surrogate.
     let gen_trail = 0 == p || 0xd800 != (buf[p - 1] & 0xfc00);

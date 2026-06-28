@@ -15,11 +15,7 @@ fn parse_lit_int(mut s: &str) -> Option<u128> {
     /// past the end of the input buffer.
     pub fn byte<S: AsRef<[u8]> + ?Sized>(s: &S, idx: usize) -> u8 {
         let s = s.as_ref();
-        if idx < s.len() {
-            s[idx]
-        } else {
-            0
-        }
+        if idx < s.len() { s[idx] } else { 0 }
     }
 
     let base = match (byte(s, 0), byte(s, 1)) {
@@ -131,8 +127,6 @@ fn eval_lit(lit: &syn::ExprLit) -> Option<u128> {
 
 /// Interprets a binary operator on two expressions.
 fn eval_binary(bin: &syn::ExprBinary) -> Option<u128> {
-    use std::u32;
-
     let l = eval_expr(&bin.left)?;
     let r = eval_expr(&bin.right)?;
     Some(match bin.op {

@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
-use quote::{quote, ToTokens};
-use syn::{parse2, Block, Expr, Ident, Pat, ReturnType, Type, TypeTuple};
+use quote::{ToTokens, quote};
+use syn::{Block, Expr, Ident, Pat, ReturnType, Type, TypeTuple, parse2};
 
 use crate::property_test::{options::Options, utils::Argument};
 

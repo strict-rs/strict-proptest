@@ -12,16 +12,14 @@
 
 use crate::std_facade::{Box, Cow, String, ToOwned, Vec};
 use core::fmt;
-use core::mem;
 use core::ops::RangeInclusive;
-use core::u32;
 
 use regex_syntax::hir::{self, Hir, HirKind::*, Repetition};
 use regex_syntax::{Error as ParseError, ParserBuilder};
 
 use crate::bool;
 use crate::char;
-use crate::collection::{size_range, vec, SizeRange};
+use crate::collection::{SizeRange, size_range, vec};
 use crate::strategy::*;
 use crate::test_runner::*;
 
@@ -83,6 +81,29 @@ impl From<ParseError> for Error {
     }
 }
 
+#[derive(Debug)]
+enum InternalError {
+    RegexSyntax(Box<ParseError>),
+    UnsupportedRegex(&'static str),
+}
+
+impl From<ParseError> for InternalError {
+    fn from(err: ParseError) -> Self {
+        Self::RegexSyntax(Box::new(err))
+    }
+}
+
+impl From<InternalError> for Error {
+    fn from(err: InternalError) -> Self {
+        match err {
+            InternalError::RegexSyntax(err) => Self::RegexSyntax(*err),
+            InternalError::UnsupportedRegex(message) => {
+                Self::UnsupportedRegex(message)
+            }
+        }
+    }
+}
+
 opaque_strategy_wrapper! {
     /// Strategy which generates values (i.e., `String` or `Vec<u8>`) matching
     /// a regular expression.
@@ -106,6 +127,7 @@ impl Strategy for str {
 }
 
 type ParseResult<T> = Result<RegexGeneratorStrategy<T>, Error>;
+type InternalParseResult<T> = Result<RegexGeneratorStrategy<T>, InternalError>;
 
 #[doc(hidden)]
 /// A type which knows how to produce a `Strategy` from a regular expression
@@ -143,14 +165,30 @@ impl StrategyFromRegex for Vec<u8> {
 ///
 /// If you don't need error handling and aren't limited by setup time, it is
 /// also possible to directly use a `&str` as a strategy with the same effect.
+#[expect(
+    clippy::result_large_err,
+    reason = "preserve the public Error::RegexSyntax(ParseError) API"
+)]
 pub fn string_regex(regex: &str) -> ParseResult<String> {
+    string_regex_inner(regex).map_err(Error::from)
+}
+
+fn string_regex_inner(regex: &str) -> InternalParseResult<String> {
     let hir = ParserBuilder::new().build().parse(regex)?;
-    string_regex_parsed(&hir)
+    string_regex_parsed_inner(&hir)
 }
 
 /// Like `string_regex()`, but allows providing a pre-parsed expression.
+#[expect(
+    clippy::result_large_err,
+    reason = "preserve the public Error::RegexSyntax(ParseError) API"
+)]
 pub fn string_regex_parsed(expr: &Hir) -> ParseResult<String> {
-    bytes_regex_parsed(expr)
+    string_regex_parsed_inner(expr).map_err(Error::from)
+}
+
+fn string_regex_parsed_inner(expr: &Hir) -> InternalParseResult<String> {
+    bytes_regex_parsed_inner(expr)
         .map(|v| {
             v.prop_map(|bytes| {
                 String::from_utf8(bytes).expect("non-utf8 string")
@@ -170,16 +208,29 @@ pub fn string_regex_parsed(expr: &Hir) -> ParseResult<String> {
 /// will generate newline characters (byte value `0x0A`).  See the
 /// [`regex` crate's documentation](https://docs.rs/regex/*/regex/#opt-out-of-unicode-support)
 /// for more information.
+#[expect(
+    clippy::result_large_err,
+    reason = "preserve the public Error::RegexSyntax(ParseError) API"
+)]
 pub fn bytes_regex(regex: &str) -> ParseResult<Vec<u8>> {
-    let hir = ParserBuilder::new()
-        .utf8(false)
-        .build()
-        .parse(regex)?;
-    bytes_regex_parsed(&hir)
+    bytes_regex_inner(regex).map_err(Error::from)
+}
+
+fn bytes_regex_inner(regex: &str) -> InternalParseResult<Vec<u8>> {
+    let hir = ParserBuilder::new().utf8(false).build().parse(regex)?;
+    bytes_regex_parsed_inner(&hir)
 }
 
 /// Like `bytes_regex()`, but allows providing a pre-parsed expression.
+#[expect(
+    clippy::result_large_err,
+    reason = "preserve the public Error::RegexSyntax(ParseError) API"
+)]
 pub fn bytes_regex_parsed(expr: &Hir) -> ParseResult<Vec<u8>> {
+    bytes_regex_parsed_inner(expr).map_err(Error::from)
+}
+
+fn bytes_regex_parsed_inner(expr: &Hir) -> InternalParseResult<Vec<u8>> {
     match expr.kind() {
         Empty => Ok(Just(vec![]).sboxed()),
 
@@ -196,15 +247,15 @@ pub fn bytes_regex_parsed(expr: &Hir) -> ParseResult<Vec<u8>> {
         }),
 
         Repetition(rep) => {
-            Ok(vec(bytes_regex_parsed(&rep.sub)?, to_range(rep)?)
+            Ok(vec(bytes_regex_parsed_inner(&rep.sub)?, to_range(rep)?)
                 .prop_map(|parts| parts.concat())
                 .sboxed())
         }
 
-        Capture(capture) => bytes_regex_parsed(&capture.sub).map(|v| v.0),
+        Capture(capture) => bytes_regex_parsed_inner(&capture.sub).map(|v| v.0),
 
         Concat(subs) => {
-            let subs = ConcatIter {
+            let mut subs = ConcatIter {
                 iter: subs.iter(),
                 buf: vec![],
                 next: None,
@@ -214,11 +265,12 @@ pub fn bytes_regex_parsed(expr: &Hir) -> ParseResult<Vec<u8>> {
                 lhs
             };
             Ok(subs
-                .fold(Ok(None), |accum: Result<_, Error>, rhs| {
-                    Ok(match accum? {
-                        None => Some(rhs?.sboxed()),
+                .try_fold(None, |accum, rhs| -> Result<_, InternalError> {
+                    let rhs = rhs?;
+                    Ok(match accum {
+                        None => Some(rhs.sboxed()),
                         Some(accum) => {
-                            Some((accum, rhs?).prop_map(ext).sboxed())
+                            Some((accum, rhs).prop_map(ext).sboxed())
                         }
                     })
                 })?
@@ -226,7 +278,8 @@ pub fn bytes_regex_parsed(expr: &Hir) -> ParseResult<Vec<u8>> {
         }
 
         Alternation(subs) => {
-            Ok(Union::try_new(subs.iter().map(bytes_regex_parsed))?.sboxed())
+            Ok(Union::try_new(subs.iter().map(bytes_regex_parsed_inner))?
+                .sboxed())
         }
 
         Look(_) => unsupported(
@@ -272,19 +325,19 @@ struct ConcatIter<'a, I> {
 
 fn flush_lit_buf<I>(
     it: &mut ConcatIter<'_, I>,
-) -> Option<ParseResult<Vec<u8>>> {
+) -> Option<InternalParseResult<Vec<u8>>> {
     Some(Ok(RegexGeneratorStrategy(
-        Just(mem::replace(&mut it.buf, vec![])).sboxed(),
+        Just(core::mem::take(&mut it.buf)).sboxed(),
     )))
 }
 
 impl<'a, I: Iterator<Item = &'a Hir>> Iterator for ConcatIter<'a, I> {
-    type Item = ParseResult<Vec<u8>>;
+    type Item = InternalParseResult<Vec<u8>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // A left-over node, process it first:
         if let Some(next) = self.next.take() {
-            return Some(bytes_regex_parsed(next));
+            return Some(bytes_regex_parsed_inner(next));
         }
 
         // Accumulate a literal sequence as long as we can:
@@ -301,7 +354,7 @@ impl<'a, I: Iterator<Item = &'a Hir>> Iterator for ConcatIter<'a, I> {
                         flush_lit_buf(self)
                     } else {
                         // We didn't; just yield this node.
-                        Some(bytes_regex_parsed(next))
+                        Some(bytes_regex_parsed_inner(next))
                     };
                 }
             }
@@ -311,12 +364,12 @@ impl<'a, I: Iterator<Item = &'a Hir>> Iterator for ConcatIter<'a, I> {
         if !self.buf.is_empty() {
             flush_lit_buf(self)
         } else {
-            self.next.take().map(bytes_regex_parsed)
+            self.next.take().map(bytes_regex_parsed_inner)
         }
     }
 }
 
-fn to_range(rep: &Repetition) -> Result<SizeRange, Error> {
+fn to_range(rep: &Repetition) -> Result<SizeRange, InternalError> {
     Ok(match (rep.min, rep.max) {
         // Zero or one
         (0, Some(1)) => size_range(0..=1),
@@ -332,7 +385,7 @@ fn to_range(rep: &Repetition) -> Result<SizeRange, Error> {
         (min, Some(max)) if min == max => size_range(min as usize),
         // At least min
         (min, None) => {
-            let max = if min < u32::MAX as u32 / 2 {
+            let max = if min < u32::MAX / 2 {
                 min as usize * 2
             } else {
                 u32::MAX as usize
@@ -341,7 +394,7 @@ fn to_range(rep: &Repetition) -> Result<SizeRange, Error> {
         }
         // Bounded range with max of u32::MAX
         (_, Some(u32::MAX)) => {
-            return unsupported("Cannot have repetition max of u32::MAX")
+            return unsupported("Cannot have repetition max of u32::MAX");
         }
         // Bounded range
         (min, Some(max)) => size_range((min as usize)..(max as usize + 1)),
@@ -353,8 +406,8 @@ fn to_bytes(khar: char) -> Vec<u8> {
     khar.encode_utf8(&mut buf).as_bytes().to_owned()
 }
 
-fn unsupported<T>(error: &'static str) -> Result<T, Error> {
-    Err(Error::UnsupportedRegex(error))
+fn unsupported<T>(error: &'static str) -> Result<T, InternalError> {
+    Err(InternalError::UnsupportedRegex(error))
 }
 
 #[cfg(test)]
@@ -402,7 +455,8 @@ mod test {
         max_distinct: usize,
         iterations: usize,
     ) {
-        let generated = generate_byte_values_matching_regex(pattern, iterations);
+        let generated =
+            generate_byte_values_matching_regex(pattern, iterations);
         assert!(
             generated.len() >= min_distinct,
             "Expected to generate at least {} strings, but only \
@@ -477,7 +531,8 @@ mod test {
                 if !ok {
                     panic!(
                         "Generated string {:?} which does not match {:?}",
-                        printable_ascii(&s), pattern
+                        printable_ascii(&s),
+                        pattern
                     );
                 }
 
@@ -584,10 +639,15 @@ mod test {
     fn test_non_utf8_byte_strings() {
         do_test_bytes(r"(?-u)[\xC0-\xFF]\x20", 64, 64, 512);
         do_test_bytes(r"(?-u)\x20[\x80-\xBF]", 64, 64, 512);
-        do_test_bytes(r#"(?x-u)
+        do_test_bytes(
+            r#"(?x-u)
   \xed (( ( \xa0\x80 | \xad\xbf | \xae\x80 | \xaf\xbf )
           ( \xed ( \xb0\x80 | \xbf\xbf ) )? )
-        | \xb0\x80 | \xbe\x80 | \xbf\xbf )"#, 15, 15, 120);
+        | \xb0\x80 | \xbe\x80 | \xbf\xbf )"#,
+            15,
+            15,
+            120,
+        );
     }
 
     fn assert_send_and_sync<T: Send + Sync>(_: T) {}

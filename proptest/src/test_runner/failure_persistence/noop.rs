@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{fmt, Box, Vec};
+use crate::std_facade::{Box, Vec, fmt};
 use core::any::Any;
 
 use crate::test_runner::failure_persistence::{
@@ -43,7 +43,7 @@ impl FailurePersistence for NoopFailurePersistence {
         other
             .as_any()
             .downcast_ref::<Self>()
-            .map_or(false, |x| x == self)
+            .is_some_and(|x| x == self)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -58,17 +58,21 @@ mod tests {
 
     #[test]
     fn default_load_is_empty() {
-        assert!(NoopFailurePersistence::default()
-            .load_persisted_failures2(None)
-            .is_empty());
-        assert!(NoopFailurePersistence::default()
-            .load_persisted_failures2(HI_PATH)
-            .is_empty());
+        assert!(
+            NoopFailurePersistence
+                .load_persisted_failures2(None)
+                .is_empty()
+        );
+        assert!(
+            NoopFailurePersistence
+                .load_persisted_failures2(HI_PATH)
+                .is_empty()
+        );
     }
 
     #[test]
     fn seeds_not_recoverable() {
-        let mut p = NoopFailurePersistence::default();
+        let mut p = NoopFailurePersistence;
         p.save_persisted_failure2(HI_PATH, INC_SEED, &"");
         assert!(p.load_persisted_failures2(HI_PATH).is_empty());
         assert!(p.load_persisted_failures2(None).is_empty());

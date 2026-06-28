@@ -7,9 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{fmt, Arc, Vec};
-use core::cmp::{max, min};
-use core::u32;
+use crate::std_facade::{Arc, Vec, fmt};
 
 #[cfg(not(feature = "std"))]
 use num_traits::float::FloatCore;
@@ -55,6 +53,7 @@ impl<T: Strategy> Union<T> {
         Self { options }
     }
 
+    #[cfg(feature = "regex-syntax")]
     pub(crate) fn try_new<E>(
         it: impl Iterator<Item = Result<T, E>>,
     ) -> Result<Self, E> {
@@ -387,7 +386,7 @@ macro_rules! tuple_union {
                         } else {
                             None
                         }),*),
-                    pick: pick,
+                    pick,
                     min_pick: 0,
                     prev_pick: None,
                 })
@@ -456,10 +455,8 @@ pub fn float_to_weight(f: f64) -> (u32, u32) {
     assert!(f > 0.0 && f < 1.0, "Invalid probability: {}", f);
 
     // Clamp to 1..WEIGHT_BASE-1 so that we never produce a weight of 0.
-    let pos = max(
-        1,
-        min(WEIGHT_BASE - 1, (f * f64::from(WEIGHT_BASE)).round() as u32),
-    );
+    let pos =
+        ((f * f64::from(WEIGHT_BASE)).round() as u32).clamp(1, WEIGHT_BASE - 1);
     let neg = WEIGHT_BASE - pos;
 
     (pos, neg)
@@ -501,14 +498,14 @@ mod test {
             }
         }
 
-        assert!(passed >= 32 && passed <= 96, "Bad passed count: {}", passed);
+        assert!((32..=96).contains(&passed), "Bad passed count: {}", passed);
         assert!(
-            converged_low >= 32 && converged_low <= 160,
+            (32..=160).contains(&converged_low),
             "Bad converged_low count: {}",
             converged_low
         );
         assert!(
-            converged_high >= 32 && converged_high <= 160,
+            (32..=160).contains(&converged_high),
             "Bad converged_high count: {}",
             converged_high
         );
@@ -578,14 +575,14 @@ mod test {
             }
         }
 
-        assert!(passed >= 32 && passed <= 96, "Bad passed count: {}", passed);
+        assert!((32..=96).contains(&passed), "Bad passed count: {}", passed);
         assert!(
-            converged_low >= 32 && converged_low <= 160,
+            (32..=160).contains(&converged_low),
             "Bad converged_low count: {}",
             converged_low
         );
         assert!(
-            converged_high >= 32 && converged_high <= 160,
+            (32..=160).contains(&converged_high),
             "Bad converged_high count: {}",
             converged_high
         );

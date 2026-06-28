@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{fmt, Arc, Cell};
+use crate::std_facade::{Arc, Cell, fmt};
 
 use crate::strategy::traits::*;
 use crate::test_runner::*;
@@ -168,11 +168,7 @@ mod test {
     #[test]
     fn test_filter_map() {
         let input = (0..256).prop_filter_map("%3 + 1", |v| {
-            if 0 == v % 3 {
-                Some(v + 1)
-            } else {
-                None
-            }
+            if 0 == v % 3 { Some(v + 1) } else { None }
         });
 
         for _ in 0..256 {
@@ -192,11 +188,7 @@ mod test {
     fn test_filter_map_sanity() {
         check_strategy_sanity(
             (0..256).prop_filter_map("!%5 * 2", |v| {
-                if 0 != v % 5 {
-                    Some(v * 2)
-                } else {
-                    None
-                }
+                if 0 != v % 5 { Some(v * 2) } else { None }
             }),
             Some(CheckStrategySanityOptions {
                 // Due to internal rejection sampling, `simplify()` can

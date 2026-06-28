@@ -80,7 +80,7 @@ pub(crate) fn not_utf8_bytes(
             iter.filter(|&&x| x != '\u{0}').collect()
         };
         let mut bytes = string.into_bytes();
-        bytes.extend(el_bytes.into_iter());
+        bytes.extend(&el_bytes);
         bytes
     })
 }

@@ -80,17 +80,13 @@ pub enum ParamsMode {
     /// If it is specified on a child of the top level item, this
     /// entails that the given type will be added to the resultant
     /// product type.
-    Specified(Type),
+    Specified(Box<Type>),
 }
 
 impl ParamsMode {
     /// Returns `true` iff the mode was explicitly set.
     pub fn is_set(&self) -> bool {
-        if let ParamsMode::Passthrough = *self {
-            false
-        } else {
-            true
-        }
+        !matches!(self, ParamsMode::Passthrough)
     }
 
     /// Converts the mode to an `Option` of an `Option` of a type
@@ -100,7 +96,7 @@ impl ParamsMode {
         use self::ParamsMode::*;
         match self {
             Passthrough => None,
-            Specified(ty) => Some(Some(ty)),
+            Specified(ty) => Some(Some(*ty)),
             Default => Some(None),
         }
     }
@@ -109,11 +105,7 @@ impl ParamsMode {
 impl StratMode {
     /// Returns `true` iff the mode was explicitly set.
     pub fn is_set(&self) -> bool {
-        if let StratMode::Arbitrary = self {
-            false
-        } else {
-            true
-        }
+        !matches!(self, StratMode::Arbitrary)
     }
 }
 
@@ -195,9 +187,9 @@ fn parse_accumulate(ctx: Ctx, attrs: &[Attribute]) -> ParseAcc {
 
     // Get rid of attributes we don't care about:
     for attr in attrs {
-        if is_proptest_attr(&attr) {
+        if is_proptest_attr(attr) {
             // Flatten attributes so we deal with them uniformly.
-            state = extract_modifiers(ctx, &attr)
+            state = extract_modifiers(ctx, attr)
                 .into_iter()
                 // Accumulate attributes into a form for final processing.
                 .fold(state, |state, meta| dispatch_attribute(ctx, state, meta))
@@ -220,7 +212,7 @@ fn is_proptest_attr(attr: &Attribute) -> bool {
 /// logic somewhat.
 fn extract_modifiers(ctx: Ctx, attr: &Attribute) -> Vec<Meta> {
     // Ensure we've been given an outer attribute form.
-    if !is_outer_attr(&attr) {
+    if !is_outer_attr(attr) {
         error::inner_attr(ctx);
     }
 
@@ -229,7 +221,8 @@ fn extract_modifiers(ctx: Ctx, attr: &Attribute) -> Vec<Meta> {
             if syn::parse2::<Lit>(list.tokens.clone()).is_ok() {
                 error::immediate_literals(ctx);
             } else {
-                let parser = Punctuated::<Meta, Token![,]>::parse_separated_nonempty;
+                let parser =
+                    Punctuated::<Meta, Token![,]>::parse_separated_nonempty;
                 let metas = parser.parse2(list.tokens.clone()).unwrap();
                 return metas.into_iter().collect();
             }
@@ -332,8 +325,7 @@ fn parse_skip(ctx: Ctx, acc: &mut ParseAcc, meta: Meta) {
 ///
 /// The `<integer>` must also fit within an `u32` and be unsigned.
 fn parse_weight(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
-    use std::u32;
-    error_if_set(ctx, &acc.weight, &meta);
+    error_if_set(ctx, &acc.weight, meta);
 
     // Convert to value if possible:
     let value = normalize_meta(meta.clone())
@@ -384,7 +376,7 @@ fn parse_filter(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
 /// + `#[proptest(regex("<string>")]`
 /// + `#[proptest(regex(<ident>)]`
 fn parse_regex(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
-    error_if_set(ctx, &acc.regex, &meta);
+    error_if_set(ctx, &acc.regex, meta);
 
     if let expr @ Some(_) = match normalize_meta(meta.clone()) {
         Some(NormMeta::Word(fun)) => Some(function_call(fun)),
@@ -427,7 +419,7 @@ fn parse_strategy(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
 /// + `#[proptest(<meta.name()>(<literal>)]`
 /// + `#[proptest(<meta.name()>(<ident>)]`
 fn parse_strategy_base(ctx: Ctx, loc: &mut Option<Expr>, meta: &Meta) {
-    error_if_set(ctx, &loc, &meta);
+    error_if_set(ctx, loc, meta);
 
     if let expr @ Some(_) = match normalize_meta(meta.clone()) {
         Some(NormMeta::Word(fun)) => Some(function_call(fun)),
@@ -471,7 +463,7 @@ fn parse_params_mode(
 ) -> DeriveResult<ParamsMode> {
     Ok(match (no_params, ty_params) {
         (None, None) => ParamsMode::Passthrough,
-        (None, Some(ty)) => ParamsMode::Specified(ty),
+        (None, Some(ty)) => ParamsMode::Specified(Box::new(ty)),
         (Some(_), None) => ParamsMode::Default,
         (Some(_), Some(_)) => error::overspecified_param(ctx)?,
     })
@@ -598,7 +590,7 @@ fn normalize_meta(meta: Meta) -> Option<NormMeta> {
         Meta::NameValue(nv) => match nv.value {
             Expr::Lit(elit) => Some(NormMeta::Lit(elit.lit)),
             _ => None,
-        }
+        },
         Meta::List(ml) => {
             let mut output: Option<NormMeta> = None;
 

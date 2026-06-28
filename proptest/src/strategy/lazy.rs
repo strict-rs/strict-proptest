@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{fmt, Arc};
+use crate::std_facade::{Arc, Box, fmt};
 use core::mem;
 
 use crate::strategy::traits::*;
@@ -26,7 +26,7 @@ enum LazyValueTreeState<S: Strategy> {
     Initialized(S::Tree),
     Uninitialized {
         strategy: Arc<S>,
-        runner: TestRunner,
+        runner: Box<TestRunner>,
     },
     Failed,
 }
@@ -37,7 +37,10 @@ impl<S: Strategy> LazyValueTree<S> {
     pub(crate) fn new(strategy: Arc<S>, runner: &mut TestRunner) -> Self {
         let runner = runner.partial_clone();
         Self {
-            state: LazyValueTreeState::Uninitialized { strategy, runner },
+            state: LazyValueTreeState::Uninitialized {
+                strategy,
+                runner: Box::new(runner),
+            },
         }
     }
 

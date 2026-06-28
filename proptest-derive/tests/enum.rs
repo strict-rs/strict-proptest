@@ -6,9 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(never_type)]
-
-use proptest::prelude::Arbitrary;
+use proptest::prelude::{Arbitrary, prop_assert, proptest};
 use proptest_derive::Arbitrary;
 
 #[derive(Debug, Arbitrary)]
@@ -446,16 +444,53 @@ enum Alan {
     F(char),
 }
 
+impl Alan {
+    fn payload_score(&self) -> usize {
+        match self {
+            Self::A(value) => usize::from(value.count_ones() > 0),
+            Self::B(value) => 1 + usize::from(!value.is_empty()),
+            Self::C(()) => 2,
+            Self::D(value) => 3 + usize::from(*value > 0),
+            Self::E(value) => 4 + usize::from(value.is_sign_negative()),
+            Self::F(value) => 5 + usize::from(value.len_utf8() > 0),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Arbitrary)]
 enum SameType {
     A(usize),
     B(usize),
 }
 
+impl SameType {
+    fn payload_score(&self) -> usize {
+        match self {
+            Self::A(value) => usize::from(value.count_ones() > 0),
+            Self::B(value) => 1 + usize::from(value.count_ones() > 0),
+        }
+    }
+}
+
 #[derive(Arbitrary, Debug)]
 enum OneTwo {
     One(u8),
     Two(u8, u8),
+}
+
+impl OneTwo {
+    fn width(&self) -> usize {
+        match self {
+            Self::One(value) => {
+                let _ = value.count_ones();
+                1
+            }
+            Self::Two(left, right) => {
+                let _ = left.count_ones() + right.count_ones();
+                2
+            }
+        }
+    }
 }
 
 #[derive(Arbitrary, Debug)]
@@ -465,10 +500,52 @@ enum ZeroOneTwo {
     Two(u8, u8),
 }
 
+impl ZeroOneTwo {
+    fn width(&self) -> usize {
+        match self {
+            Self::Zero => 0,
+            Self::One(value) => {
+                let _ = value.count_ones();
+                1
+            }
+            Self::Two(left, right) => {
+                let _ = left.count_ones() + right.count_ones();
+                2
+            }
+        }
+    }
+}
+
 #[derive(Arbitrary, Debug)]
 enum Nested {
     First(SameType),
     Second(ZeroOneTwo, OneTwo),
+}
+
+impl Nested {
+    fn payload_score(&self) -> usize {
+        match self {
+            Self::First(value) => value.payload_score(),
+            Self::Second(left, right) => left.width() + right.width(),
+        }
+    }
+}
+
+proptest! {
+    #[test]
+    fn generated_payload_fixtures_are_consumed(
+        alan: Alan,
+        same_type: SameType,
+        one_two: OneTwo,
+        zero_one_two: ZeroOneTwo,
+        nested: Nested,
+    ) {
+        prop_assert!(alan.payload_score() <= 6);
+        prop_assert!(same_type.payload_score() <= 2);
+        prop_assert!((1..=2).contains(&one_two.width()));
+        prop_assert!(zero_one_two.width() <= 2);
+        prop_assert!(nested.payload_score() <= 4);
+    }
 }
 
 #[test]
