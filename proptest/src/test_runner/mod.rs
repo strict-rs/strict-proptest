@@ -13,6 +13,8 @@
 //! when implementing new low-level strategies.
 
 mod config;
+#[cfg(feature = "std")]
+pub(crate) mod diagnostics;
 mod errors;
 mod failure_persistence;
 mod reason;

@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote_spanned};
-use syn::{FnArg, ItemFn, Meta, ReturnType, Type, spanned::Spanned};
+use syn::{FnArg, ItemFn, Meta, PatType, ReturnType, Type, spanned::Spanned};
 
 use super::utils::is_strategy;
 
@@ -71,42 +71,45 @@ fn validate_parameter_attrs(f: &mut ItemFn) -> Result<(), TokenStream> {
             });
         }
 
-        let mut first_strategy_seen = false;
-        let mut final_attrs = Vec::with_capacity(pat_ty.attrs.len());
-        let old_attrs = std::mem::take(&mut pat_ty.attrs);
-
-        // every strategy attr should have the form `#[strategy = <expr>]`
-        for attr in old_attrs.into_iter().filter(is_strategy) {
-            match attr.meta {
-                // a "good" strategy - if we see more than one, emit an error
-                Meta::NameValue(_) => {
-                    if first_strategy_seen {
-                        let pat =
-                            pat_ty.pat.clone().into_token_stream().to_string();
-                        let message = format!(
-                            "{pat} has duplicate `#[strategy = ...] attribute`"
-                        );
-                        error.extend(quote_spanned! {
-                            attr.span() => compile_error!(#message);
-                        });
-                    } else {
-                        final_attrs.push(attr);
-                        first_strategy_seen = true;
-                    }
-                }
-                _ => {
-                    error.extend(quote_spanned! {
-                        attr.meta.span() => compile_error!("`strategy` attributes must have the form `#[strategy = <expr>]`");
-                    });
-                    final_attrs.push(attr);
-                }
-            }
-        }
-
-        pat_ty.attrs = final_attrs;
+        retain_single_strategy_attr(pat_ty, &mut error);
     }
 
     if error.is_empty() { Ok(()) } else { Err(error) }
+}
+
+/// Keep the first well-formed `#[strategy = <expr>]` attribute on a
+/// parameter — a parameter has exactly one generation strategy — diagnosing
+/// duplicates and malformed shapes. Malformed attributes are retained so
+/// later stages still see them.
+fn retain_single_strategy_attr(pat_ty: &mut PatType, error: &mut TokenStream) {
+    let mut first_strategy_seen = false;
+    let mut final_attrs = Vec::with_capacity(pat_ty.attrs.len());
+    let old_attrs = std::mem::take(&mut pat_ty.attrs);
+
+    // every strategy attr should have the form `#[strategy = <expr>]`
+    for attr in old_attrs.into_iter().filter(is_strategy) {
+        if !matches!(attr.meta, Meta::NameValue(_)) {
+            error.extend(quote_spanned! {
+                attr.meta.span() => compile_error!("`strategy` attributes must have the form `#[strategy = <expr>]`");
+            });
+            final_attrs.push(attr);
+            continue;
+        }
+        if first_strategy_seen {
+            // a duplicate "good" strategy - emit an error
+            let pat = pat_ty.pat.clone().into_token_stream().to_string();
+            let message =
+                format!("{pat} has duplicate `#[strategy = ...] attribute`");
+            error.extend(quote_spanned! {
+                attr.span() => compile_error!(#message);
+            });
+            continue;
+        }
+        final_attrs.push(attr);
+        first_strategy_seen = true;
+    }
+
+    pat_ty.attrs = final_attrs;
 }
 
 /// Helper function to generate `compile_error!()` outputs

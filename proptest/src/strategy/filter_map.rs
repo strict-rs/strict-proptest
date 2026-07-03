@@ -60,9 +60,13 @@ impl<S: Strategy, F: Fn(S::Value) -> Option<O>, O: fmt::Debug> Strategy
 
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
         loop {
-            let val = self.source.new_tree(runner)?;
-            if let Some(current) = (self.fun)(val.current()) {
-                return Ok(FilterMapValueTree::new(val, &self.fun, current));
+            let source_tree = self.source.new_tree(runner)?;
+            if let Some(current) = (self.fun)(source_tree.current()) {
+                return Ok(FilterMapValueTree::new(
+                    source_tree,
+                    &self.fun,
+                    current,
+                ));
             } else {
                 runner.reject_local(self.whence.clone())?;
             }

@@ -94,6 +94,12 @@ macro_rules! float_sampler {
                 {
                     let low = low.borrow().0;
                     let high = high.borrow().0;
+                    if !(low.is_finite() && high.is_finite()) {
+                        return Err(rand::distr::uniform::Error::NonFinite);
+                    }
+                    if !(high - low > 0.) {
+                        return Err(rand::distr::uniform::Error::EmptyRange);
+                    }
                     Ok(FloatUniform {
                         low,
                         high,
@@ -109,6 +115,12 @@ macro_rules! float_sampler {
                 {
                     let low = low.borrow().0;
                     let high = high.borrow().0;
+                    if !(low.is_finite() && high.is_finite()) {
+                        return Err(rand::distr::uniform::Error::NonFinite);
+                    }
+                    if low > high {
+                        return Err(rand::distr::uniform::Error::EmptyRange);
+                    }
 
                     // A single-point inclusive range is well-defined and yields `low`.
                     let intervals = if low == high {
@@ -173,9 +185,12 @@ macro_rules! float_sampler {
             }
 
             fn split_interval([low, high]: [$typ; 2]) -> IntervalCollection {
-                    assert!(low.is_finite(), "low finite");
-                    assert!(high.is_finite(), "high finite");
-                    assert!(high - low > 0., "invalid range");
+                    // The `FloatUniform` constructors validate their bounds
+                    // and return typed errors before calling here, so these
+                    // are internal invariants rather than input checks.
+                    debug_assert!(low.is_finite(), "low finite");
+                    debug_assert!(high.is_finite(), "high finite");
+                    debug_assert!(high - low > 0., "invalid range");
 
                     let min_abs = $typ::min(low.abs(), high.abs());
                     let max_abs = $typ::max(low.abs(), high.abs());
@@ -255,6 +270,62 @@ macro_rules! float_sampler {
 
                 use super::*;
                 use crate::prelude::*;
+
+                #[test]
+                fn uniform_constructors_accept_valid_ranges()
+                -> Result<(), TestFailure> {
+                    ensure(
+                        FloatUniform::new($wrapper(1.), $wrapper(2.)).is_ok(),
+                        "new accepts a finite non-empty range",
+                    )?;
+                    ensure(
+                        FloatUniform::new_inclusive(
+                            $wrapper(1.),
+                            $wrapper(1.),
+                        )
+                        .is_ok(),
+                        "new_inclusive accepts a single-point range",
+                    )
+                }
+
+                #[test]
+                fn uniform_constructors_reject_invalid_ranges()
+                -> Result<(), TestFailure> {
+                    ensure(
+                        matches!(
+                            FloatUniform::new($wrapper(2.), $wrapper(1.)),
+                            Err(rand::distr::uniform::Error::EmptyRange)
+                        ),
+                        "new rejects a reversed range as empty",
+                    )?;
+                    ensure(
+                        matches!(
+                            FloatUniform::new($wrapper(1.), $wrapper(1.)),
+                            Err(rand::distr::uniform::Error::EmptyRange)
+                        ),
+                        "new rejects a single-point exclusive range as empty",
+                    )?;
+                    ensure(
+                        matches!(
+                            FloatUniform::new(
+                                $wrapper($typ::NAN),
+                                $wrapper(1.),
+                            ),
+                            Err(rand::distr::uniform::Error::NonFinite)
+                        ),
+                        "new rejects a non-finite bound",
+                    )?;
+                    ensure(
+                        matches!(
+                            FloatUniform::new_inclusive(
+                                $wrapper(2.),
+                                $wrapper(1.),
+                            ),
+                            Err(rand::distr::uniform::Error::EmptyRange)
+                        ),
+                        "new_inclusive rejects a reversed range as empty",
+                    )
+                }
 
                 fn sort((left, right): ($typ, $typ)) -> ($typ, $typ) {
                     if left < right {

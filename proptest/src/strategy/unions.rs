@@ -24,6 +24,62 @@ pub type W<T> = (u32, T);
 /// coupled with `Arc<T>`. The weight is currently given in `u32`.
 pub type WA<T> = (u32, Arc<T>);
 
+/// Error returned by the fallible [`Union`] constructors (and
+/// [`try_float_to_weight`]) when the requested option set cannot form a valid
+/// weighted union.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UnionBuildError {
+    /// No options were supplied; a union must have at least one.
+    Empty,
+    /// An option carried a relative weight of zero.
+    ZeroWeight,
+    /// The sum of all relative weights overflows a `u32`.
+    WeightSumOverflow,
+    /// A probability handed to [`try_float_to_weight`] was not a real number
+    /// strictly between 0.0 and 1.0.
+    InvalidProbability,
+}
+
+impl fmt::Display for UnionBuildError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Empty => write!(f, "Union must have at least one option"),
+            Self::ZeroWeight => write!(f, "Union option has a weight of 0"),
+            Self::WeightSumOverflow => {
+                write!(f, "Union weights overflow u32")
+            }
+            Self::InvalidProbability => {
+                write!(f, "probability must be within (0.0, 1.0) exclusive")
+            }
+        }
+    }
+}
+
+impl core::error::Error for UnionBuildError {}
+
+/// Validate the relative weights of a prospective union: at least one option,
+/// no zero weights, and a weight sum that fits in a `u32`.
+fn validate_weights<'a>(
+    weights: impl Iterator<Item = &'a u32>,
+) -> Result<(), UnionBuildError> {
+    let mut count = 0u64;
+    let mut sum = 0u64;
+    for &weight in weights {
+        if weight == 0 {
+            return Err(UnionBuildError::ZeroWeight);
+        }
+        count += 1;
+        sum += u64::from(weight);
+    }
+    if count == 0 {
+        return Err(UnionBuildError::Empty);
+    }
+    if sum > u64::from(u32::MAX) {
+        return Err(UnionBuildError::WeightSumOverflow);
+    }
+    Ok(())
+}
+
 /// A `Strategy` which picks from one of several delegate `Strategy`s.
 ///
 /// See `Strategy::prop_union()`.
@@ -45,12 +101,26 @@ impl<T: Strategy> Union<T> {
     ///
     /// ## Panics
     ///
-    /// Panics if `options` is empty.
+    /// Panics if `options` is empty. [`Union::try_new_uniform`] is the
+    /// fallible form.
     pub fn new(options: impl IntoIterator<Item = T>) -> Self {
+        match Self::try_new_uniform(options) {
+            Ok(union) => union,
+            Err(error) => panic!("{}", error),
+        }
+    }
+
+    /// Fallible form of [`Union::new`]: returns a typed error instead of
+    /// panicking when `options` is empty.
+    pub fn try_new_uniform(
+        options: impl IntoIterator<Item = T>,
+    ) -> Result<Self, UnionBuildError> {
         let options: Vec<WA<T>> =
             options.into_iter().map(|v| (1, Arc::new(v))).collect();
-        assert!(!options.is_empty());
-        Self { options }
+        if options.is_empty() {
+            return Err(UnionBuildError::Empty);
+        }
+        Ok(Self { options })
     }
 
     #[cfg(feature = "regex-syntax")]
@@ -77,20 +147,25 @@ impl<T: Strategy> Union<T> {
     /// Panics if `options` is empty or any element has a weight of 0.
     ///
     /// Panics if the sum of the weights overflows a `u32`.
+    ///
+    /// [`Union::try_new_weighted`] is the fallible form.
     pub fn new_weighted(options: Vec<W<T>>) -> Self {
-        assert!(!options.is_empty());
-        assert!(
-            !options.iter().any(|&(w, _)| 0 == w),
-            "Union option has a weight of 0"
-        );
-        assert!(
-            options.iter().map(|&(w, _)| u64::from(w)).sum::<u64>()
-                <= u64::from(u32::MAX),
-            "Union weights overflow u32"
-        );
+        match Self::try_new_weighted(options) {
+            Ok(union) => union,
+            Err(error) => panic!("{}", error),
+        }
+    }
+
+    /// Fallible form of [`Union::new_weighted`]: returns a typed error
+    /// instead of panicking when `options` is empty, an option's weight is
+    /// zero, or the weight sum overflows a `u32`.
+    pub fn try_new_weighted(
+        options: Vec<W<T>>,
+    ) -> Result<Self, UnionBuildError> {
+        validate_weights(options.iter().map(|(w, _)| w))?;
         let options =
             options.into_iter().map(|(w, v)| (w, Arc::new(v))).collect();
-        Self { options }
+        Ok(Self { options })
     }
 
     /// Add `other` as an additional alternate strategy with weight 1.
@@ -104,16 +179,21 @@ fn pick_weighted<I: Iterator<Item = u32>>(
     runner: &mut TestRunner,
     weights1: I,
     weights2: I,
-) -> usize {
+) -> Result<usize, Reason> {
     let sum = weights1.map(u64::from).sum();
+    if 0 == sum {
+        // `TupleUnion` accepts arbitrary weights, so an all-zero tuple can
+        // reach this point; sampling an empty range would panic inside rand.
+        return Err("all union weights are zero".into());
+    }
     let weighted_pick = sample_uniform(runner, 0, sum);
-    weights2
+    Ok(weights2
         .scan(0u64, |state, w| {
             *state += u64::from(w);
             Some(*state)
         })
         .filter(|&v| v <= weighted_pick)
-        .count()
+        .count())
 }
 
 impl<T: Strategy> Strategy for Union<T> {
@@ -129,21 +209,27 @@ impl<T: Strategy> Strategy for Union<T> {
             runner,
             self.options.iter().map(extract_weight::<T>),
             self.options.iter().map(extract_weight::<T>),
-        );
+        )?;
 
         let mut options = Vec::with_capacity(pick);
 
         // Delay initialization for all options less than pick.
-        for option in &self.options[0..pick] {
+        for option in self.options.iter().take(pick) {
             options.push(LazyValueTree::new(Arc::clone(&option.1), runner));
         }
 
         // Initialize the tree at pick so at least one value is available. Note
         // that if generation for the value at pick fails, the entire strategy
         // will fail. This seems like the right call.
-        options.push(LazyValueTree::new_initialized(
-            self.options[pick].1.new_tree(runner)?,
-        ));
+        //
+        // `pick_weighted` returns the index of one of the summed options, so
+        // the lookup cannot miss; an inconsistency aborts generation rather
+        // than panicking.
+        let picked = self.options.get(pick).ok_or_else(|| {
+            Reason::from("union pick out of range (internal invariant)")
+        })?;
+        options
+            .push(LazyValueTree::new_initialized(picked.1.new_tree(runner)?));
 
         Ok(UnionValueTree {
             options,
@@ -365,7 +451,7 @@ macro_rules! tuple_union {
             fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
                 let weights = [((self.0).0).0, $(((self.0).$ix).0),*];
                 let pick = pick_weighted(runner, weights.iter().cloned(),
-                                         weights.iter().cloned());
+                                         weights.iter().cloned())?;
 
                 Ok(TupleUnionValueTree {
                     options: (
@@ -451,20 +537,34 @@ const WEIGHT_BASE: u32 = 0x8000_0000;
 /// ## Panics
 ///
 /// Panics if `f` is not a real number between 0.0 and 1.0, both exclusive.
+/// [`try_float_to_weight`] is the fallible form.
 pub fn float_to_weight(f: f64) -> (u32, u32) {
-    assert!(f > 0.0 && f < 1.0, "Invalid probability: {}", f);
+    match try_float_to_weight(f) {
+        Ok(weights) => weights,
+        Err(error) => panic!("{}: {}", error, f),
+    }
+}
+
+/// Fallible form of [`float_to_weight`]: returns a typed error instead of
+/// panicking when `f` is not a real number strictly between 0.0 and 1.0.
+pub fn try_float_to_weight(f: f64) -> Result<(u32, u32), UnionBuildError> {
+    if !(f > 0.0 && f < 1.0) {
+        return Err(UnionBuildError::InvalidProbability);
+    }
 
     // Clamp to 1..WEIGHT_BASE-1 so that we never produce a weight of 0.
     let pos =
         ((f * f64::from(WEIGHT_BASE)).round() as u32).clamp(1, WEIGHT_BASE - 1);
     let neg = WEIGHT_BASE - pos;
 
-    (pos, neg)
+    Ok((pos, neg))
 }
 
 #[cfg(test)]
 mod test {
-    use strict_test_support::{TestFailure, ensure, ensure_some};
+    use strict_test_support::{
+        TestFailure, ensure, ensure_eq, ensure_ok, ensure_some,
+    };
 
     use super::*;
     use crate::strategy::just::Just;
@@ -698,6 +798,85 @@ mod test {
             )),
             None,
         );
+    }
+
+    #[test]
+    fn try_constructors_accept_valid_unions() -> Result<(), TestFailure> {
+        ensure(
+            Union::try_new_uniform(vec![Just(1usize), Just(2usize)]).is_ok(),
+            "try_new_uniform accepts a non-empty option list",
+        )?;
+        ensure(
+            Union::try_new_weighted(vec![(1, Just(0usize)), (3, Just(1))])
+                .is_ok(),
+            "try_new_weighted accepts positive weights",
+        )?;
+        let (pos, neg) = ensure_ok(
+            try_float_to_weight(0.25),
+            "try_float_to_weight accepts a probability inside (0, 1)",
+        )?;
+        ensure(
+            pos > 0 && neg > 0 && pos.checked_add(neg).is_some(),
+            "the produced weight pair is non-zero and does not overflow",
+        )
+    }
+
+    #[test]
+    fn try_constructors_reject_invalid_unions() -> Result<(), TestFailure> {
+        ensure_eq(
+            &ensure_some(
+                Union::<Just<usize>>::try_new_uniform(vec![]).err(),
+                "try_new_uniform rejects an empty option list",
+            )?,
+            &UnionBuildError::Empty,
+            "the empty union error names the violated invariant",
+        )?;
+        ensure_eq(
+            &ensure_some(
+                Union::try_new_weighted(vec![(0, Just(0usize))]).err(),
+                "try_new_weighted rejects a zero weight",
+            )?,
+            &UnionBuildError::ZeroWeight,
+            "the zero-weight error names the violated invariant",
+        )?;
+        ensure_eq(
+            &ensure_some(
+                Union::try_new_weighted(vec![
+                    (u32::MAX, Just(0usize)),
+                    (u32::MAX, Just(1)),
+                ])
+                .err(),
+                "try_new_weighted rejects an overflowing weight sum",
+            )?,
+            &UnionBuildError::WeightSumOverflow,
+            "the overflow error names the violated invariant",
+        )?;
+        ensure_eq(
+            &ensure_some(
+                try_float_to_weight(1.5).err(),
+                "try_float_to_weight rejects a probability outside (0, 1)",
+            )?,
+            &UnionBuildError::InvalidProbability,
+            "the probability error names the violated invariant",
+        )?;
+        ensure(
+            try_float_to_weight(f64::NAN).is_err(),
+            "try_float_to_weight rejects NaN",
+        )
+    }
+
+    #[test]
+    fn zero_weight_tuple_union_aborts_generation() -> Result<(), TestFailure> {
+        let input = TupleUnion::new((
+            (0, Arc::new(Just(0usize))),
+            (0, Arc::new(Just(1usize))),
+        ));
+        let mut runner = TestRunner::deterministic();
+        ensure(
+            input.new_tree(&mut runner).is_err(),
+            "an all-zero-weight tuple union reports a generation error \
+             instead of panicking",
+        )
     }
 
     /// Test that unions work even if local filtering causes errors.

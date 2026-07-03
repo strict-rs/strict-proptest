@@ -106,6 +106,9 @@ mod property_test;
 /// function returning `proptest::strict::TestResult` and running through
 /// `proptest::strict::ensure_property` is, however, part of the documented contract.
 #[proc_macro_attribute]
-pub fn property_test(attr: TokenStream, item: TokenStream) -> TokenStream {
-    property_test::property_test(attr.into(), item.into()).into()
+pub fn property_test(
+    attr: TokenStream,
+    annotated_fn: TokenStream,
+) -> TokenStream {
+    property_test::property_test(attr.into(), annotated_fn.into()).into()
 }

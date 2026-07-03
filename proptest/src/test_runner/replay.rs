@@ -53,7 +53,8 @@ impl Replay {
     pub fn merge(&mut self, other: &Replay) {
         if other.steps.len() > self.steps.len() {
             let sl = self.steps.len();
-            self.steps.extend_from_slice(&other.steps[sl..]);
+            self.steps
+                .extend_from_slice(other.steps.get(sl..).unwrap_or(&[]));
         }
     }
 }

@@ -23,6 +23,25 @@ impl Options {
     }
 }
 
+/// Validate a `proptest_path = <value>` attribute value: only a plain,
+/// qself-free path can name the proptest crate. Returns the path on success,
+/// or the spanned `compile_error!` statement to record as a recoverable
+/// diagnostic.
+fn parse_proptest_path(attr_value: &Expr) -> Result<Path, TokenStream> {
+    let bad_path = |span| {
+        quote_spanned!(span =>
+            compile_error!("argument to `proptest_path` must be a path to the proptest crate, e.g. `proptest_path = ::path::to::proptest`");
+        )
+    };
+    let Expr::Path(path) = attr_value else {
+        return Err(bad_path(attr_value.span()));
+    };
+    if path.qself.is_some() {
+        return Err(bad_path(attr_value.span()));
+    }
+    Ok(path.path.clone())
+}
+
 impl Parse for Options {
     // note: this impl takes only the contents of the attr, not the attr itself
     // e.g. it will get `foo = bar, baz = qux`, not `#[macro(foo = bar, baz = qux)]`
@@ -35,27 +54,23 @@ impl Parse for Options {
         let mut config = None;
         let mut proptest_path = None;
 
-        for MetaNameValue { path, value, .. } in pairs {
+        for MetaNameValue {
+            path,
+            value: attr_value,
+            ..
+        } in pairs
+        {
             let path_string = path.get_ident().map(Ident::to_string);
 
             match path_string.as_deref() {
                 None => errors.push(quote_spanned!(path.span() => compile_error!("unknown argument");)),
-                Some("config") => config = Some(value),
+                Some("config") => config = Some(attr_value),
                 Some("proptest_path") => {
-                    let Expr::Path(path) = &value else {
-                        errors.push(quote_spanned!(value.span() =>
-                            compile_error!("argument to `proptest_path` must be a path to the proptest crate, e.g. `proptest_path = ::path::to::proptest`");
-                        ));
-                        continue;
-                    };
-                    if path.qself.is_some() {
-                        errors.push(quote_spanned!(value.span() =>
-                            compile_error!("argument to `proptest_path` must be a path to the proptest crate, e.g. `proptest_path = ::path::to::proptest`");
-                        ));
-                        continue;
+                    match parse_proptest_path(&attr_value) {
+                        Ok(path) => proptest_path = Some(path),
+                        Err(error) => errors.push(error),
                     }
-                    proptest_path = Some(path.path.clone());
-                },
+                }
                 Some(other) => {
                     let error_message = format!("unknown argument: {other}");
                     let error_message = LitStr::new(&error_message, other.span());

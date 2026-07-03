@@ -113,25 +113,38 @@ fn select_range_index(
             .map(|r| (*r.start() as u32, ch as u32 - *r.start() as u32))
     }
 
+    // An empty `ranges` list cannot generate anything; degrade to the
+    // canonical ASCII simplification target instead of panicking.
+    let Some(first_range) = ranges.first() else {
+        return ('a' as u32, 0);
+    };
+
     if !special.is_empty() && rnd.random() {
-        let s = special[rnd.random_range(0..special.len())];
-        if let Some(ret) = in_range(ranges, s) {
+        let picked = special
+            .get(rnd.random_range(0..special.len()))
+            .and_then(|&s| in_range(ranges, s));
+        if let Some(ret) = picked {
             return ret;
         }
     }
 
     if !preferred.is_empty() && rnd.random() {
-        let range = preferred[rnd.random_range(0..preferred.len())].clone();
-        let selected = ::core::char::from_u32(
-            rnd.random_range(*range.start() as u32..*range.end() as u32 + 1),
-        );
+        let selected = preferred
+            .get(rnd.random_range(0..preferred.len()))
+            .and_then(|range| {
+                ::core::char::from_u32(rnd.random_range(
+                    *range.start() as u32..*range.end() as u32 + 1,
+                ))
+            });
         if let Some(ret) = selected.and_then(|ch| in_range(ranges, ch)) {
             return ret;
         }
     }
 
     for _ in 0..65_536 {
-        let range = ranges[rnd.random_range(0..ranges.len())].clone();
+        let Some(range) = ranges.get(rnd.random_range(0..ranges.len())) else {
+            continue;
+        };
         if let Some(ch) = ::core::char::from_u32(
             rnd.random_range(*range.start() as u32..*range.end() as u32 + 1),
         ) {
@@ -140,7 +153,7 @@ fn select_range_index(
     }
 
     // Give up and return a character we at least know is valid.
-    (*ranges[0].start() as u32, 0)
+    (*first_range.start() as u32, 0)
 }
 
 /// Strategy for generating `char`s.
@@ -443,5 +456,20 @@ mod test {
                 ..CheckStrategySanityOptions::default()
             }),
         );
+    }
+    #[test]
+    fn select_char_degrades_to_ascii_a_on_empty_ranges()
+    -> Result<(), TestFailure> {
+        let mut runner = crate::test_runner::TestRunner::deterministic();
+        let selected = select_char(runner.rng(), &['x'], &[], &[]);
+        ensure(
+            'a' == selected,
+            "an empty range list degrades to the canonical 'a' target",
+        )?;
+        let in_range = select_char(runner.rng(), &[], &[], &['p'..='t']);
+        ensure(
+            in_range >= 'p' && in_range <= 't',
+            "a non-empty range list still selects from the ranges",
+        )
     }
 }

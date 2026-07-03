@@ -21,8 +21,11 @@ macro_rules! parse {
     };
 }
 
-pub fn property_test(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let mut item_fn = parse!(item);
+pub fn property_test(
+    attr: TokenStream,
+    annotated_fn: TokenStream,
+) -> TokenStream {
+    let mut item_fn = parse!(annotated_fn);
     let options = parse!(attr);
 
     if let Err(compile_error) = validate(&mut item_fn) {

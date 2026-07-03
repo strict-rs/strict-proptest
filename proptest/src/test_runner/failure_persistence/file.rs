@@ -15,11 +15,11 @@ use std::env;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::string::String;
-use std::sync::RwLock;
+use std::string::{String, ToString};
 use std::vec::Vec;
 
 use self::FileFailurePersistence::*;
+use crate::test_runner::diagnostics::{self, RunnerDiagnostic};
 use crate::test_runner::failure_persistence::{
     FailurePersistence, PersistedSeed,
 };
@@ -91,8 +91,11 @@ impl FailurePersistence for FileFailurePersistence {
         let result: io::Result<Vec<PersistedSeed>> = path.map_or_else(
             || Ok(vec![]),
             |path| {
-                // .ok() instead of .unwrap() so we don't propagate panics here
-                let _lock = PERSISTENCE_LOCK.read().ok();
+                // Reads run unserialized against concurrent appends: every
+                // record is appended as one whole line, and a torn or
+                // in-flight trailing line is skipped by `parse_seed_line`
+                // (with a warning), so the worst case is missing a seed that
+                // was persisted mid-load.
                 io::BufReader::new(fs::File::open(path)?)
                     .lines()
                     .enumerate()
@@ -106,13 +109,10 @@ impl FailurePersistence for FileFailurePersistence {
 
         unwrap_or!(result, err => {
             if io::ErrorKind::NotFound != err.kind() {
-                eprintln!(
-                    "proptest: failed to open {}: {}",
-                    path.map(PathBuf::as_path)
-                        .unwrap_or_else(|| Path::new("??"))
-                        .display(),
-                    err
-                );
+                diagnostics::emit(RunnerDiagnostic::PersistenceOpenFailed {
+                    path: path.cloned(),
+                    error: err,
+                });
             }
             vec![]
         })
@@ -126,39 +126,24 @@ impl FailurePersistence for FileFailurePersistence {
     ) {
         let path = self.resolve(source_file.map(Path::new));
         if let Some(path) = path {
-            // .ok() instead of .unwrap() so we don't propagate panics here
-            let _lock = PERSISTENCE_LOCK.write().ok();
-            let is_new = !path.is_file();
+            let line = seed_line(&seed, shrunken_value);
 
-            let mut to_write = Vec::<u8>::new();
-            if is_new {
-                write_header(&mut to_write)
-                    .expect("proptest: couldn't write header.");
-            }
-
-            write_seed_line(&mut to_write, &seed, shrunken_value)
-                .expect("proptest: couldn't write seed line.");
-
-            if let Err(e) = write_seed_data_to_file(&path, &to_write) {
-                eprintln!(
-                    "proptest: failed to append to {}: {}",
-                    path.display(),
-                    e
-                );
-            } else {
-                eprintln!(
-                    "proptest: Saving this and future failures in {}\n\
-                     proptest: If this test was run on a CI system, you may \
-                     wish to add the following line to your copy of the file.{}\n\
-                     {}",
-                    path.display(),
-                    if is_new {
-                        " (You may need to create it.)"
-                    } else {
-                        ""
-                    },
-                    seed
-                );
+            match write_seed_data_to_file(&path, line.as_bytes()) {
+                Err(e) => {
+                    diagnostics::emit(
+                        RunnerDiagnostic::PersistenceAppendFailed {
+                            path,
+                            error: e,
+                        },
+                    );
+                }
+                Ok(is_new) => {
+                    diagnostics::emit(RunnerDiagnostic::PersistenceSaved {
+                        path,
+                        created: is_new,
+                        seed: seed.to_string(),
+                    });
+                }
             }
         }
     }
@@ -225,24 +210,20 @@ fn absolutize_source_file_with_cwd<'a>(
                 }
 
                 if !cwd.pop() {
-                    eprintln!(
-                        "proptest: Failed to find absolute path of \
-                         source file '{:?}'. Ensure the test is \
-                         being run from somewhere within the crate \
-                         directory hierarchy.",
-                        source
+                    diagnostics::emit(
+                        RunnerDiagnostic::SourceNotAbsolutizable {
+                            source: source.to_path_buf(),
+                        },
                     );
                     break None;
                 }
             },
 
             Err(e) => {
-                eprintln!(
-                    "proptest: Failed to determine current \
-                     directory, so the relative source path \
-                     '{:?}' cannot be resolved: {}",
-                    source, e
-                );
+                diagnostics::emit(RunnerDiagnostic::CwdUnresolvable {
+                    source: source.to_path_buf(),
+                    error: e,
+                });
                 None
             }
         }
@@ -250,23 +231,22 @@ fn absolutize_source_file_with_cwd<'a>(
 }
 
 fn parse_seed_line(
-    mut line: String,
+    line: String,
     path: &Path,
     lineno: usize,
 ) -> Option<PersistedSeed> {
-    // Remove anything after and including '#':
-    if let Some(comment_start) = line.find('#') {
-        line.truncate(comment_start);
-    }
+    // Everything from the first '#' on is a comment:
+    let seed_text = line
+        .split_once('#')
+        .map_or(line.as_str(), |(seed_text, _comment)| seed_text);
 
-    if !line.is_empty() {
-        let ret = line.parse::<PersistedSeed>().ok();
+    if !seed_text.is_empty() {
+        let ret = seed_text.parse::<PersistedSeed>().ok();
         if ret.is_none() {
-            eprintln!(
-                "proptest: {}:{}: unparsable line, ignoring",
-                path.display(),
-                lineno + 1
-            );
+            diagnostics::emit(RunnerDiagnostic::UnparsableSeedLine {
+                path: path.to_path_buf(),
+                line: lineno + 1,
+            });
         }
         return ret;
     }
@@ -274,54 +254,102 @@ fn parse_seed_line(
     None
 }
 
-fn write_seed_line(
-    buf: &mut Vec<u8>,
-    seed: &PersistedSeed,
-    shrunken_value: &dyn Debug,
-) -> io::Result<()> {
-    // Write the seed itself
-    write!(buf, "{}", seed)?;
-
-    // Write out comment:
-    let debug_start = buf.len();
-    write!(buf, " # shrinks to {:?}", shrunken_value)?;
-
-    // Ensure there are no newlines in the debug output
-    for byte in &mut buf[debug_start..] {
-        if b'\n' == *byte || b'\r' == *byte {
-            *byte = b' ';
-        }
-    }
-
-    buf.push(b'\n');
-
-    Ok(())
+/// Render one persistence record: the seed, a `#` comment carrying the
+/// minimized value's `Debug` (newlines flattened to spaces so the record
+/// stays a single line), and the trailing newline.
+fn seed_line(seed: &PersistedSeed, shrunken_value: &dyn Debug) -> String {
+    let comment = format!(" # shrinks to {:?}", shrunken_value)
+        .replace(['\n', '\r'], " ");
+    format!("{}{}\n", seed, comment)
 }
 
-fn write_header(buf: &mut Vec<u8>) -> io::Result<()> {
-    writeln!(
-        buf,
-        "\
+/// The explanatory comment block written once at the top of a new
+/// persistence file. Every line starts with `#`, so `parse_seed_line`
+/// skips it on read.
+const FILE_HEADER: &str = "\
 # Seeds for failure cases proptest has generated in the past. It is
 # automatically read and these particular cases re-run before any
 # novel cases are generated.
 #
 # It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases."
-    )
-}
+# everyone who runs the test benefits from these saved cases.
+";
 
-fn write_seed_data_to_file(dst: &Path, data: &[u8]) -> io::Result<()> {
+/// Append one whole record to the persistence file, writing the header
+/// first when this call creates the file.
+///
+/// Returns whether the file was newly created.
+///
+/// Concurrency design (this replaces an in-process lock): the header is
+/// claimed via `create_new`, which is atomic at the OS level, so exactly
+/// one writer — in this process or any other — writes it. Every append is
+/// a single `write_all` of one or two whole lines on an append-mode
+/// handle, and the read side skips torn or foreign trailing lines, so
+/// concurrent appends need no further serialization.
+fn write_seed_data_to_file(dst: &Path, seed_data: &[u8]) -> io::Result<bool> {
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
 
-    let mut options = fs::OpenOptions::new();
-    options.append(true).create(true);
-    let mut out = options.open(dst)?;
-    out.write_all(data)?;
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dst)
+    {
+        Ok(mut out) => {
+            let mut record =
+                Vec::with_capacity(FILE_HEADER.len() + seed_data.len());
+            record.extend_from_slice(FILE_HEADER.as_bytes());
+            record.extend_from_slice(seed_data);
+            out.write_all(&record)?;
+            Ok(true)
+        }
+        Err(e) if io::ErrorKind::AlreadyExists == e.kind() => {
+            let mut out = fs::OpenOptions::new().append(true).open(dst)?;
+            out.write_all(seed_data)?;
+            Ok(false)
+        }
+        Err(e) => Err(e),
+    }
+}
 
-    Ok(())
+/// Walk upward from a source file to the directory that contains the crate
+/// root (`lib.rs` or `main.rs`) — the anchor `SourceParallel` mirrors its
+/// sibling tree against. `None` when no crate root exists above the file.
+fn crate_root_dir_above(source_path: &Path) -> Option<PathBuf> {
+    let mut dir = source_path.to_path_buf();
+    while dir.pop() {
+        if dir.join("lib.rs").is_file() || dir.join("main.rs").is_file() {
+            return Some(dir);
+        }
+    }
+    None
+}
+
+/// Resolve the `SourceParallel` path strategy: mirror the source file's
+/// relative path into the `sibling` directory beside the crate root, with
+/// the extension changed to `.txt`; fall back to `WithSource` when no crate
+/// root is found above the source file.
+fn resolve_source_parallel(
+    sibling: &'static str,
+    source_path: &Cow<'_, Path>,
+) -> Option<PathBuf> {
+    let Some(dir) = crate_root_dir_above(source_path) else {
+        diagnostics::emit(RunnerDiagnostic::SourceParallelRootless);
+        return WithSource(sibling).resolve(Some(source_path.as_ref()));
+    };
+    let suffix = source_path
+        .strip_prefix(&dir)
+        .expect("parent of source is not a prefix of it?")
+        .to_owned();
+    let mut result = dir;
+    // If we've somehow reached the root, or someone gave us a relative path
+    // that we've exhausted, just accept creating a subdirectory instead.
+    let _ = result.pop();
+    result.push(sibling);
+    result.push(&suffix);
+    result.set_extension("txt");
+    Some(result)
 }
 
 impl FileFailurePersistence {
@@ -335,43 +363,11 @@ impl FileFailurePersistence {
 
             SourceParallel(sibling) => match source {
                 Some(source_path) => {
-                    let mut dir = Cow::into_owned(source_path.clone());
-                    let mut found = false;
-                    while dir.pop() {
-                        if dir.join("lib.rs").is_file()
-                            || dir.join("main.rs").is_file()
-                        {
-                            found = true;
-                            break;
-                        }
-                    }
-
-                    if !found {
-                        eprintln!(
-                            "proptest: FileFailurePersistence::SourceParallel set, \
-                             but failed to find lib.rs or main.rs"
-                        );
-                        WithSource(sibling).resolve(Some(source_path.as_ref()))
-                    } else {
-                        let suffix = source_path
-                            .strip_prefix(&dir)
-                            .expect("parent of source is not a prefix of it?")
-                            .to_owned();
-                        let mut result = dir;
-                        // If we've somehow reached the root, or someone gave
-                        // us a relative path that we've exhausted, just accept
-                        // creating a subdirectory instead.
-                        let _ = result.pop();
-                        result.push(sibling);
-                        result.push(&suffix);
-                        result.set_extension("txt");
-                        Some(result)
-                    }
+                    resolve_source_parallel(sibling, &source_path)
                 }
                 None => {
-                    eprintln!(
-                        "proptest: FileFailurePersistence::SourceParallel set, \
-                         but no source file known"
+                    diagnostics::emit(
+                        RunnerDiagnostic::SourceParallelSourceless,
                     );
                     None
                 }
@@ -385,10 +381,7 @@ impl FileFailurePersistence {
                 }
 
                 None => {
-                    eprintln!(
-                        "proptest: FileFailurePersistence::WithSource set, \
-                         but no source file known"
-                    );
+                    diagnostics::emit(RunnerDiagnostic::WithSourceSourceless);
                     None
                 }
             },
@@ -398,18 +391,12 @@ impl FileFailurePersistence {
     }
 }
 
-/// Used to guard access to the persistence file(s) so that a single
-/// process will not step on its own toes.
-///
-/// We don't have much protecting us should two separate process try to
-/// write to the same file at once (depending on how atomic append mode is
-/// on the OS), but this should be extremely rare.
-static PERSISTENCE_LOCK: RwLock<()> = RwLock::new(());
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use strict_test_support::{TestFailure, ensure, ensure_some};
+    use strict_test_support::{
+        TempDir, TestFailure, ensure, ensure_ok, ensure_some,
+    };
 
     struct TestPaths {
         crate_root: &'static Path,
@@ -546,6 +533,141 @@ mod tests {
         ensure(
             expected.as_path() == from_subdir.as_ref(),
             "a subdirectory cwd pops up to the manifest path",
+        )
+    }
+
+    /// Parse every seed line in the file at `path`, skipping header and
+    /// unparsable lines exactly as the load path does.
+    fn read_persisted_seeds(
+        path: &Path,
+    ) -> Result<Vec<PersistedSeed>, TestFailure> {
+        let contents = ensure_ok(
+            std::fs::read_to_string(path),
+            "the persistence file is readable",
+        )?;
+        Ok(contents
+            .lines()
+            .enumerate()
+            .filter_map(|(lineno, line)| {
+                parse_seed_line(line.to_owned(), path, lineno)
+            })
+            .collect())
+    }
+
+    fn sample_seed(wire: &'static str) -> Result<PersistedSeed, TestFailure> {
+        ensure_some(
+            wire.parse::<PersistedSeed>().ok(),
+            "the sample wire seed parses",
+        )
+    }
+
+    #[test]
+    fn new_file_gets_exactly_one_header_and_appends_stay_headerless()
+    -> Result<(), TestFailure> {
+        let dir = TempDir::new("persistence-header")?;
+        let path = dir.child("regressions.txt");
+
+        let first = sample_seed("xs 1 2 3 4")?;
+        let second = sample_seed("xs 5 6 7 8")?;
+
+        let created = ensure_ok(
+            write_seed_data_to_file(
+                &path,
+                seed_line(&first, &"first").as_bytes(),
+            ),
+            "the first save succeeds",
+        )?;
+        ensure(created, "the first save reports the file as new")?;
+
+        let appended = ensure_ok(
+            write_seed_data_to_file(
+                &path,
+                seed_line(&second, &"second").as_bytes(),
+            ),
+            "the second save succeeds",
+        )?;
+        ensure(!appended, "the second save appends to the existing file")?;
+
+        let contents = ensure_ok(
+            std::fs::read_to_string(&path),
+            "the persistence file is readable",
+        )?;
+        ensure(
+            contents.matches("# Seeds for failure cases").count() == 1,
+            "the header is written exactly once",
+        )?;
+
+        let seeds = read_persisted_seeds(&path)?;
+        ensure(
+            seeds == vec![first, second],
+            "both persisted seeds read back in order",
+        )
+    }
+
+    #[test]
+    fn preexisting_file_is_never_reheadered() -> Result<(), TestFailure> {
+        let dir = TempDir::new("persistence-existing")?;
+        let path = dir.child("regressions.txt");
+        ensure_ok(
+            std::fs::write(&path, ""),
+            "pre-creating the persistence file succeeds",
+        )?;
+
+        let seed = sample_seed("xs 9 10 11 12")?;
+        let created = ensure_ok(
+            write_seed_data_to_file(
+                &path,
+                seed_line(&seed, &"value").as_bytes(),
+            ),
+            "saving into the pre-existing file succeeds",
+        )?;
+        ensure(!created, "a pre-existing file is not treated as new")?;
+
+        let contents = ensure_ok(
+            std::fs::read_to_string(&path),
+            "the persistence file is readable",
+        )?;
+        ensure(
+            !contents.contains("# Seeds for failure cases"),
+            "no header is added to a file this save did not create",
+        )?;
+        let seeds = read_persisted_seeds(&path)?;
+        ensure(seeds == vec![seed], "the appended seed reads back")
+    }
+
+    #[test]
+    fn torn_or_garbage_lines_are_skipped_on_read() -> Result<(), TestFailure> {
+        let dir = TempDir::new("persistence-torn")?;
+        let path = dir.child("regressions.txt");
+
+        let seed = sample_seed("xs 13 14 15 16")?;
+        ensure_ok(
+            write_seed_data_to_file(
+                &path,
+                seed_line(&seed, &"value").as_bytes(),
+            ),
+            "the initial save succeeds",
+        )?;
+        // Simulate a torn concurrent append: a trailing half-record with
+        // no terminating newline.
+        ensure_ok(
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .and_then(|mut f| f.write_all(b"cc deadbe")),
+            "appending the torn suffix succeeds",
+        )?;
+
+        let seeds = read_persisted_seeds(&path)?;
+        ensure(
+            seeds == vec![seed.clone()],
+            "the valid seed survives and the torn line is skipped",
+        )?;
+
+        let flattened = seed_line(&seed, &"multi\nline\rdebug");
+        ensure(
+            !flattened.trim_end_matches('\n').contains(['\n', '\r']),
+            "seed_line flattens newlines so a record stays one line",
         )
     }
 }

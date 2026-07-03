@@ -136,7 +136,7 @@ impl BitSetLike for Vec<bool> {
     }
 
     fn test(&self, bit: usize) -> bool {
-        if bit >= self.len() { false } else { self[bit] }
+        self.get(bit).copied().unwrap_or(false)
     }
 
     fn set(&mut self, bit: usize) {
@@ -144,12 +144,14 @@ impl BitSetLike for Vec<bool> {
             self.resize(bit + 1, false);
         }
 
-        self[bit] = true;
+        if let Some(slot) = self.get_mut(bit) {
+            *slot = true;
+        }
     }
 
     fn clear(&mut self, bit: usize) {
-        if bit < self.len() {
-            self[bit] = false;
+        if let Some(slot) = self.get_mut(bit) {
+            *slot = false;
         }
     }
 
@@ -233,6 +235,43 @@ pub struct SampledBitSetStrategy<T: BitSetLike> {
     _marker: PhantomData<T>,
 }
 
+/// Error returned by [`SampledBitSetStrategy::try_new`] when the requested
+/// size and bit ranges cannot form a valid sampling strategy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SampledBitsError {
+    /// The requested size range is empty.
+    EmptySizeRange(crate::collection::EmptySizeRange),
+    /// The requested sample size exceeds the number of available bits.
+    NotEnoughBits {
+        /// Number of bits available in the bit range.
+        available: usize,
+        /// Start of the requested size range.
+        size_start: usize,
+        /// Exclusive end of the requested size range.
+        size_end_excl: usize,
+    },
+}
+
+impl fmt::Display for SampledBitsError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::EmptySizeRange(inner) => inner.fmt(f),
+            Self::NotEnoughBits {
+                available,
+                size_start,
+                size_end_excl,
+            } => write!(
+                f,
+                "Illegal SampledBitSetStrategy: have {} bits available, \
+                 but requested size is {}..{}",
+                available, size_start, size_end_excl
+            ),
+        }
+    }
+}
+
+impl core::error::Error for SampledBitsError {}
+
 impl<T: BitSetLike> SampledBitSetStrategy<T> {
     /// Create a strategy which generates values where bits within the bounds
     /// given by `bits` may be set. The number of bits that are set is chosen
@@ -244,26 +283,40 @@ impl<T: BitSetLike> SampledBitSetStrategy<T> {
     /// ## Panics
     ///
     /// Panics if `size` includes a value that is greater than the number of
-    /// bits in `bits`.
+    /// bits in `bits`. [`SampledBitSetStrategy::try_new`] is the fallible
+    /// form.
     pub fn new(size: impl Into<SizeRange>, bits: impl Into<SizeRange>) -> Self {
+        match Self::try_new(size, bits) {
+            Ok(strategy) => strategy,
+            Err(error) => panic!("{}", error),
+        }
+    }
+
+    /// Fallible form of [`SampledBitSetStrategy::new`]: returns a typed
+    /// error instead of panicking when `size` is empty or requests more bits
+    /// than `bits` makes available.
+    pub fn try_new(
+        size: impl Into<SizeRange>,
+        bits: impl Into<SizeRange>,
+    ) -> Result<Self, SampledBitsError> {
         let size = size.into();
         let bits = bits.into();
-        size.assert_nonempty();
+        size.ensure_nonempty()
+            .map_err(SampledBitsError::EmptySizeRange)?;
 
         let available_bits = bits.end_excl() - bits.start();
-        assert!(
-            size.end_excl() <= available_bits + 1,
-            "Illegal SampledBitSetStrategy: have {} bits available, \
-             but requested size is {}..{}",
-            available_bits,
-            size.start(),
-            size.end_excl()
-        );
-        SampledBitSetStrategy {
+        if size.end_excl() > available_bits + 1 {
+            return Err(SampledBitsError::NotEnoughBits {
+                available: available_bits,
+                size_start: size.start(),
+                size_end_excl: size.end_excl(),
+            });
+        }
+        Ok(SampledBitSetStrategy {
             size,
             bits,
             _marker: PhantomData,
-        }
+        })
     }
 }
 
@@ -279,7 +332,10 @@ impl<T: BitSetLike> Strategy for SampledBitSetStrategy<T> {
             self.size.end_incl(),
         );
         if bits.len() < count {
-            panic!("not enough bits to sample");
+            // Reachable only when the concrete `BitSetLike` cannot represent
+            // the requested bit range (e.g. sampling 20 bits from a `u8`);
+            // report a generation failure instead of panicking.
+            return Err("not enough bits to sample".into());
         }
 
         for bit in self.bits.iter().sample(runner.rng(), count) {
@@ -537,6 +593,68 @@ mod test {
     use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
 
     use super::*;
+
+    #[test]
+    fn try_new_accepts_a_satisfiable_sample_request() -> Result<(), TestFailure>
+    {
+        let strategy = ensure_some(
+            SampledBitSetStrategy::<u32>::try_new(2..=4, 0..8).ok(),
+            "try_new accepts a size range covered by the bit range",
+        )?;
+        let mut runner = TestRunner::deterministic();
+        let value = ensure_some(
+            strategy.new_tree(&mut runner).ok(),
+            "the fallibly constructed strategy generates",
+        )?
+        .current();
+        let count = value.count_ones() as usize;
+        ensure(
+            (2..=4).contains(&count),
+            "the sampled bit count honors the size range",
+        )
+    }
+
+    #[test]
+    fn try_new_rejects_unsatisfiable_sample_requests() -> Result<(), TestFailure>
+    {
+        ensure(
+            matches!(
+                SampledBitSetStrategy::<u32>::try_new(4..4, 0..8),
+                Err(SampledBitsError::EmptySizeRange(_))
+            ),
+            "try_new rejects an empty size range with the typed error",
+        )?;
+        let error = ensure_some(
+            SampledBitSetStrategy::<u32>::try_new(0..=9, 0..8).err(),
+            "try_new rejects a size range exceeding the available bits",
+        )?;
+        ensure_eq(
+            &error,
+            &SampledBitsError::NotEnoughBits {
+                available: 8,
+                size_start: 0,
+                size_end_excl: 10,
+            },
+            "the typed error names the available and requested sizes",
+        )
+    }
+
+    #[test]
+    fn undersized_bitset_reports_generation_failure() -> Result<(), TestFailure>
+    {
+        // `u8` can only represent 8 bits, but the bit range requests 20; the
+        // constructor cannot see the concrete capacity, so generation reports
+        // a typed failure instead of panicking.
+        let strategy = ensure_some(
+            SampledBitSetStrategy::<u8>::try_new(16..=16, 0..20).ok(),
+            "the constructor accepts a range the type cannot represent",
+        )?;
+        let mut runner = TestRunner::deterministic();
+        ensure(
+            strategy.new_tree(&mut runner).is_err(),
+            "generation reports the capacity shortfall as an error",
+        )
+    }
 
     #[test]
     fn generates_values_in_range() -> Result<(), TestFailure> {
@@ -818,5 +936,34 @@ mod test {
             u128::masked(0xdeadbeef_cafebabe_12345678_9abcdef0),
             None,
         );
+    }
+    #[test]
+    fn vec_bool_bitset_ops_are_bounds_checked() -> Result<(), TestFailure> {
+        let mut bits = vec![false; 4];
+        BitSetLike::set(&mut bits, 2);
+        ensure(
+            BitSetLike::test(&bits, 2),
+            "an in-bounds set bit reads back",
+        )?;
+        BitSetLike::clear(&mut bits, 2);
+        ensure(
+            !BitSetLike::test(&bits, 2),
+            "an in-bounds cleared bit reads back cleared",
+        )?;
+        ensure(
+            !BitSetLike::test(&bits, 100),
+            "an out-of-bounds test reads as unset instead of panicking",
+        )?;
+        BitSetLike::clear(&mut bits, 100);
+        ensure_eq(
+            &4,
+            &BitSetLike::len(&bits),
+            "an out-of-bounds clear leaves the length unchanged",
+        )?;
+        BitSetLike::set(&mut bits, 6);
+        ensure(
+            BitSetLike::test(&bits, 6),
+            "an out-of-len set grows the vector, matching its resize contract",
+        )
     }
 }

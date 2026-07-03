@@ -106,20 +106,48 @@ impl SizeRange {
         self.start() == self.end_excl()
     }
 
-    pub(crate) fn assert_nonempty(&self) {
+    /// Validate that this size range is non-empty, naming the violated
+    /// invariant as a typed error instead of panicking.
+    pub(crate) fn ensure_nonempty(&self) -> Result<(), EmptySizeRange> {
         if self.is_empty() {
-            panic!(
-                "Invalid use of empty size range. (hint: did you \
-                 accidentally write {}..{} where you meant {}..={} \
-                 somewhere?)",
-                self.start(),
-                self.end_excl(),
-                self.start(),
-                self.end_excl()
-            );
+            Err(EmptySizeRange {
+                start: self.start(),
+                end_excl: self.end_excl(),
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn assert_nonempty(&self) {
+        if let Err(error) = self.ensure_nonempty() {
+            panic!("{}", error);
         }
     }
 }
+
+/// Error returned by the fallible collection-strategy constructors (and other
+/// size-driven strategy constructors) when the requested size range is empty,
+/// for example `0..0`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmptySizeRange {
+    start: usize,
+    end_excl: usize,
+}
+
+impl fmt::Display for EmptySizeRange {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Invalid use of empty size range. (hint: did you \
+             accidentally write {}..{} where you meant {}..={} \
+             somewhere?)",
+            self.start, self.end_excl, self.start, self.end_excl
+        )
+    }
+}
+
+impl core::error::Error for EmptySizeRange {}
 
 /// Given `(low: usize, high: usize)`,
 /// then a size range of `[low..high)` is the result.
@@ -210,6 +238,17 @@ pub fn vec<T: Strategy>(
     VecStrategy { element, size }
 }
 
+/// Fallible form of [`vec`]: returns a typed [`EmptySizeRange`] error instead
+/// of panicking when `size` is an empty range.
+pub fn try_vec<T: Strategy>(
+    element: T,
+    size: impl Into<SizeRange>,
+) -> Result<VecStrategy<T>, EmptySizeRange> {
+    let size = size.into();
+    size.ensure_nonempty()?;
+    Ok(VecStrategy { element, size })
+}
+
 mapfn! {
     [] fn VecToDeque[<T : fmt::Debug>](vec: Vec<T>) -> VecDeque<T> {
         vec.into()
@@ -240,6 +279,18 @@ pub fn vec_deque<T: Strategy>(
     VecDequeStrategy(statics::Map::new(vec(element, size), VecToDeque))
 }
 
+/// Fallible form of [`vec_deque`]: returns a typed [`EmptySizeRange`] error
+/// instead of panicking when `size` is an empty range.
+pub fn try_vec_deque<T: Strategy>(
+    element: T,
+    size: impl Into<SizeRange>,
+) -> Result<VecDequeStrategy<T>, EmptySizeRange> {
+    Ok(VecDequeStrategy(statics::Map::new(
+        try_vec(element, size)?,
+        VecToDeque,
+    )))
+}
+
 mapfn! {
     [] fn VecToLl[<T : fmt::Debug>](vec: Vec<T>) -> LinkedList<T> {
         vec.into_iter().collect()
@@ -268,6 +319,18 @@ pub fn linked_list<T: Strategy>(
     size: impl Into<SizeRange>,
 ) -> LinkedListStrategy<T> {
     LinkedListStrategy(statics::Map::new(vec(element, size), VecToLl))
+}
+
+/// Fallible form of [`linked_list`]: returns a typed [`EmptySizeRange`] error
+/// instead of panicking when `size` is an empty range.
+pub fn try_linked_list<T: Strategy>(
+    element: T,
+    size: impl Into<SizeRange>,
+) -> Result<LinkedListStrategy<T>, EmptySizeRange> {
+    Ok(LinkedListStrategy(statics::Map::new(
+        try_vec(element, size)?,
+        VecToLl,
+    )))
 }
 
 mapfn! {
@@ -301,6 +364,21 @@ where
     T::Value: Ord,
 {
     BinaryHeapStrategy(statics::Map::new(vec(element, size), VecToBinHeap))
+}
+
+/// Fallible form of [`binary_heap`]: returns a typed [`EmptySizeRange`] error
+/// instead of panicking when `size` is an empty range.
+pub fn try_binary_heap<T: Strategy>(
+    element: T,
+    size: impl Into<SizeRange>,
+) -> Result<BinaryHeapStrategy<T>, EmptySizeRange>
+where
+    T::Value: Ord,
+{
+    Ok(BinaryHeapStrategy(statics::Map::new(
+        try_vec(element, size)?,
+        VecToBinHeap,
+    )))
 }
 
 mapfn! {
@@ -361,6 +439,25 @@ where
     ))
 }
 
+/// Fallible form of [`hash_set`]: returns a typed [`EmptySizeRange`] error
+/// instead of panicking when `size` is an empty range.
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+pub fn try_hash_set<T: Strategy>(
+    element: T,
+    size: impl Into<SizeRange>,
+) -> Result<HashSetStrategy<T>, EmptySizeRange>
+where
+    T::Value: Hash + Eq,
+{
+    let size = size.into();
+    Ok(HashSetStrategy(statics::Filter::new(
+        statics::Map::new(try_vec(element, size.clone())?, VecToHashSet),
+        "HashSet minimum size".into(),
+        MinSize(size.start()),
+    )))
+}
+
 mapfn! {
     [] fn VecToBTreeSet[<T : fmt::Debug + Ord>](vec: Vec<T>)
                                                 -> BTreeSet<T> {
@@ -408,6 +505,23 @@ where
         "BTreeSet minimum size".into(),
         MinSize(size.start()),
     ))
+}
+
+/// Fallible form of [`btree_set`]: returns a typed [`EmptySizeRange`] error
+/// instead of panicking when `size` is an empty range.
+pub fn try_btree_set<T: Strategy>(
+    element: T,
+    size: impl Into<SizeRange>,
+) -> Result<BTreeSetStrategy<T>, EmptySizeRange>
+where
+    T::Value: Ord,
+{
+    let size = size.into();
+    Ok(BTreeSetStrategy(statics::Filter::new(
+        statics::Map::new(try_vec(element, size.clone())?, VecToBTreeSet),
+        "BTreeSet minimum size".into(),
+        MinSize(size.start()),
+    )))
 }
 
 mapfn! {
@@ -458,7 +572,7 @@ opaque_strategy_wrapper! {
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub fn hash_map<K: Strategy, V: Strategy>(
     key: K,
-    value: V,
+    value_strategy: V,
     size: impl Into<SizeRange>,
 ) -> HashMapStrategy<K, V>
 where
@@ -466,10 +580,36 @@ where
 {
     let size = size.into();
     HashMapStrategy(statics::Filter::new(
-        statics::Map::new(vec((key, value), size.clone()), VecToHashMap),
+        statics::Map::new(
+            vec((key, value_strategy), size.clone()),
+            VecToHashMap,
+        ),
         "HashMap minimum size".into(),
         MinSize(size.start()),
     ))
+}
+
+/// Fallible form of [`hash_map`]: returns a typed [`EmptySizeRange`] error
+/// instead of panicking when `size` is an empty range.
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+pub fn try_hash_map<K: Strategy, V: Strategy>(
+    key: K,
+    value_strategy: V,
+    size: impl Into<SizeRange>,
+) -> Result<HashMapStrategy<K, V>, EmptySizeRange>
+where
+    K::Value: Hash + Eq,
+{
+    let size = size.into();
+    Ok(HashMapStrategy(statics::Filter::new(
+        statics::Map::new(
+            try_vec((key, value_strategy), size.clone())?,
+            VecToHashMap,
+        ),
+        "HashMap minimum size".into(),
+        MinSize(size.start()),
+    )))
 }
 
 mapfn! {
@@ -514,7 +654,7 @@ opaque_strategy_wrapper! {
 /// should produce duplicate values.
 pub fn btree_map<K: Strategy, V: Strategy>(
     key: K,
-    value: V,
+    value_strategy: V,
     size: impl Into<SizeRange>,
 ) -> BTreeMapStrategy<K, V>
 where
@@ -522,10 +662,34 @@ where
 {
     let size = size.into();
     BTreeMapStrategy(statics::Filter::new(
-        statics::Map::new(vec((key, value), size.clone()), VecToBTreeMap),
+        statics::Map::new(
+            vec((key, value_strategy), size.clone()),
+            VecToBTreeMap,
+        ),
         "BTreeMap minimum size".into(),
         MinSize(size.start()),
     ))
+}
+
+/// Fallible form of [`btree_map`]: returns a typed [`EmptySizeRange`] error
+/// instead of panicking when `size` is an empty range.
+pub fn try_btree_map<K: Strategy, V: Strategy>(
+    key: K,
+    value_strategy: V,
+    size: impl Into<SizeRange>,
+) -> Result<BTreeMapStrategy<K, V>, EmptySizeRange>
+where
+    K::Value: Ord,
+{
+    let size = size.into();
+    Ok(BTreeMapStrategy(statics::Filter::new(
+        statics::Map::new(
+            try_vec((key, value_strategy), size.clone())?,
+            VecToBTreeMap,
+        ),
+        "BTreeMap minimum size".into(),
+        MinSize(size.start()),
+    )))
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -633,7 +797,13 @@ impl<T: ValueTree> ValueTree for VecValueTree<T> {
                 continue;
             }
 
-            if !self.elements[ix].simplify() {
+            // A missing slot (impossible: `ix` is bounded by the element
+            // count above) reads as "cannot simplify further".
+            let simplified = self
+                .elements
+                .get_mut(ix)
+                .is_some_and(|element| element.simplify());
+            if !simplified {
                 // Move on to the next element
                 self.shrink = Shrink::ShrinkElement(ix + 1);
             } else {
@@ -656,7 +826,13 @@ impl<T: ValueTree> ValueTree for VecValueTree<T> {
                 true
             }
             Some(Shrink::ShrinkElement(ix)) => {
-                if self.elements[ix].complicate() {
+                // A missing slot (impossible: `ix` came from a simplify pass
+                // over the same elements) reads as "cannot complicate".
+                let complicated = self
+                    .elements
+                    .get_mut(ix)
+                    .is_some_and(|element| element.complicate());
+                if complicated {
                     // Don't unset prev_shrink; we may be able to complicate
                     // again.
                     true
@@ -676,12 +852,112 @@ impl<T: ValueTree> ValueTree for VecValueTree<T> {
 
 #[cfg(test)]
 mod test {
-    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
+    use std::string::ToString;
+
+    use strict_test_support::{
+        TestFailure, ensure, ensure_contains, ensure_eq, ensure_ok, ensure_some,
+    };
 
     use super::*;
 
     use crate::bits;
     use crate::test_runner::TestCaseError;
+
+    #[test]
+    fn try_constructors_accept_nonempty_size_ranges() -> Result<(), TestFailure>
+    {
+        let mut runner = TestRunner::deterministic();
+        let strategy = ensure_ok(
+            try_vec(0u8..4, 1..4),
+            "try_vec accepts a non-empty size range",
+        )?;
+        let value = ensure_some(
+            strategy.new_tree(&mut runner).ok(),
+            "the fallibly constructed vec strategy generates",
+        )?
+        .current();
+        ensure(
+            (1..4).contains(&value.len()),
+            "the generated vec honors the requested size range",
+        )?;
+        ensure(
+            try_vec_deque(0u8..4, 1..4).is_ok(),
+            "try_vec_deque accepts a non-empty size range",
+        )?;
+        ensure(
+            try_linked_list(0u8..4, 1..4).is_ok(),
+            "try_linked_list accepts a non-empty size range",
+        )?;
+        ensure(
+            try_binary_heap(0u8..4, 1..4).is_ok(),
+            "try_binary_heap accepts a non-empty size range",
+        )?;
+        ensure(
+            try_btree_set(0u8..4, 1..4).is_ok(),
+            "try_btree_set accepts a non-empty size range",
+        )?;
+        ensure(
+            try_btree_map(0u8..4, 0u8..4, 1..4).is_ok(),
+            "try_btree_map accepts a non-empty size range",
+        )?;
+        #[cfg(feature = "std")]
+        {
+            ensure(
+                try_hash_set(0u8..4, 1..4).is_ok(),
+                "try_hash_set accepts a non-empty size range",
+            )?;
+            ensure(
+                try_hash_map(0u8..4, 0u8..4, 1..4).is_ok(),
+                "try_hash_map accepts a non-empty size range",
+            )?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn try_constructors_reject_empty_size_ranges() -> Result<(), TestFailure> {
+        let error = ensure_some(
+            try_vec(0u8..4, 3..3).err(),
+            "try_vec rejects an empty size range",
+        )?;
+        ensure_contains(
+            &error.to_string(),
+            "did you accidentally write 3..3 where you meant 3..=3",
+            "the typed error carries the corrective hint",
+        )?;
+        ensure(
+            try_vec_deque(0u8..4, 0..0).is_err(),
+            "try_vec_deque rejects an empty size range",
+        )?;
+        ensure(
+            try_linked_list(0u8..4, 0..0).is_err(),
+            "try_linked_list rejects an empty size range",
+        )?;
+        ensure(
+            try_binary_heap(0u8..4, 0..0).is_err(),
+            "try_binary_heap rejects an empty size range",
+        )?;
+        ensure(
+            try_btree_set(0u8..4, 0..0).is_err(),
+            "try_btree_set rejects an empty size range",
+        )?;
+        ensure(
+            try_btree_map(0u8..4, 0u8..4, 0..0).is_err(),
+            "try_btree_map rejects an empty size range",
+        )?;
+        #[cfg(feature = "std")]
+        {
+            ensure(
+                try_hash_set(0u8..4, 0..0).is_err(),
+                "try_hash_set rejects an empty size range",
+            )?;
+            ensure(
+                try_hash_map(0u8..4, 0u8..4, 0..0).is_err(),
+                "try_hash_map rejects an empty size range",
+            )?;
+        }
+        Ok(())
+    }
 
     #[test]
     fn test_vec() -> Result<(), TestFailure> {

@@ -26,8 +26,8 @@ pub struct ResultCacheKey<'a> {
 }
 
 impl<'a> ResultCacheKey<'a> {
-    pub(crate) fn new(value: &'a dyn fmt::Debug) -> Self {
-        Self { value }
+    pub(crate) fn new(case_value: &'a dyn fmt::Debug) -> Self {
+        Self { value: case_value }
     }
 
     /// Return the test input value as an `&dyn Debug`.
@@ -62,7 +62,7 @@ struct BasicResultCache {
 
 #[cfg(feature = "std")]
 impl ResultCache for BasicResultCache {
-    fn key(&self, val: &ResultCacheKey) -> u64 {
+    fn key(&self, cache_key: &ResultCacheKey) -> u64 {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::Hasher;
         use std::io::{self, Write};
@@ -80,7 +80,7 @@ impl ResultCache for BasicResultCache {
         }
 
         let mut hash = HashWriter(DefaultHasher::default());
-        write!(hash, "{:?}", val).expect("Debug format returned Err");
+        write!(hash, "{:?}", cache_key).expect("Debug format returned Err");
         hash.0.finish()
     }
 

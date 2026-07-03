@@ -342,22 +342,20 @@ impl<'a, I: Iterator<Item = &'a Hir>> Iterator for ConcatIter<'a, I> {
 
         // Accumulate a literal sequence as long as we can:
         while let Some(next) = self.iter.next() {
-            match next.kind() {
-                // A literal. Accumulate:
-                Literal(literal) => self.buf.extend_from_slice(&literal.0),
-                // Encountered a non-literal.
-                _ => {
-                    return if !self.buf.is_empty() {
-                        // We've accumulated a literal from before, flush it out.
-                        // Store this node so we deal with it the next call.
-                        self.next = Some(next);
-                        flush_lit_buf(self)
-                    } else {
-                        // We didn't; just yield this node.
-                        Some(bytes_regex_parsed_inner(next))
-                    };
-                }
+            // A literal. Accumulate:
+            if let Literal(literal) = next.kind() {
+                self.buf.extend_from_slice(&literal.0);
+                continue;
             }
+            // Encountered a non-literal without an accumulated literal from
+            // before; just yield this node.
+            if self.buf.is_empty() {
+                return Some(bytes_regex_parsed_inner(next));
+            }
+            // We've accumulated a literal from before, flush it out.
+            // Store this node so we deal with it the next call.
+            self.next = Some(next);
+            return flush_lit_buf(self);
         }
 
         // Flush out any accumulated literal from before.

@@ -327,18 +327,18 @@ fn parse_skip(ctx: Ctx, acc: &mut ParseAcc, meta: Meta) {
 fn parse_weight(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
     error_if_set(ctx, &acc.weight, meta);
 
-    // Convert to value if possible:
-    let value = normalize_meta(meta.clone())
+    // Convert to a weight if possible:
+    let weight = normalize_meta(meta.clone())
         .and_then(extract_lit)
         .and_then(extract_expr)
-        // Evaluate the expression into a value:
+        // Evaluate the expression into a constant:
         .as_ref()
         .and_then(interp::eval_expr)
-        // Ensure that `val` fits within an `u32` as proptest requires that:
-        .filter(|&value| value <= u128::from(u32::MAX))
-        .map(|value| value as u32);
+        // Ensure the weight fits within an `u32` as proptest requires that:
+        .filter(|&weight| weight <= u128::from(u32::MAX))
+        .map(|weight| weight as u32);
 
-    if let v @ Some(_) = value {
+    if let v @ Some(_) = weight {
         acc.weight = v;
     } else {
         error::weight_malformed(ctx, meta)
@@ -438,10 +438,10 @@ fn parse_strategy_base(ctx: Ctx, loc: &mut Option<Expr>, meta: &Meta) {
 fn parse_strat_mode(
     ctx: Ctx,
     strat: Option<Expr>,
-    value: Option<Expr>,
+    value_expr: Option<Expr>,
     regex: Option<Expr>,
 ) -> DeriveResult<StratMode> {
-    Ok(match (strat, value, regex) {
+    Ok(match (strat, value_expr, regex) {
         (None, None, None) => StratMode::Arbitrary,
         (None, None, Some(re)) => StratMode::Regex(re),
         (None, Some(vl), None) => StratMode::Value(vl),

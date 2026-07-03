@@ -337,57 +337,69 @@ impl<
     TransitionValueTree: ValueTree<Value = Transition>,
 > SequentialValueTree<State, Transition, StateValueTree, TransitionValueTree>
 {
+    /// The one-shot unseen-transition deletion: when the test runner saw
+    /// fewer transitions than are included (the failure cut the run short),
+    /// drop the never-executed tail from both bit-sets and jump the shrink
+    /// phase to the deepest still-meaningful point. Runs at most once, on
+    /// the first `simplify()`, while the seen counter is still attached;
+    /// the counter is detached afterwards so shrinking runs pass `None`.
+    fn drop_unseen_transitions(&mut self) {
+        let Some(seen_transitions_counter) =
+            self.seen_transitions_counter.as_ref()
+        else {
+            return;
+        };
+        let seen_count =
+            seen_transitions_counter.load(atomic::Ordering::SeqCst);
+
+        let included_count = self.included_transitions.count();
+
+        if seen_count >= included_count {
+            // every included transition was executed; nothing to drop.
+            // Remove the seen transitions counter for shrinking runs.
+            self.seen_transitions_counter = None;
+            return;
+        }
+
+        // the test runner did not see all the transitions so we can delete
+        // the transitions that were not seen because they were not executed
+
+        let mut kept_count = 0;
+        for ix in 0..self.transitions.len() {
+            if !self.included_transitions.test(ix) {
+                // transition at ix was already deleted from the test
+                continue;
+            }
+            if kept_count < seen_count {
+                // transition at ix was seen by the test or we are
+                // still below minimum size for the test
+                kept_count += 1;
+                continue;
+            }
+            // transition at ix was never seen
+            self.included_transitions.clear(ix);
+            self.shrinkable_transitions.clear(ix);
+        }
+        // Set the next shrink based on how many transitions were seen:
+        // - If 0 seen: go directly to shrinking the initial state.
+        // - If 1 seen: can't delete any more, so shrink individual transitions.
+        // - If >1 seen: delete the transition before the last seen transition.
+        //   (subtract 2 from `kept_count` because the last seen transition
+        //   caused the failure).
+        self.shrink = match kept_count {
+            0 => InitialState,
+            1 => Transition(0),
+            _ => DeleteTransition(kept_count.saturating_sub(2)),
+        };
+
+        // Remove the seen transitions counter for shrinking runs
+        self.seen_transitions_counter = None;
+    }
+
     /// Try to apply the next `self.shrink`. Returns `true` if a shrink has been
     /// applied.
     fn try_simplify(&mut self) -> bool {
-        if let Some(seen_transitions_counter) =
-            self.seen_transitions_counter.as_ref()
-        {
-            let seen_count =
-                seen_transitions_counter.load(atomic::Ordering::SeqCst);
-
-            let included_count = self.included_transitions.count();
-
-            if seen_count < included_count {
-                // the test runner did not see all the transitions so we can
-                // delete the transitions that were not seen because they were
-                // not executed
-
-                let mut kept_count = 0;
-                for ix in 0..self.transitions.len() {
-                    if self.included_transitions.test(ix) {
-                        // transition at ix was part of test
-
-                        if kept_count < seen_count {
-                            // transition at xi was seen by the test or we are
-                            // still below minimum size for the test
-                            kept_count += 1;
-                        } else {
-                            // transition at ix was never seen
-                            self.included_transitions.clear(ix);
-                            self.shrinkable_transitions.clear(ix);
-                        }
-                    }
-                }
-                // Set the next shrink based on how many transitions were seen:
-                // - If 0 seen: go directly to shrinking the initial state.
-                // - If 1 seen: can't delete any more, so shrink individual transitions.
-                // - If >1 seen: delete the transition before the last seen transition.
-                //   (subtract 2 from `kept_count` because the last seen transition
-                //   caused the failure).
-                if kept_count == 0 {
-                    self.shrink = InitialState;
-                } else if kept_count == 1 {
-                    self.shrink = Transition(0);
-                } else {
-                    self.shrink =
-                        DeleteTransition(kept_count.saturating_sub(2));
-                }
-            }
-
-            // Remove the seen transitions counter for shrinking runs
-            self.seen_transitions_counter = None;
-        }
+        self.drop_unseen_transitions();
 
         if let DeleteTransition(ix) = self.shrink {
             // Delete the index from the included transitions
@@ -433,50 +445,89 @@ impl<
             {
                 // This transition is already simplified and rejected
                 self.shrink = self.next_shrink_transition(ix);
-            } else if self.transitions[ix].simplify() {
-                self.last_shrink = Some(self.shrink);
-                if self.check_acceptable(
-                    Some(ix),
-                    self.last_valid_initial_state.clone(),
-                ) {
-                    self.acceptable_transitions[ix] =
-                        (Accepted, self.transitions[ix].current());
-                    return true;
-                } else {
-                    let (state, _trans) =
-                        self.acceptable_transitions.get_mut(ix).unwrap();
-                    *state = SimplifyRejected;
-                    self.shrinkable_transitions.clear(ix);
-                    self.shrink = self.next_shrink_transition(ix);
-                    return self.simplify();
-                }
-            } else {
+                continue;
+            }
+
+            if !self.transitions[ix].simplify() {
+                // Nothing simpler to try for this transition
                 self.shrinkable_transitions.clear(ix);
                 self.shrink = self.next_shrink_transition(ix);
+                continue;
             }
+
+            self.last_shrink = Some(self.shrink);
+            if self.commit_simplified_transition(ix) {
+                return true;
+            }
+            return self.simplify();
         }
 
         if let InitialState = self.shrink {
-            if self.initial_state.simplify() {
-                if self.check_acceptable(None, self.initial_state.current()) {
-                    self.last_valid_initial_state =
-                        self.initial_state.current();
-                    self.last_shrink = Some(self.shrink);
-                    return true;
-                } else {
-                    // If the shrink is not acceptable, clear it out
-                    self.last_shrink = None;
-
-                    // `initial_state` is "dirty" here but we won't ever use it again because it is unshrinkable from here.
-                }
-            }
-            self.is_initial_state_shrinkable = false;
-            // Nothing left to do
-            return false;
+            return self.simplify_initial_state();
         }
 
         // This statement should never be reached
         panic!("Unexpected shrink state");
+    }
+
+    /// Commit the just-simplified value of the transition at `ix` if the
+    /// whole included sequence still satisfies the preconditions from the
+    /// last valid initial state; otherwise mark the slot `SimplifyRejected`,
+    /// drop it from the shrinkable set, and advance the shrink cursor.
+    /// Returns whether the simplification was accepted.
+    fn commit_simplified_transition(&mut self, ix: usize) -> bool {
+        if self
+            .check_acceptable(Some(ix), self.last_valid_initial_state.clone())
+        {
+            self.acceptable_transitions[ix] =
+                (Accepted, self.transitions[ix].current());
+            return true;
+        }
+        self.acceptable_transitions[ix].0 = SimplifyRejected;
+        self.shrinkable_transitions.clear(ix);
+        self.shrink = self.next_shrink_transition(ix);
+        false
+    }
+
+    /// The final shrink phase: simplify the initial state itself. The shrunk
+    /// state is accepted only if the whole included sequence still satisfies
+    /// the preconditions when replayed from it. Once the initial state cannot
+    /// shrink further, shrinking as a whole is done.
+    fn simplify_initial_state(&mut self) -> bool {
+        if self.initial_state.simplify() {
+            if self.check_acceptable(None, self.initial_state.current()) {
+                self.last_valid_initial_state = self.initial_state.current();
+                self.last_shrink = Some(self.shrink);
+                return true;
+            }
+            // If the shrink is not acceptable, clear it out
+            self.last_shrink = None;
+
+            // `initial_state` is "dirty" here but we won't ever use it again
+            // because it is unshrinkable from here.
+        }
+        self.is_initial_state_shrinkable = false;
+        // Nothing left to do
+        false
+    }
+
+    /// Undo the last simplification of the transition at `ix`: if the
+    /// complicated value keeps the included sequence acceptable, commit it;
+    /// otherwise mark the slot `ComplicateRejected`. Returns whether the
+    /// complication was accepted.
+    fn commit_complicated_transition(&mut self, ix: usize) -> bool {
+        if !self.transitions[ix].complicate() {
+            return false;
+        }
+        if self
+            .check_acceptable(Some(ix), self.last_valid_initial_state.clone())
+        {
+            self.acceptable_transitions[ix] =
+                (Accepted, self.transitions[ix].current());
+            return true;
+        }
+        self.acceptable_transitions[ix].0 = ComplicateRejected;
+        false
     }
 
     /// Find if there's any acceptable included transition that is not current,
@@ -639,21 +690,10 @@ impl<
             }
             Some(Transition(ix)) => {
                 let ix = *ix;
-                if self.transitions[ix].complicate() {
-                    if self.check_acceptable(
-                        Some(ix),
-                        self.last_valid_initial_state.clone(),
-                    ) {
-                        self.acceptable_transitions[ix] =
-                            (Accepted, self.transitions[ix].current());
-                        // Don't unset prev_shrink; we may be able to complicate
-                        // it again
-                        return true;
-                    } else {
-                        let (state, _trans) =
-                            self.acceptable_transitions.get_mut(ix).unwrap();
-                        *state = ComplicateRejected;
-                    }
+                if self.commit_complicated_transition(ix) {
+                    // Don't unset prev_shrink; we may be able to complicate
+                    // it again
+                    return true;
                 }
                 // Can't complicate the last element any further
                 self.last_shrink = None;

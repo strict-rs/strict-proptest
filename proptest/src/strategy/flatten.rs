@@ -164,16 +164,18 @@ where
     }
 
     fn complicate(&mut self) -> bool {
+        // The regen budget is only consulted (and the runner-wide budget
+        // only charged) while regeneration complications remain.
+        if self.complicate_regen_remaining > 0 && !self.runner.flat_map_regen()
+        {
+            self.complicate_regen_remaining = 0;
+        }
         if self.complicate_regen_remaining > 0 {
-            if self.runner.flat_map_regen() {
-                self.complicate_regen_remaining -= 1;
+            self.complicate_regen_remaining -= 1;
 
-                if let Ok(v) = self.meta.current().new_tree(&mut self.runner) {
-                    self.current = Fuse::new(v);
-                    return true;
-                }
-            } else {
-                self.complicate_regen_remaining = 0;
+            if let Ok(v) = self.meta.current().new_tree(&mut self.runner) {
+                self.current = Fuse::new(v);
+                return true;
             }
         }
 

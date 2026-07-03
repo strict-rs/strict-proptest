@@ -102,31 +102,10 @@ impl UseTracker {
         for_used: &syn::TypeParamBound,
         for_not: Option<syn::TypeParamBound>,
     ) -> DeriveResult<()> {
-        {
-            let mut iter = self
-                .used_map
-                .iter()
-                .map(|(_, used)| used)
-                .zip(self.generics.type_params_mut());
-            if let Some(for_not) = for_not {
-                iter.try_for_each(|(&used, tv)| {
-                    // Steal the attributes:
-                    let no_bound = attr::has_no_bound(ctx, &tv.attrs)?;
-                    let bound = if used && !no_bound {
-                        for_used
-                    } else {
-                        &for_not
-                    };
-                    tv.bounds.push(bound.clone());
-                    Ok(())
-                })?;
-            } else {
-                iter.for_each(|(&used, tv)| {
-                    if used {
-                        tv.bounds.push(for_used.clone())
-                    }
-                })
-            }
+        if let Some(for_not) = for_not {
+            self.bound_all_params(ctx, for_used, &for_not)?;
+        } else {
+            self.bound_used_params_only(for_used);
         }
 
         self.generics.make_where_clause().predicates.extend(
@@ -143,6 +122,41 @@ impl UseTracker {
         Ok(())
     }
 
+    /// Bound every type parameter: used parameters (without
+    /// `#[proptest(no_bound)]`) get `for_used`, all others get `for_not`.
+    fn bound_all_params(
+        &mut self,
+        ctx: Ctx,
+        for_used: &syn::TypeParamBound,
+        for_not: &syn::TypeParamBound,
+    ) -> DeriveResult<()> {
+        self.used_map
+            .iter()
+            .map(|(_, used)| used)
+            .zip(self.generics.type_params_mut())
+            .try_for_each(|(&used, tv)| {
+                // Steal the attributes:
+                let no_bound = attr::has_no_bound(ctx, &tv.attrs)?;
+                let bound = if used && !no_bound { for_used } else { for_not };
+                tv.bounds.push(bound.clone());
+                Ok(())
+            })
+    }
+
+    /// Bound only the used type parameters with `for_used`, leaving unused
+    /// parameters unbounded.
+    fn bound_used_params_only(&mut self, for_used: &syn::TypeParamBound) {
+        self.used_map
+            .iter()
+            .map(|(_, used)| used)
+            .zip(self.generics.type_params_mut())
+            .for_each(|(&used, tv)| {
+                if used {
+                    tv.bounds.push(for_used.clone())
+                }
+            })
+    }
+
     /// Consumes the (potentially) modified generics that the
     /// tracker was originally constructed with and returns it.
     pub fn consume(self) -> syn::Generics {
@@ -156,36 +170,38 @@ impl UseTracker {
 
 impl UseMarkable for syn::Type {
     fn mark_uses(&self, ut: &mut UseTracker) {
-        use syn::visit;
+        syn::visit::visit_type(&mut PathVisitor(ut), self);
+    }
+}
 
-        visit::visit_type(&mut PathVisitor(ut), self);
+/// The generic-usage walker behind `mark_uses`: it marks simple-path
+/// identifiers as used type variables, records associated-type projections
+/// of a generic for `where` bounds, and deliberately skips macro bodies and
+/// `PhantomData<T>` innards.
+struct PathVisitor<'ut>(&'ut mut UseTracker);
 
-        struct PathVisitor<'ut>(&'ut mut UseTracker);
+impl<'ut, 'ast> syn::visit::Visit<'ast> for PathVisitor<'ut> {
+    fn visit_macro(&mut self, _: &syn::Macro) {}
 
-        impl<'ut, 'ast> visit::Visit<'ast> for PathVisitor<'ut> {
-            fn visit_macro(&mut self, _: &syn::Macro) {}
-
-            fn visit_type_path(&mut self, tpath: &syn::TypePath) {
-                if matches_prj_tyvar(self.0, tpath) {
-                    self.0.use_type(adjust_simple_prj(tpath).into());
-                    return;
-                }
-                visit::visit_type_path(self, tpath);
-            }
-
-            fn visit_path(&mut self, path: &syn::Path) {
-                // If path is PhantomData<T> do not mark innards.
-                if util::is_phantom_data(path) {
-                    return;
-                }
-
-                if let Some(ident) = util::extract_simple_path(path) {
-                    self.0.use_tyvar(ident);
-                }
-
-                visit::visit_path(self, path);
-            }
+    fn visit_type_path(&mut self, tpath: &syn::TypePath) {
+        if matches_prj_tyvar(self.0, tpath) {
+            self.0.use_type(adjust_simple_prj(tpath).into());
+            return;
         }
+        syn::visit::visit_type_path(self, tpath);
+    }
+
+    fn visit_path(&mut self, path: &syn::Path) {
+        // If path is PhantomData<T> do not mark innards.
+        if util::is_phantom_data(path) {
+            return;
+        }
+
+        if let Some(ident) = util::extract_simple_path(path) {
+            self.0.use_tyvar(ident);
+        }
+
+        syn::visit::visit_path(self, path);
     }
 }
 

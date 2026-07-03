@@ -48,43 +48,63 @@ pub fn if_has_lifetimes(ctx: Ctx, ast: &syn::DeriveInput) {
     }
 }
 
-/// Ensures that no attributes were specified on `item`.
-pub fn if_anything_specified(ctx: Ctx, attrs: &ParsedAttributes, item: &str) {
-    if_enum_attrs_present(ctx, attrs, item);
-    if_strategy_present(ctx, attrs, item);
-    if_specified_params(ctx, attrs, item);
-    if_specified_filter(ctx, attrs, item);
+/// Ensures that no attributes were specified on `item_kind`.
+pub fn if_anything_specified(
+    ctx: Ctx,
+    attrs: &ParsedAttributes,
+    item_kind: &str,
+) {
+    if_enum_attrs_present(ctx, attrs, item_kind);
+    if_strategy_present(ctx, attrs, item_kind);
+    if_specified_params(ctx, attrs, item_kind);
+    if_specified_filter(ctx, attrs, item_kind);
 }
 
 /// Ensures that things only allowed on an enum variant is not present on
-/// `item` which is not an enum variant.
-pub fn if_enum_attrs_present(ctx: Ctx, attrs: &ParsedAttributes, item: &str) {
-    if_skip_present(ctx, attrs, item);
-    if_weight_present(ctx, attrs, item);
+/// `item_kind` which is not an enum variant.
+pub fn if_enum_attrs_present(
+    ctx: Ctx,
+    attrs: &ParsedAttributes,
+    item_kind: &str,
+) {
+    if_skip_present(ctx, attrs, item_kind);
+    if_weight_present(ctx, attrs, item_kind);
 }
 
-/// Ensures that parameters is not present on `item`.
-pub fn if_specified_filter(ctx: Ctx, attrs: &ParsedAttributes, item: &str) {
+/// Ensures that parameters is not present on `item_kind`.
+pub fn if_specified_filter(
+    ctx: Ctx,
+    attrs: &ParsedAttributes,
+    item_kind: &str,
+) {
     if !attrs.filter.is_empty() {
-        meaningless_filter(ctx, item);
+        meaningless_filter(ctx, item_kind);
     }
 }
 
-/// Ensures that parameters is not present on `item`.
-pub fn if_specified_params(ctx: Ctx, attrs: &ParsedAttributes, item: &str) {
+/// Ensures that parameters is not present on `item_kind`.
+pub fn if_specified_params(
+    ctx: Ctx,
+    attrs: &ParsedAttributes,
+    item_kind: &str,
+) {
     if attrs.params.is_set() {
-        parent_has_param(ctx, item);
+        parent_has_param(ctx, item_kind);
     }
 }
 
-/// Ensures that an explicit strategy or value is not present on `item`.
-pub fn if_strategy_present(ctx: Ctx, attrs: &ParsedAttributes, item: &str) {
+/// Ensures that an explicit strategy or value is not present on `item_kind`.
+pub fn if_strategy_present(
+    ctx: Ctx,
+    attrs: &ParsedAttributes,
+    item_kind: &str,
+) {
     use crate::attr::StratMode::*;
     match attrs.strategy {
         Arbitrary => {}
-        Strategy(_) => illegal_strategy(ctx, "strategy", item),
-        Value(_) => illegal_strategy(ctx, "value", item),
-        Regex(_) => illegal_regex(ctx, item),
+        Strategy(_) => illegal_strategy(ctx, "strategy", item_kind),
+        Value(_) => illegal_strategy(ctx, "value", item_kind),
+        Regex(_) => illegal_regex(ctx, item_kind),
     }
 }
 
@@ -119,17 +139,17 @@ pub fn if_present_on_unit_struct(ctx: Ctx, attrs: &ParsedAttributes) {
     }
 }
 
-/// Ensures that skip is not present on `item`.
-pub fn if_skip_present(ctx: Ctx, attrs: &ParsedAttributes, item: &str) {
+/// Ensures that skip is not present on `item_kind`.
+pub fn if_skip_present(ctx: Ctx, attrs: &ParsedAttributes, item_kind: &str) {
     if attrs.skip {
-        illegal_skip(ctx, item)
+        illegal_skip(ctx, item_kind)
     }
 }
 
-/// Ensures that a weight is not present on `item`.
-pub fn if_weight_present(ctx: Ctx, attrs: &ParsedAttributes, item: &str) {
+/// Ensures that a weight is not present on `item_kind`.
+pub fn if_weight_present(ctx: Ctx, attrs: &ParsedAttributes, item_kind: &str) {
     if attrs.weight.is_some() {
-        illegal_weight(ctx, item)
+        illegal_weight(ctx, item_kind)
     }
 }
 
@@ -310,81 +330,81 @@ error!(
 );
 
 // Happens when `#[proptest(strategy = "<expr>")]` or
-// `#[proptest(value = "<expr>")]` is specified on an `item`
+// `#[proptest(value = "<expr>")]` is specified on an `item_kind`
 // that does not support setting an explicit value or strategy.
 // An enum or struct does not support that.
-error!(illegal_strategy(attr: &str, item: &str), E0007,
+error!(illegal_strategy(attr: &str, item_kind: &str), E0007,
     "`#[proptest({0} = \"<expr>\")]` is not allowed on {1}. Only struct fields, \
     enum variants and fields inside those can use an explicit {0}.",
-    attr, item);
+    attr, item_kind);
 
-// Happens when `#[proptest(regex = "<string>")]` is specified on an `item`
+// Happens when `#[proptest(regex = "<string>")]` is specified on an `item_kind`
 // that does not support setting an explicit value or strategy.
 // See `illegal_strategy` for more.
 error!(
-    illegal_regex(item: &str),
+    illegal_regex(item_kind: &str),
     E0007,
     "`#[proptest(regex = \"<string>\")]` is not allowed on {0}. Only struct \
      fields, enum variant fields can use an explicit regex.",
-    item
+    item_kind
 );
 
-// Happens when `#[proptest(skip)]` is specified on an `item` that does
+// Happens when `#[proptest(skip)]` is specified on an `item_kind` that does
 // not support skipping. Only enum variants support skipping.
 error!(
-    illegal_skip(item: &str),
+    illegal_skip(item_kind: &str),
     E0008,
     "A {} can't be `#[proptest(skip)]`ed, only enum variants can be skipped.",
-    item
+    item_kind
 );
 
 // Happens when `#[proptest(weight = <integer>)]` is specified on an
-// `item` that does not support weighting.
+// `item_kind` that does not support weighting.
 error!(
-    illegal_weight(item: &str),
+    illegal_weight(item_kind: &str),
     E0009,
     "`#[proptest(weight = <integer>)]` is not allowed on {} as it is \
      meaningless. Only enum variants can be assigned weights.",
-    item
+    item_kind
 );
 
-// Happens when `#[proptest(params = <type>)]` is set on `item`
-// but also on the parent of `item`. If the parent has set `params`
-// then that applies, and the `params` on `item` would be meaningless
+// Happens when `#[proptest(params = <type>)]` is set on `item_kind`
+// but also on the parent of `item_kind`. If the parent has set `params`
+// then that applies, and the `params` on `item_kind` would be meaningless
 // wherefore it is forbidden.
 error!(
-    parent_has_param(item: &str),
+    parent_has_param(item_kind: &str),
     E0010,
     "Cannot set the associated type `Parameters` of `Arbitrary` with either \
      `#[proptest(no_params)]` or `#[proptest(params(<type>)]` on {} since it \
      was set on the parent.",
-    item
+    item_kind
 );
 
-// Happens when `#[proptest(params = <type>)]` is set on `item`
+// Happens when `#[proptest(params = <type>)]` is set on `item_kind`
 // but not `#[proptest(strategy = <expr>)]`.
 // This does not apply to the top level type declaration.
 fatal!(
-    cant_set_param_but_not_strat(self_ty: &syn::Type, item: &str),
+    cant_set_param_but_not_strat(self_ty: &syn::Type, item_kind: &str),
     E0011,
     "Cannot set `#[proptest(params = <type>)]` on {0} while not providing a \
      strategy for the {0} to use it since `<{1} as Arbitrary<'a>>::Strategy` \
      may require a different type than the one provided in `<type>`.",
-    item,
+    item_kind,
     quote! { #self_ty }
 );
 
-// Happens when `#[proptest(filter = "<expr>")]` is set on `item`,
-// but the parent of the `item` explicitly specifies a value or strategy,
+// Happens when `#[proptest(filter = "<expr>")]` is set on `item_kind`,
+// but the parent of the `item_kind` explicitly specifies a value or strategy,
 // which would cause the value to be generated without consulting the
 // `filter`.
 error!(
-    meaningless_filter(item: &str),
+    meaningless_filter(item_kind: &str),
     E0012,
     "Cannot set `#[proptest(filter = <expr>)]` on {} since it is set on the \
-     item which it is inside of that outer item specifies how to generate \
+     item_kind which it is inside of that outer item_kind specifies how to generate \
      itself.",
-    item
+    item_kind
 );
 
 // Happens when the form `#![proptest<..>]` is used. This will probably never
@@ -540,41 +560,41 @@ error!(
 // Any attributes on a skipped variant has no effect - so we emit this error
 // to the user so that they are aware.
 error!(
-    skipped_variant_has_weight(item: &str),
+    skipped_variant_has_weight(item_kind: &str),
     E0028,
     "A variant has been skipped. Setting `#[proptest(weight = <value>)]` on \
      the {} is meaningless and is not allowed.",
-    item
+    item_kind
 );
 
 // Any attributes on a skipped variant has no effect - so we emit this error
 // to the user so that they are aware.
 error!(
-    skipped_variant_has_param(item: &str),
+    skipped_variant_has_param(item_kind: &str),
     E0028,
     "A variant has been skipped. Setting `#[proptest(no_param)]` or \
     `#[proptest(params(<type>))]` on the {} is meaningless and is not allowed.",
-    item
+    item_kind
 );
 
 // Any attributes on a skipped variant has no effect - so we emit this error
 // to the user so that they are aware.
 error!(
-    skipped_variant_has_strat(item: &str),
+    skipped_variant_has_strat(item_kind: &str),
     E0028,
     "A variant has been skipped. Setting `#[proptest(value = \"<expr>\")]` or \
      `#[proptest(strategy = \"<expr>\")]` on the {} is meaningless and is not \
      allowed.",
-    item
+    item_kind
 );
 
 // Any attributes on a skipped variant has no effect - so we emit this error
 // to the user so that they are aware. Unfortunately, there's no way to
 // emit a warning to the user, so we emit an error instead.
-error!(skipped_variant_has_filter(item: &str), E0028,
+error!(skipped_variant_has_filter(item_kind: &str), E0028,
     "A variant has been skipped. Setting `#[proptest(filter = \"<expr>\")]` or \
     on the {} is meaningless and is not allowed.",
-    item);
+    item_kind);
 
 // There's only one way to produce a specific unit variant, so setting
 // `#[proptest(strategy = "<expr>")]` or `#[proptest(value = "<expr>")]`
@@ -669,17 +689,17 @@ error!(
     regular expression embedded in a Rust string slice."
 );
 
-// Happens when `#[proptest(params = <type>)]` is set on `item` and then
+// Happens when `#[proptest(params = <type>)]` is set on `item_kind` and then
 // `#[proptest(regex = "<string>")]` is also set. We reject this because
 // the params can't be used. TODO: reduce this to a warning once we can
 // emit warnings.
 error!(
-    cant_set_param_and_regex(item: &str),
+    cant_set_param_and_regex(item_kind: &str),
     E0035,
     "Cannot set #[proptest(regex = \"<string>\")] and \
      `#[proptest(params = <type>)]` on {0} because the latter is a logic bug \
      since `params` cannot be used in `<string>`.",
-    item
+    item_kind
 );
 
 #[cfg(test)]

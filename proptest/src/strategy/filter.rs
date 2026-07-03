@@ -58,12 +58,12 @@ impl<S: Strategy, F: Fn(&S::Value) -> bool> Strategy for Filter<S, F> {
 
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
         loop {
-            let val = self.source.new_tree(runner)?;
-            if !(self.fun)(&val.current()) {
+            let source_tree = self.source.new_tree(runner)?;
+            if !(self.fun)(&source_tree.current()) {
                 runner.reject_local(self.whence.clone())?;
             } else {
                 return Ok(Filter {
-                    source: val,
+                    source: source_tree,
                     whence: self.whence.clone(),
                     fun: Arc::clone(&self.fun),
                 });

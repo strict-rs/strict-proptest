@@ -19,8 +19,6 @@ use std::panic::{self, AssertUnwindSafe};
 #[cfg(feature = "fork")]
 use rusty_fork;
 #[cfg(feature = "fork")]
-use std::cell::{Cell, RefCell};
-#[cfg(feature = "fork")]
 use std::env;
 #[cfg(feature = "fork")]
 use std::fs;
@@ -49,11 +47,13 @@ const TRACE: u32 = 2;
 #[cfg(feature = "std")]
 macro_rules! verbose_message {
     ($runner:expr, $level:expr, $fmt:tt $($arg:tt)*) => {{
-        #[allow(unused_comparisons)]
-        {
-            if $runner.config.verbose >= $level {
-                eprintln!(concat!("proptest: ", $fmt) $($arg)*);
-            }
+        if crate::test_runner::diagnostics::verbose_at_least(
+            $runner.config.verbose,
+            $level,
+        ) {
+            crate::test_runner::diagnostics::emit_verbose(
+                format_args!($fmt $($arg)*),
+            );
         }
     }}
 }
@@ -183,7 +183,7 @@ impl ForkOutput {
 fn call_test<V, F, R>(
     _runner: &mut TestRunner,
     case: V,
-    test: &F,
+    test_fn: &F,
     replay_from_fork: &mut R,
     result_cache: &mut dyn ResultCache,
     _: &mut ForkOutput,
@@ -203,7 +203,7 @@ where
         return result.clone().map(|_| TestCaseOk::CacheHitSuccess);
     }
 
-    let result = test(case);
+    let result = test_fn(case);
     result_cache.put(cache_key, &result);
     result.map(|_| {
         if is_from_persisted_seed {
@@ -218,7 +218,7 @@ where
 fn call_test<V, F, R>(
     runner: &mut TestRunner,
     case: V,
-    test: &F,
+    test_fn: &F,
     replay_from_fork: &mut R,
     result_cache: &mut dyn ResultCache,
     fork_output: &mut ForkOutput,
@@ -259,7 +259,7 @@ where
     let result = unwrap_or!(
         super::scoped_panic_hook::with_hook(
             |_| { /* Silence out panic backtrace */ },
-            || panic::catch_unwind(AssertUnwindSafe(|| test(case)))
+            || panic::catch_unwind(AssertUnwindSafe(|| test_fn(case)))
         ),
         what => Err(TestCaseError::Fail(
             what.downcast::<&'static str>().map(|s| (*s).into())
@@ -416,12 +416,12 @@ impl TestRunner {
     pub fn run<S: Strategy>(
         &mut self,
         strategy: &S,
-        test: impl Fn(S::Value) -> TestCaseResult,
+        test_fn: impl Fn(S::Value) -> TestCaseResult,
     ) -> TestRunResult<S> {
         if self.config.fork() {
-            self.run_in_fork(strategy, test)
+            self.run_in_fork(strategy, test_fn)
         } else {
-            self.run_in_process(strategy, test)
+            self.run_in_process(strategy, test_fn)
         }
     }
 
@@ -438,18 +438,15 @@ impl TestRunner {
     fn run_in_fork<S: Strategy>(
         &mut self,
         strategy: &S,
-        test: impl Fn(S::Value) -> TestCaseResult,
+        test_fn: impl Fn(S::Value) -> TestCaseResult,
     ) -> TestRunResult<S> {
-        let mut test = Some(test);
+        let mut test_fn = Some(test_fn);
 
         let test_name = rusty_fork::fork_test::fix_module_path(
             self.config
                 .test_name
                 .expect("Must supply test_name when forking enabled"),
         );
-        let forkfile: RefCell<Option<tempfile::NamedTempFile>> =
-            RefCell::new(None);
-        let init_forkfile_size = Cell::new(0u64);
         let seed = self.rng.new_rng_seed();
         let mut replay = replay::Replay {
             seed,
@@ -458,40 +455,48 @@ impl TestRunner {
         let mut child_count = 0;
         let timeout = self.config.timeout();
 
-        fn forkfile_size(forkfile: &Option<tempfile::NamedTempFile>) -> u64 {
-            forkfile.as_ref().map_or(0, |ff| {
-                ff.as_file().metadata().map(|md| md.len()).unwrap_or(0)
-            })
+        fn forkfile_size(forkfile: &tempfile::NamedTempFile) -> u64 {
+            forkfile
+                .as_file()
+                .metadata()
+                .map(|md| md.len())
+                .unwrap_or(0)
         }
 
+        // One shared forkfile is created up front and reused by every child
+        // spawn, so replay progress accumulates across child processes. A
+        // creation or initialisation failure aborts the run instead of
+        // panicking.
+        let mut forkfile = tempfile::NamedTempFile::new().map_err(|error| {
+            TestError::Abort(
+                format!("Failed to create temporary file for fork: {}", error)
+                    .into(),
+            )
+        })?;
+        replay.init_file(&mut forkfile).map_err(|error| {
+            TestError::Abort(
+                format!(
+                    "Failed to initialise temporary file for fork: {}",
+                    error
+                )
+                .into(),
+            )
+        })?;
+        // The path never changes across spawns; owning a copy keeps the
+        // command-setup closure free of any borrow of the forkfile itself.
+        let forkfile_path = forkfile.path().to_path_buf();
+
         loop {
+            let pre_spawn_forkfile_size = forkfile_size(&forkfile);
             let (child_error, last_fork_file_len) = rusty_fork::fork(
                 test_name,
                 rusty_fork_id!(),
                 |cmd| {
-                    let mut forkfile = forkfile.borrow_mut();
-                    if forkfile.is_none() {
-                        *forkfile =
-                            Some(tempfile::NamedTempFile::new().expect(
-                                "Failed to create temporary file for fork",
-                            ));
-                        replay.init_file(forkfile.as_mut().unwrap()).expect(
-                            "Failed to initialise temporary file for fork",
-                        );
-                    }
-
-                    init_forkfile_size.set(forkfile_size(&forkfile));
-
-                    cmd.env(ENV_FORK_FILE, forkfile.as_ref().unwrap().path());
+                    cmd.env(ENV_FORK_FILE, &forkfile_path);
                 },
-                |child, _| {
-                    await_child(
-                        child,
-                        forkfile.borrow_mut().as_mut().unwrap(),
-                        timeout,
-                    )
-                },
-                || match self.run_in_process(strategy, test.take().unwrap()) {
+                |child, _| await_child(child, &mut forkfile, timeout),
+                || match self.run_in_process(strategy, test_fn.take().unwrap())
+                {
                     Ok(_) => (),
                     Err(e) => panic!(
                         "Test failed normally in child process.\n{}\n{}",
@@ -501,10 +506,8 @@ impl TestRunner {
             )
             .expect("Fork failed");
 
-            let parsed = replay::Replay::parse_from(
-                forkfile.borrow_mut().as_mut().unwrap(),
-            )
-            .expect("Failed to re-read fork file");
+            let parsed = replay::Replay::parse_from(&mut forkfile)
+                .expect("Failed to re-read fork file");
             match parsed {
                 replay::ReplayFileStatus::InProgress(new_replay) => {
                     replay = new_replay
@@ -518,12 +521,12 @@ impl TestRunner {
                 }
             }
 
-            let curr_forkfile_size = forkfile_size(&forkfile.borrow());
+            let curr_forkfile_size = forkfile_size(&forkfile);
 
             // If the child failed to append *anything* to the forkfile, it
             // crashed or timed out before starting even one test case, so
             // bail.
-            if curr_forkfile_size == init_forkfile_size.get() {
+            if curr_forkfile_size == pre_spawn_forkfile_size {
                 return Err(TestError::Abort(
                     "Child process crashed or timed out before the first test \
                      started running; giving up."
@@ -545,7 +548,7 @@ impl TestRunner {
                     "Child process was terminated abruptly \
                      but with successful status",
                 )));
-                replay::append(forkfile.borrow_mut().as_mut().unwrap(), &error)
+                replay::append(&mut forkfile, &error)
                     .expect("Failed to append to replay file");
                 replay.steps.push(error);
             }
@@ -575,12 +578,12 @@ impl TestRunner {
     fn run_in_process<S: Strategy>(
         &mut self,
         strategy: &S,
-        test: impl Fn(S::Value) -> TestCaseResult,
+        test_fn: impl Fn(S::Value) -> TestCaseResult,
     ) -> TestRunResult<S> {
         let (replay_steps, fork_output) = init_replay(&mut self.rng);
         self.run_in_process_with_replay(
             strategy,
-            test,
+            test_fn,
             replay_steps.into_iter(),
             fork_output,
         )
@@ -589,7 +592,7 @@ impl TestRunner {
     fn run_in_process_with_replay<S: Strategy>(
         &mut self,
         strategy: &S,
-        test: impl Fn(S::Value) -> TestCaseResult,
+        test_fn: impl Fn(S::Value) -> TestCaseResult,
         mut replay_from_fork: impl Iterator<Item = TestCaseResult>,
         mut fork_output: ForkOutput,
     ) -> TestRunResult<S> {
@@ -610,7 +613,7 @@ impl TestRunner {
             self.rng.set_seed(persisted_seed);
             self.gen_and_run_case(
                 strategy,
-                &test,
+                &test_fn,
                 &mut replay_from_fork,
                 &mut *result_cache,
                 &mut fork_output,
@@ -625,7 +628,7 @@ impl TestRunner {
             let seed = self.rng.gen_get_seed();
             let result = self.gen_and_run_case(
                 strategy,
-                &test,
+                &test_fn,
                 &mut replay_from_fork,
                 &mut *result_cache,
                 &mut fork_output,
@@ -636,7 +639,7 @@ impl TestRunner {
             // Don't update the persistence file if we're a child process. The
             // parent relies on it remaining consistent and will take care of
             // updating it itself.
-            if let Err(TestError::Fail(_, ref value)) = result
+            if let Err(TestError::Fail(_, ref shrunken_value)) = result
                 && let Some(ref mut failure_persistence) =
                     self.config.failure_persistence
                 && !fork_output.is_in_fork()
@@ -644,7 +647,7 @@ impl TestRunner {
                 failure_persistence.save_persisted_failure2(
                     source_file,
                     PersistedSeed(seed),
-                    value,
+                    shrunken_value,
                 );
             }
 
@@ -704,12 +707,12 @@ impl TestRunner {
     pub fn run_one<V: ValueTree>(
         &mut self,
         case: V,
-        test: impl Fn(V::Value) -> TestCaseResult,
+        test_fn: impl Fn(V::Value) -> TestCaseResult,
     ) -> Result<bool, TestError<V::Value>> {
         let mut result_cache = self.new_cache();
         self.run_one_with_replay(
             case,
-            test,
+            test_fn,
             &mut iter::empty::<TestCaseResult>().fuse(),
             &mut *result_cache,
             &mut ForkOutput::empty(),
@@ -721,7 +724,7 @@ impl TestRunner {
     fn run_one_with_replay<V: ValueTree>(
         &mut self,
         mut case: V,
-        test: impl Fn(V::Value) -> TestCaseResult,
+        test_fn: impl Fn(V::Value) -> TestCaseResult,
         replay_from_fork: &mut impl Iterator<Item = TestCaseResult>,
         result_cache: &mut dyn ResultCache,
         fork_output: &mut ForkOutput,
@@ -730,7 +733,7 @@ impl TestRunner {
         let result = call_test(
             self,
             case.current(),
-            &test,
+            &test_fn,
             replay_from_fork,
             result_cache,
             fork_output,
@@ -743,7 +746,7 @@ impl TestRunner {
                 let why = self
                     .shrink(
                         &mut case,
-                        test,
+                        test_fn,
                         replay_from_fork,
                         result_cache,
                         fork_output,
@@ -762,7 +765,7 @@ impl TestRunner {
     fn shrink<V: ValueTree>(
         &mut self,
         case: &mut V,
-        test: impl Fn(V::Value) -> TestCaseResult,
+        test_fn: impl Fn(V::Value) -> TestCaseResult,
         replay_from_fork: &mut impl Iterator<Item = TestCaseResult>,
         result_cache: &mut dyn ResultCache,
         fork_output: &mut ForkOutput,
@@ -785,118 +788,156 @@ impl TestRunner {
 
         verbose_message!(self, TRACE, "Starting shrinking");
 
-        if case.simplify() {
-            loop {
-                #[cfg(all(feature = "std", not(target_arch = "wasm32")))]
-                let mut timed_out: Option<u64> = None;
-                #[cfg(not(all(feature = "std", not(target_arch = "wasm32"))))]
-                let timed_out: Option<u64> = None;
-                #[cfg(all(feature = "std", not(target_arch = "wasm32")))]
-                if self.config.max_shrink_time > 0 {
-                    let elapsed = start_time.elapsed();
-                    let elapsed_ms = elapsed
-                        .as_secs()
-                        .saturating_mul(1000)
-                        .saturating_add(u64::from(elapsed.subsec_millis()));
-                    if elapsed_ms > self.config.max_shrink_time as u64 {
-                        timed_out = Some(elapsed_ms);
-                    }
+        if !case.simplify() {
+            return last_failure;
+        }
+
+        loop {
+            #[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+            let timed_out: Option<u64> = self.shrink_time_exceeded(start_time);
+            #[cfg(not(all(feature = "std", not(target_arch = "wasm32"))))]
+            let timed_out: Option<u64> = None;
+
+            if self.shrink_budget_exhausted(iterations, timed_out) {
+                self.backtrack_to_last_failure(case, fork_output);
+                break;
+            }
+
+            iterations += 1;
+
+            let result = call_test(
+                self,
+                case.current(),
+                &test_fn,
+                replay_from_fork,
+                result_cache,
+                fork_output,
+                is_from_persisted_seed,
+            );
+
+            let walked = match result {
+                // Rejections are effectively a pass here,
+                // since they indicate that any behaviour of
+                // the function under test is acceptable.
+                Ok(_) | Err(TestCaseError::Reject(..)) => {
+                    self.complicate_or_note(case)
                 }
-
-                let bail = if iterations >= self.config.max_shrink_iters() {
-                    #[cfg(feature = "std")]
-                    const CONTROLLER: &str = "the PROPTEST_MAX_SHRINK_ITERS environment \
-                         variable or ProptestConfig.max_shrink_iters";
-                    #[cfg(not(feature = "std"))]
-                    const CONTROLLER: &str = "ProptestConfig.max_shrink_iters";
-                    verbose_message!(
-                        self,
-                        ALWAYS,
-                        "Aborting shrinking after {} iterations (set {} \
-                         to a large(r) value to shrink more; current \
-                         configuration: {} iterations)",
-                        CONTROLLER,
-                        self.config.max_shrink_iters(),
-                        iterations
-                    );
-                    true
-                } else if let Some(ms) = timed_out {
-                    #[cfg(feature = "std")]
-                    const CONTROLLER: &str = "the PROPTEST_MAX_SHRINK_TIME environment \
-                         variable or ProptestConfig.max_shrink_time";
-                    #[cfg(feature = "std")]
-                    let current = self.config.max_shrink_time;
-                    #[cfg(not(feature = "std"))]
-                    const CONTROLLER: &str = "(not configurable in no_std)";
-                    #[cfg(not(feature = "std"))]
-                    let current = 0;
-                    verbose_message!(
-                        self,
-                        ALWAYS,
-                        "Aborting shrinking after taking too long: {} ms \
-                         (set {} to a large(r) value to shrink more; current \
-                         configuration: {} ms)",
-                        ms,
-                        CONTROLLER,
-                        current
-                    );
-                    true
-                } else {
-                    false
-                };
-
-                if bail {
-                    // Move back to the most recent failing case
-                    while case.complicate() {
-                        fork_output.append(&Ok(()));
-                    }
-                    break;
+                Err(TestCaseError::Fail(why)) => {
+                    last_failure = Some(why);
+                    self.simplify_or_note(case)
                 }
-
-                iterations += 1;
-
-                let result = call_test(
-                    self,
-                    case.current(),
-                    &test,
-                    replay_from_fork,
-                    result_cache,
-                    fork_output,
-                    is_from_persisted_seed,
-                );
-
-                match result {
-                    // Rejections are effectively a pass here,
-                    // since they indicate that any behaviour of
-                    // the function under test is acceptable.
-                    Ok(_) | Err(TestCaseError::Reject(..)) => {
-                        if !case.complicate() {
-                            verbose_message!(
-                                self,
-                                TRACE,
-                                "Cannot complicate further"
-                            );
-
-                            break;
-                        }
-                    }
-                    Err(TestCaseError::Fail(why)) => {
-                        last_failure = Some(why);
-                        if !case.simplify() {
-                            verbose_message!(
-                                self,
-                                TRACE,
-                                "Cannot simplify further"
-                            );
-
-                            break;
-                        }
-                    }
-                }
+            };
+            if !walked {
+                break;
             }
         }
 
         last_failure
+    }
+
+    /// Spend the rest of the shrink walk backtracking to the most recent
+    /// failing case once a shrink budget is exhausted.
+    fn backtrack_to_last_failure<V: ValueTree>(
+        &self,
+        case: &mut V,
+        fork_output: &mut ForkOutput,
+    ) {
+        // Move back to the most recent failing case
+        while case.complicate() {
+            fork_output.append(&Ok(()));
+        }
+    }
+
+    /// How many milliseconds the shrink phase has been running past the
+    /// `max_shrink_time` budget, or `None` while still inside it (or when
+    /// the budget is unlimited).
+    #[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+    fn shrink_time_exceeded(
+        &self,
+        start_time: std::time::Instant,
+    ) -> Option<u64> {
+        if self.config.max_shrink_time == 0 {
+            return None;
+        }
+        let elapsed = start_time.elapsed();
+        let elapsed_ms = elapsed
+            .as_secs()
+            .saturating_mul(1000)
+            .saturating_add(u64::from(elapsed.subsec_millis()));
+        (elapsed_ms > self.config.max_shrink_time as u64).then_some(elapsed_ms)
+    }
+
+    /// Whether the shrink walk must stop early because a budget is spent —
+    /// the iteration cap (`max_shrink_iters`) or the wall clock
+    /// (`max_shrink_time`) — emitting the ALWAYS-level diagnostic that
+    /// names the knob to raise.
+    fn shrink_budget_exhausted(
+        &self,
+        iterations: u32,
+        timed_out: Option<u64>,
+    ) -> bool {
+        if iterations >= self.config.max_shrink_iters() {
+            #[cfg(feature = "std")]
+            const CONTROLLER: &str = "the PROPTEST_MAX_SHRINK_ITERS environment \
+                 variable or ProptestConfig.max_shrink_iters";
+            #[cfg(not(feature = "std"))]
+            const CONTROLLER: &str = "ProptestConfig.max_shrink_iters";
+            verbose_message!(
+                self,
+                ALWAYS,
+                "Aborting shrinking after {} iterations (set {} \
+                 to a large(r) value to shrink more; current \
+                 configuration: {} iterations)",
+                CONTROLLER,
+                self.config.max_shrink_iters(),
+                iterations
+            );
+            return true;
+        }
+
+        let Some(ms) = timed_out else {
+            return false;
+        };
+        #[cfg(feature = "std")]
+        const CONTROLLER: &str = "the PROPTEST_MAX_SHRINK_TIME environment \
+                 variable or ProptestConfig.max_shrink_time";
+        #[cfg(feature = "std")]
+        let current = self.config.max_shrink_time;
+        #[cfg(not(feature = "std"))]
+        const CONTROLLER: &str = "(not configurable in no_std)";
+        #[cfg(not(feature = "std"))]
+        let current = 0;
+        verbose_message!(
+            self,
+            ALWAYS,
+            "Aborting shrinking after taking too long: {} ms \
+             (set {} to a large(r) value to shrink more; current \
+             configuration: {} ms)",
+            ms,
+            CONTROLLER,
+            current
+        );
+        true
+    }
+
+    /// Backtrack the shrink walk toward the most recent failing value,
+    /// noting at TRACE level when the tree has no further complications.
+    fn complicate_or_note<V: ValueTree>(&self, case: &mut V) -> bool {
+        if case.complicate() {
+            return true;
+        }
+        verbose_message!(self, TRACE, "Cannot complicate further");
+        false
+    }
+
+    /// Step the shrink walk toward a simpler value, noting at TRACE level
+    /// when the tree has no further simplifications.
+    fn simplify_or_note<V: ValueTree>(&self, case: &mut V) -> bool {
+        if case.simplify() {
+            return true;
+        }
+        verbose_message!(self, TRACE, "Cannot simplify further");
+        false
     }
 
     /// Update the state to account for a local rejection from `whence`, and
@@ -1188,10 +1229,10 @@ mod test {
             "the seeding run must fail so a seed is persisted",
         )?;
 
-        let run_count = RefCell::new(0);
+        let run_count = Cell::new(0);
         ensure_ok(
             TestRunner::new(config.clone()).run(&(0i32..max), |_v| {
-                *run_count.borrow_mut() += 1;
+                run_count.set(run_count.get() + 1);
                 Ok(())
             }),
             "the replay run succeeds",
@@ -1200,7 +1241,7 @@ mod test {
         // Persisted ran, and a new case ran, and only new case counts
         // against `cases: 1`.
         ensure_eq(
-            &run_count.into_inner(),
+            &run_count.get(),
             &2,
             "the persisted replay does not count toward cases",
         )

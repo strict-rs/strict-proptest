@@ -49,21 +49,64 @@ pub fn subsequence<T: Clone + 'static>(
     values: impl Into<Cow<'static, [T]>>,
     size: impl Into<SizeRange>,
 ) -> Subsequence<T> {
+    match try_subsequence(values, size) {
+        Ok(strategy) => strategy,
+        Err(error) => panic!("{}", error),
+    }
+}
+
+/// Error returned by [`try_subsequence`] when the requested size range cannot
+/// select a subsequence of the input collection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SubsequenceError {
+    /// The requested size range is empty.
+    EmptySizeRange(crate::collection::EmptySizeRange),
+    /// The requested maximum subsequence size exceeds the input length.
+    TooLarge {
+        /// Inclusive maximum of the requested size range.
+        size_end_incl: usize,
+        /// Length of the input collection.
+        len: usize,
+    },
+}
+
+impl fmt::Display for SubsequenceError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::EmptySizeRange(inner) => inner.fmt(f),
+            Self::TooLarge { size_end_incl, len } => write!(
+                f,
+                "Maximum size of subsequence {} exceeds length of input {}",
+                size_end_incl, len
+            ),
+        }
+    }
+}
+
+impl core::error::Error for SubsequenceError {}
+
+/// Fallible form of [`subsequence`]: returns a typed error instead of
+/// panicking when `size` is an empty range or exceeds the input length.
+pub fn try_subsequence<T: Clone + 'static>(
+    values: impl Into<Cow<'static, [T]>>,
+    size: impl Into<SizeRange>,
+) -> Result<Subsequence<T>, SubsequenceError> {
     let values = values.into();
     let len = values.len();
     let size = size.into();
 
-    size.assert_nonempty();
-    assert!(
-        size.end_incl() <= len,
-        "Maximum size of subsequence {} exceeds length of input {}",
-        size.end_incl(),
-        len
-    );
-    Subsequence {
+    size.ensure_nonempty()
+        .map_err(SubsequenceError::EmptySizeRange)?;
+    if size.end_incl() > len {
+        return Err(SubsequenceError::TooLarge {
+            size_end_incl: size.end_incl(),
+            len,
+        });
+    }
+    Ok(Subsequence {
         values: Arc::new(values),
         bit_strategy: bits::varsize::sampled(size, 0..len),
-    }
+    })
 }
 
 /// Strategy to generate `Vec`s by sampling a subsequence from another
@@ -101,7 +144,12 @@ impl<T: fmt::Debug + Clone + 'static> ValueTree for SubsequenceValueTree<T> {
 
     fn current(&self) -> Self::Value {
         let inner = self.inner.current();
-        inner.iter().map(|ix| self.values[ix].clone()).collect()
+        // The bit set was sized to `values`, so every index resolves; a
+        // missing slot (impossible) is skipped rather than panicking.
+        inner
+            .iter()
+            .filter_map(|ix| self.values.get(ix).cloned())
+            .collect()
     }
 
     fn simplify(&mut self) -> bool {
@@ -154,11 +202,39 @@ opaque_strategy_wrapper! {
 pub fn select<T: Clone + fmt::Debug + 'static>(
     values: impl Into<Cow<'static, [T]>>,
 ) -> Select<T> {
+    match try_select(values) {
+        Ok(strategy) => strategy,
+        Err(error) => panic!("{}", error),
+    }
+}
+
+/// Error returned by [`try_select`] when the input collection is empty.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmptySelection;
+
+impl fmt::Display for EmptySelection {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Cannot select from empty collection")
+    }
+}
+
+impl core::error::Error for EmptySelection {}
+
+/// Fallible form of [`select`]: returns a typed error instead of panicking
+/// when `values` is empty.
+pub fn try_select<T: Clone + fmt::Debug + 'static>(
+    values: impl Into<Cow<'static, [T]>>,
+) -> Result<Select<T>, EmptySelection> {
     let cow = values.into();
 
-    assert!(!cow.is_empty(), "Cannot select from empty collection");
+    if cow.is_empty() {
+        return Err(EmptySelection);
+    }
 
-    Select(statics::Map::new(0..cow.len(), SelectMapFn(Arc::new(cow))))
+    Ok(Select(statics::Map::new(
+        0..cow.len(),
+        SelectMapFn(Arc::new(cow)),
+    )))
 }
 
 /// A stand-in for an index into a slice or similar collection or conceptually
@@ -217,15 +293,28 @@ impl Index {
     ///
     /// ## Panics
     ///
-    /// Panics if `size == 0`.
+    /// Panics if `size == 0`. [`Index::try_index`] is the fallible form.
     pub fn index(&self, size: usize) -> usize {
-        assert!(size > 0, "Attempt to use `Index` with 0-size collection");
+        match self.try_index(size) {
+            Some(index) => index,
+            None => panic!("Attempt to use `Index` with 0-size collection"),
+        }
+    }
+
+    /// Fallible form of [`Index::index`]: returns `None` instead of panicking
+    /// when `size == 0`.
+    pub fn try_index(&self, size: usize) -> Option<usize> {
+        if size == 0 {
+            return None;
+        }
 
         // No platforms currently have `usize` wider than 64 bits, so `u128` is
         // sufficient to hold the result of a full multiply, letting us do a
         // simple fixed-point multiply.
-        (((size as u128) * (self.0 as u128)) >> (mem::size_of::<usize>() * 8))
-            as usize
+        Some(
+            (((size as u128) * (self.0 as u128))
+                >> (mem::size_of::<usize>() * 8)) as usize,
+        )
     }
 
     /// Return a reference to the element in `slice` that this `Index` refers to.
@@ -402,10 +491,10 @@ impl Selector {
         let mut best = None;
         let mut rng = self.rng.clone();
 
-        for item in it {
+        for candidate in it {
             let score = bias.saturating_add(rng.random());
             if best.is_none() || score < min_score {
-                best = Some(item);
+                best = Some(candidate);
                 min_score = score;
             }
 
@@ -424,6 +513,80 @@ mod test {
 
     use super::*;
     use crate::arbitrary::any;
+
+    #[test]
+    fn try_constructors_accept_valid_inputs() -> Result<(), TestFailure> {
+        let subsequence_strategy = ensure_some(
+            try_subsequence(vec![1u8, 2, 3, 4], 1..3).ok(),
+            "try_subsequence accepts a size range within the input length",
+        )?;
+        let mut runner = TestRunner::deterministic();
+        let subsequence_value = ensure_some(
+            subsequence_strategy.new_tree(&mut runner).ok(),
+            "the fallibly constructed subsequence strategy generates",
+        )?
+        .current();
+        ensure(
+            (1..3).contains(&subsequence_value.len()),
+            "the sampled subsequence honors the size range",
+        )?;
+        let select_strategy = ensure_some(
+            try_select(vec![7u8, 8, 9]).ok(),
+            "try_select accepts a non-empty collection",
+        )?;
+        let selected = ensure_some(
+            select_strategy.new_tree(&mut runner).ok(),
+            "the fallibly constructed select strategy generates",
+        )?
+        .current();
+        ensure(
+            [7u8, 8, 9].contains(&selected),
+            "the selected value comes from the input collection",
+        )?;
+        let index = Index(usize::MAX / 2);
+        ensure_eq(
+            &ensure_some(
+                index.try_index(10),
+                "try_index accepts a non-zero collection size",
+            )?,
+            &index.index(10),
+            "try_index agrees with the panicking form on valid sizes",
+        )
+    }
+
+    #[test]
+    fn try_constructors_reject_invalid_inputs() -> Result<(), TestFailure> {
+        ensure(
+            matches!(
+                try_subsequence(vec![1u8, 2, 3], 2..2),
+                Err(SubsequenceError::EmptySizeRange(_))
+            ),
+            "try_subsequence rejects an empty size range",
+        )?;
+        ensure_eq(
+            &ensure_some(
+                try_subsequence(vec![1u8, 2, 3], 1..=5).err(),
+                "try_subsequence rejects a size range beyond the input",
+            )?,
+            &SubsequenceError::TooLarge {
+                size_end_incl: 5,
+                len: 3,
+            },
+            "the typed error names the requested size and input length",
+        )?;
+        ensure_eq(
+            &ensure_some(
+                try_select(Vec::<u8>::new()).err(),
+                "try_select rejects an empty collection",
+            )?,
+            &EmptySelection,
+            "the typed error names the empty selection",
+        )?;
+        ensure(
+            Index(0).try_index(0).is_none(),
+            "try_index reports a zero-size collection as None",
+        )
+    }
 
     #[test]
     fn sample_slice() -> Result<(), TestFailure> {

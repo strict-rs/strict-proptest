@@ -129,6 +129,16 @@ fn from_sys_rng<R: SeedableRng>() -> R {
     R::from_rng(&mut rng)
 }
 
+/// Resolve the configured seed into a seedable RNG: OS entropy for
+/// `Random`, a deterministic `seed_from_u64` stream for `Fixed`.
+#[cfg(feature = "std")]
+fn seeded_or_sys_rng<R: SeedableRng>(seed: config::RngSeed) -> R {
+    match seed {
+        config::RngSeed::Random => from_sys_rng::<R>(),
+        config::RngSeed::Fixed(seed) => R::seed_from_u64(seed),
+    }
+}
+
 impl TestRng {
     fn next_u32_inner(&mut self) -> u32 {
         match &mut self.rng {
@@ -168,12 +178,23 @@ impl TestRng {
         match &mut self.rng {
             TestRngImpl::XorShift(rng) => rng.fill_bytes(dest),
             TestRngImpl::ChaCha(rng) => rng.fill_bytes(dest),
-            TestRngImpl::PassThrough { off, end, data } => {
-                let bytes_to_copy = dest.len().min(*end - *off);
-                dest[..bytes_to_copy]
-                    .copy_from_slice(&data[*off..*off + bytes_to_copy]);
-                *off += bytes_to_copy;
-                for byte in &mut dest[bytes_to_copy..] {
+            TestRngImpl::PassThrough {
+                off,
+                end,
+                data: bytes,
+            } => {
+                // Copy as much of the remaining window as fits in `dest`;
+                // everything past the window (including the whole of `dest`
+                // if the window is exhausted or inconsistent) reads as zero,
+                // which is PassThrough's documented depletion behavior.
+                let available = bytes.get(*off..*end).unwrap_or(&[]);
+                let mut copied = 0;
+                for (dst_byte, src_byte) in dest.iter_mut().zip(available) {
+                    *dst_byte = *src_byte;
+                    copied += 1;
+                }
+                *off += copied;
+                for byte in dest.iter_mut().skip(copied) {
                     *byte = 0;
                 }
             }
@@ -210,31 +231,69 @@ pub(crate) enum Seed {
     Recorder([u8; 32]),
 }
 
+/// Length mismatch between an RNG algorithm's required seed size and the
+/// bytes supplied to construct a [`Seed`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SeedLengthError {
+    algorithm: &'static str,
+    required: usize,
+}
+
+impl fmt::Display for SeedLengthError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} requires a {}-byte seed",
+            self.algorithm, self.required
+        )
+    }
+}
+
+impl core::error::Error for SeedLengthError {}
+
 impl Seed {
     pub(crate) fn from_bytes(algorithm: RngAlgorithm, seed: &[u8]) -> Self {
+        match Self::try_from_bytes(algorithm, seed) {
+            Ok(parsed) => parsed,
+            // This panic is `TestRng::from_seed`'s documented public
+            // contract for a wrong-length seed.
+            Err(error) => panic!("{}", error),
+        }
+    }
+
+    pub(crate) fn try_from_bytes(
+        algorithm: RngAlgorithm,
+        seed: &[u8],
+    ) -> Result<Self, SeedLengthError> {
         match algorithm {
-            RngAlgorithm::XorShift => {
-                assert_eq!(16, seed.len(), "XorShift requires a 16-byte seed");
-                let mut buf = [0; 16];
-                buf.copy_from_slice(seed);
-                Seed::XorShift(buf)
-            }
+            RngAlgorithm::XorShift => seed
+                .try_into()
+                .map(Seed::XorShift)
+                .map_err(|_| SeedLengthError {
+                    algorithm: "XorShift",
+                    required: 16,
+                }),
 
             RngAlgorithm::ChaCha => {
-                assert_eq!(32, seed.len(), "ChaCha requires a 32-byte seed");
-                let mut buf = [0; 32];
-                buf.copy_from_slice(seed);
-                Seed::ChaCha(buf)
+                seed.try_into()
+                    .map(Seed::ChaCha)
+                    .map_err(|_| SeedLengthError {
+                        algorithm: "ChaCha",
+                        required: 32,
+                    })
             }
 
-            RngAlgorithm::PassThrough => Seed::PassThrough(None, seed.into()),
-
-            RngAlgorithm::Recorder => {
-                assert_eq!(32, seed.len(), "Recorder requires a 32-byte seed");
-                let mut buf = [0; 32];
-                buf.copy_from_slice(seed);
-                Seed::Recorder(buf)
+            RngAlgorithm::PassThrough => {
+                Ok(Seed::PassThrough(None, seed.into()))
             }
+
+            RngAlgorithm::Recorder => seed
+                .try_into()
+                .map(Seed::Recorder)
+                .map_err(|_| SeedLengthError {
+                    algorithm: "Recorder",
+                    required: 32,
+                }),
         }
     }
 
@@ -244,9 +303,8 @@ impl Seed {
                 return None;
             }
 
-            for (dst_byte, src_pair) in
-                dst.iter_mut().zip(src.as_bytes().chunks(2))
-            {
+            let (src_pairs, _) = src.as_bytes().as_chunks::<2>();
+            for (dst_byte, src_pair) in dst.iter_mut().zip(src_pairs) {
                 *dst_byte =
                     u8::from_str_radix(str::from_utf8(src_pair).ok()?, 16)
                         .ok()?;
@@ -257,55 +315,47 @@ impl Seed {
 
         let parts =
             string.trim().split(char::is_whitespace).collect::<Vec<_>>();
-        RngAlgorithm::from_persistence_key(parts[0]).and_then(|alg| match alg {
+        let (key, data) = parts.split_first()?;
+        RngAlgorithm::from_persistence_key(key).and_then(|alg| match alg {
             RngAlgorithm::XorShift => {
-                if 5 != parts.len() {
+                if 4 != data.len() {
                     return None;
                 }
 
                 let mut dwords = [0u32; 4];
-                for (dword, part) in dwords.iter_mut().zip(&parts[1..]) {
+                for (dword, part) in dwords.iter_mut().zip(data) {
                     *dword = part.parse().ok()?;
                 }
 
                 let mut seed = [0u8; 16];
-                for (chunk, dword) in seed.chunks_mut(4).zip(dwords) {
-                    chunk.copy_from_slice(&dword.to_le_bytes());
+                let (seed_chunks, _) = seed.as_chunks_mut::<4>();
+                for (chunk, dword) in seed_chunks.iter_mut().zip(dwords) {
+                    *chunk = dword.to_le_bytes();
                 }
                 Some(Seed::XorShift(seed))
             }
 
             RngAlgorithm::ChaCha => {
-                if 2 != parts.len() {
-                    return None;
-                }
-
+                let [payload] = data else { return None };
                 let mut seed = [0u8; 32];
-                from_base16(&mut seed, parts[1])?;
+                from_base16(&mut seed, payload)?;
                 Some(Seed::ChaCha(seed))
             }
 
-            RngAlgorithm::PassThrough => {
-                if 1 == parts.len() {
-                    return Some(Seed::PassThrough(None, vec![].into()));
+            RngAlgorithm::PassThrough => match data {
+                [] => Some(Seed::PassThrough(None, vec![].into())),
+                [payload] => {
+                    let mut seed = vec![0u8; payload.len() / 2];
+                    from_base16(&mut seed, payload)?;
+                    Some(Seed::PassThrough(None, seed.into()))
                 }
-
-                if 2 != parts.len() {
-                    return None;
-                }
-
-                let mut seed = vec![0u8; parts[1].len() / 2];
-                from_base16(&mut seed, parts[1])?;
-                Some(Seed::PassThrough(None, seed.into()))
-            }
+                _ => None,
+            },
 
             RngAlgorithm::Recorder => {
-                if 2 != parts.len() {
-                    return None;
-                }
-
+                let [payload] = data else { return None };
                 let mut seed = [0u8; 32];
-                from_base16(&mut seed, parts[1])?;
+                from_base16(&mut seed, payload)?;
                 Some(Seed::Recorder(seed))
             }
         })
@@ -320,19 +370,19 @@ impl Seed {
 
         match *self {
             Seed::XorShift(ref seed) => {
-                let dwords = [
-                    u32::from_le_bytes(seed[0..4].try_into().unwrap()),
-                    u32::from_le_bytes(seed[4..8].try_into().unwrap()),
-                    u32::from_le_bytes(seed[8..12].try_into().unwrap()),
-                    u32::from_le_bytes(seed[12..16].try_into().unwrap()),
-                ];
+                let mut dwords = [0u32; 4];
+                let (seed_chunks, _) = seed.as_chunks::<4>();
+                for (dword, chunk) in dwords.iter_mut().zip(seed_chunks) {
+                    *dword = u32::from_le_bytes(*chunk);
+                }
+                let [d0, d1, d2, d3] = dwords;
                 format!(
                     "{} {} {} {} {}",
                     RngAlgorithm::XorShift.persistence_key(),
-                    dwords[0],
-                    dwords[1],
-                    dwords[2],
-                    dwords[3]
+                    d0,
+                    d1,
+                    d2,
+                    d3
                 )
             }
 
@@ -344,13 +394,16 @@ impl Seed {
                 string
             }
 
-            Seed::PassThrough(bounds, ref data) => {
-                let data =
-                    bounds.map_or(&data[..], |(start, end)| &data[start..end]);
+            Seed::PassThrough(bounds, ref bytes) => {
+                // An inconsistent window (impossible via the tracked
+                // consumption bounds) serializes as the exhausted seed.
+                let bytes = bounds.map_or(bytes.as_ref(), |(start, end)| {
+                    bytes.get(start..end).unwrap_or(&[])
+                });
                 let mut string =
                     RngAlgorithm::PassThrough.persistence_key().to_owned();
                 string.push(' ');
-                to_base16(&mut string, data);
+                to_base16(&mut string, bytes);
                 string
             }
 
@@ -402,44 +455,18 @@ impl TestRng {
             Self {
                 rng: match algorithm {
                     RngAlgorithm::XorShift => {
-                        let rng = match seed {
-                            config::RngSeed::Random => {
-                                from_sys_rng::<XorShiftRng>()
-                            }
-                            config::RngSeed::Fixed(seed) => {
-                                XorShiftRng::seed_from_u64(seed)
-                            }
-                        };
-                        TestRngImpl::XorShift(rng)
+                        TestRngImpl::XorShift(seeded_or_sys_rng(seed))
                     }
                     RngAlgorithm::ChaCha => {
-                        let rng = match seed {
-                            config::RngSeed::Random => {
-                                from_sys_rng::<ChaChaRng>()
-                            }
-                            config::RngSeed::Fixed(seed) => {
-                                ChaChaRng::seed_from_u64(seed)
-                            }
-                        };
-                        TestRngImpl::ChaCha(rng)
+                        TestRngImpl::ChaCha(seeded_or_sys_rng(seed))
                     }
                     RngAlgorithm::PassThrough => {
                         panic!("cannot create default instance of PassThrough")
                     }
-                    RngAlgorithm::Recorder => {
-                        let rng = match seed {
-                            config::RngSeed::Random => {
-                                from_sys_rng::<ChaChaRng>()
-                            }
-                            config::RngSeed::Fixed(seed) => {
-                                ChaChaRng::seed_from_u64(seed)
-                            }
-                        };
-                        TestRngImpl::Recorder {
-                            rng,
-                            record: Vec::new(),
-                        }
-                    }
+                    RngAlgorithm::Recorder => TestRngImpl::Recorder {
+                        rng: seeded_or_sys_rng(seed),
+                        record: Vec::new(),
+                    },
                 },
             }
         }
@@ -588,11 +615,12 @@ impl TestRng {
                 // Directly using XorShiftRng::from_seed() at this point would
                 // result in rng and the returned value being exactly the same.
                 // Perturb the seed with some arbitrary values to prevent this.
-                for word in seed.chunks_mut(4) {
-                    word[3] ^= 0xde;
-                    word[2] ^= 0xad;
-                    word[1] ^= 0xbe;
-                    word[0] ^= 0xef;
+                let (words, _) = seed.as_chunks_mut::<4>();
+                for [b0, b1, b2, b3] in words {
+                    *b3 ^= 0xde;
+                    *b2 ^= 0xad;
+                    *b1 ^= 0xbe;
+                    *b0 ^= 0xef;
                 }
 
                 Seed::XorShift(seed)
@@ -603,7 +631,7 @@ impl TestRng {
             TestRngImpl::PassThrough {
                 ref mut off,
                 ref mut end,
-                ref data,
+                data: ref bytes,
             } => {
                 let len = *end - *off;
                 let child_start = *off + len / 2;
@@ -611,7 +639,7 @@ impl TestRng {
                 *end = child_start;
                 Seed::PassThrough(
                     Some((child_start, child_end)),
-                    Arc::clone(data),
+                    Arc::clone(bytes),
                 )
             }
 
@@ -633,12 +661,12 @@ impl TestRng {
                     TestRngImpl::ChaCha(ChaChaRng::from_seed(seed))
                 }
 
-                Seed::PassThrough(bounds, data) => {
-                    let (start, end) = bounds.unwrap_or((0, data.len()));
+                Seed::PassThrough(bounds, bytes) => {
+                    let (start, end) = bounds.unwrap_or((0, bytes.len()));
                     TestRngImpl::PassThrough {
                         off: start,
                         end,
-                        data,
+                        data: bytes,
                     }
                 }
 
@@ -654,6 +682,8 @@ impl TestRng {
 #[cfg(test)]
 mod test {
     use crate::std_facade::Vec;
+    use std::borrow::ToOwned;
+    use std::string::ToString;
 
     use rand::{Rng, RngExt};
 
@@ -670,7 +700,7 @@ mod test {
             any::<[u8; 16]>().prop_map(Seed::XorShift),
             any::<[u8; 32]>().prop_map(Seed::ChaCha),
             any::<Vec<u8>>()
-                .prop_map(|data| Seed::PassThrough(None, data.into())),
+                .prop_map(|raw| Seed::PassThrough(None, raw.into())),
             any::<[u8; 32]>().prop_map(Seed::Recorder),
         ];
         crate::strict::ensure_property(
@@ -901,5 +931,83 @@ mod test {
             expected == rng.bytes_used(),
             "the recorder replays exactly the bytes it emitted",
         )
+    }
+
+    #[test]
+    fn try_from_bytes_accepts_correct_seed_lengths() -> Result<(), TestFailure>
+    {
+        ensure_all(&[
+            (
+                Seed::try_from_bytes(RngAlgorithm::XorShift, &[0; 16]).is_ok(),
+                "a 16-byte XorShift seed is accepted",
+            ),
+            (
+                Seed::try_from_bytes(RngAlgorithm::ChaCha, &[0; 32]).is_ok(),
+                "a 32-byte ChaCha seed is accepted",
+            ),
+            (
+                Seed::try_from_bytes(RngAlgorithm::Recorder, &[0; 32]).is_ok(),
+                "a 32-byte Recorder seed is accepted",
+            ),
+            (
+                Seed::try_from_bytes(RngAlgorithm::PassThrough, &[]).is_ok(),
+                "PassThrough accepts any seed length, including empty",
+            ),
+        ])
+    }
+
+    #[test]
+    fn try_from_bytes_rejects_wrong_seed_lengths() -> Result<(), TestFailure> {
+        let xorshift =
+            Seed::try_from_bytes(RngAlgorithm::XorShift, &[0; 15]).err();
+        let chacha = Seed::try_from_bytes(RngAlgorithm::ChaCha, &[0; 31]).err();
+        let recorder =
+            Seed::try_from_bytes(RngAlgorithm::Recorder, &[0; 33]).err();
+        let render = |error: super::SeedLengthError| error.to_string();
+        ensure_eq(
+            &"XorShift requires a 16-byte seed".to_owned(),
+            &ensure_some(xorshift, "a 15-byte XorShift seed is rejected")
+                .map(render)?,
+            "the XorShift length error keeps the legacy panic text",
+        )?;
+        ensure_eq(
+            &"ChaCha requires a 32-byte seed".to_owned(),
+            &ensure_some(chacha, "a 31-byte ChaCha seed is rejected")
+                .map(render)?,
+            "the ChaCha length error keeps the legacy panic text",
+        )?;
+        ensure_eq(
+            &"Recorder requires a 32-byte seed".to_owned(),
+            &ensure_some(recorder, "a 33-byte Recorder seed is rejected")
+                .map(render)?,
+            "the Recorder length error keeps the legacy panic text",
+        )
+    }
+
+    #[test]
+    fn persistence_parser_rejects_malformed_payloads() -> Result<(), TestFailure>
+    {
+        ensure_all(&[
+            (
+                Seed::from_persistence("cc abc").is_none(),
+                "an odd-length base16 payload is rejected",
+            ),
+            (
+                Seed::from_persistence("cc").is_none(),
+                "a missing ChaCha payload is rejected",
+            ),
+            (
+                Seed::from_persistence("xs 1 2 3").is_none(),
+                "a short XorShift dword list is rejected",
+            ),
+            (
+                Seed::from_persistence("").is_none(),
+                "an empty line parses to no seed",
+            ),
+            (
+                Seed::from_persistence("pt").is_some(),
+                "a bare PassThrough key parses as the empty seed",
+            ),
+        ])
     }
 }

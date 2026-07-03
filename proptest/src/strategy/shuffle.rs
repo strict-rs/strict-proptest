@@ -34,6 +34,23 @@ pub trait Shuffleable {
     fn shuffle_swap(&mut self, a: usize, b: usize);
 }
 
+/// Swap the elements at `a` and `b` when both indices are in bounds; an
+/// out-of-bounds pair leaves the slice untouched. Callers draw indices below
+/// `shuffle_len()`, so the untouched arm is unreachable in normal operation.
+fn swap_if_in_bounds<T>(slice: &mut [T], a: usize, b: usize) {
+    if a == b {
+        return;
+    }
+    let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+    if let Some((head, tail)) = slice.split_at_mut_checked(hi) {
+        if let (Some(first), Some(second)) =
+            (head.get_mut(lo), tail.first_mut())
+        {
+            core::mem::swap(first, second);
+        }
+    }
+}
+
 macro_rules! shuffleable {
     ($($t:tt)*) => {
         impl<T> Shuffleable for $($t)* {
@@ -42,7 +59,7 @@ macro_rules! shuffleable {
             }
 
             fn shuffle_swap(&mut self, a: usize, b: usize) {
-                self.swap(a, b);
+                swap_if_in_bounds(self, a, b);
             }
         }
     }
@@ -50,7 +67,20 @@ macro_rules! shuffleable {
 
 shuffleable!([T]);
 shuffleable!(Vec<T>);
-shuffleable!(VecDeque<T>);
+
+impl<T> Shuffleable for VecDeque<T> {
+    fn shuffle_len(&self) -> usize {
+        self.len()
+    }
+
+    /// `VecDeque::swap` panics out of bounds, so both indices are guarded
+    /// first; callers draw indices below `shuffle_len()`.
+    fn shuffle_swap(&mut self, a: usize, b: usize) {
+        if a < self.len() && b < self.len() {
+            self.swap(a, b);
+        }
+    }
+}
 // Zero- and 1-length arrays aren't usefully shuffleable, but are included to
 // simplify external macros that may try to use them anyway.
 shuffleable!([T; 0]);
@@ -151,17 +181,17 @@ where
     type Value = V::Value;
 
     fn current(&self) -> V::Value {
-        let mut value = self.inner.current();
-        let len = value.shuffle_len();
+        let mut permuted = self.inner.current();
+        let len = permuted.shuffle_len();
         // The maximum distance to swap elements. This could be larger than
-        // `value` if `value` has reduced size during shrinking; that's OK,
-        // since we only use this to filter swaps.
+        // the permuted collection if it has reduced size during shrinking;
+        // that's OK, since we only use this to filter swaps.
         let max_swap = self.init_dist(len);
 
         // If empty collection or all swaps will be filtered out, there's
         // nothing to shuffle.
         if 0 == len || 0 == max_swap {
-            return value;
+            return permuted;
         }
 
         let mut rng = self.rng.clone();
@@ -172,11 +202,11 @@ where
             // generate the same sequence of random numbers every time.
             let end_index = rng.random_range(start_index..len);
             if end_index - start_index <= max_swap {
-                value.shuffle_swap(start_index, end_index);
+                permuted.shuffle_swap(start_index, end_index);
             }
         }
 
-        value
+        permuted
     }
 
     fn simplify(&mut self) -> bool {
@@ -297,5 +327,54 @@ mod test {
             collection::vec(0i32..1000, 5..10).prop_shuffle(),
             None,
         );
+    }
+
+    #[test]
+    fn swap_if_in_bounds_swaps_in_bounds_pairs() -> Result<(), TestFailure> {
+        let mut values = [1, 2, 3, 4];
+        swap_if_in_bounds(&mut values, 0, 3);
+        ensure_eq(
+            &"[4, 2, 3, 1]".to_owned(),
+            &format!("{values:?}"),
+            "an in-bounds pair swaps both elements",
+        )?;
+        swap_if_in_bounds(&mut values, 2, 2);
+        ensure_eq(
+            &"[4, 2, 3, 1]".to_owned(),
+            &format!("{values:?}"),
+            "equal indices leave the slice unchanged",
+        )
+    }
+
+    #[test]
+    fn swap_if_in_bounds_ignores_out_of_bounds_pairs() -> Result<(), TestFailure>
+    {
+        let mut values = [1, 2, 3];
+        swap_if_in_bounds(&mut values, 0, 3);
+        swap_if_in_bounds(&mut values, 5, 1);
+        swap_if_in_bounds(&mut values, 9, 9);
+        ensure_eq(
+            &"[1, 2, 3]".to_owned(),
+            &format!("{values:?}"),
+            "out-of-bounds pairs leave the slice untouched",
+        )
+    }
+
+    #[test]
+    fn vec_deque_swap_is_bounds_guarded() -> Result<(), TestFailure> {
+        let mut deque: VecDeque<i32> = VecDeque::from(vec![1, 2, 3]);
+        deque.shuffle_swap(0, 2);
+        ensure_eq(
+            &"[3, 2, 1]".to_owned(),
+            &format!("{deque:?}"),
+            "an in-bounds pair swaps both deque elements",
+        )?;
+        deque.shuffle_swap(0, 3);
+        deque.shuffle_swap(7, 1);
+        ensure_eq(
+            &"[3, 2, 1]".to_owned(),
+            &format!("{deque:?}"),
+            "out-of-bounds pairs leave the deque untouched",
+        )
     }
 }

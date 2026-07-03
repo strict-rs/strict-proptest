@@ -818,6 +818,52 @@ impl Default for CheckStrategySanityOptions {
     }
 }
 
+/// Drive a fresh clone of `state` to its shrink fixed point, panicking once
+/// `simplify()`/`complicate()` keep reporting change past 65536 steps — a
+/// near-certain infinite loop in the strategy's shrink state machine.
+fn assert_shrink_converges<V: ValueTree + Clone + fmt::Debug>(state: &V) {
+    let mut state = state.clone();
+    let mut count = 0;
+    while state.simplify() || state.complicate() {
+        count += 1;
+        if count > 65536 {
+            panic!("Failed to converge on any value. State:\n{:#?}", state);
+        }
+    }
+}
+
+/// Complicate `complicated` until it reports no further change, returning
+/// the last state that still reported a change and the number of
+/// complications applied; panics past 65536 complications (a possible
+/// infinite loop), citing `full_state` in the message.
+fn complicate_to_fixed_point<V: ValueTree + Clone + fmt::Debug>(
+    complicated: &mut V,
+    full_state: &V,
+) -> (V, u32) {
+    let mut prev_complicated = complicated.clone();
+    let mut num_complications = 0u32;
+    loop {
+        if !complicated.complicate() {
+            break;
+        }
+        prev_complicated = complicated.clone();
+        num_complications += 1;
+
+        if num_complications > 65_536 {
+            panic!(
+                "complicate() returned true over 65536 times in a \
+                 row; aborting due to possible infinite loop. \
+                 If this is not an infinite loop, it may be \
+                 necessary to reconsider how shrinking is \
+                 implemented or use a simpler test strategy. \
+                 Internal state:\n{:#?}",
+                full_state
+            );
+        }
+    }
+    (prev_complicated, num_complications)
+}
+
 /// Run some tests on the given `Strategy` to ensure that it upholds the
 /// simplify/complicate contracts.
 ///
@@ -881,19 +927,7 @@ pub fn check_strategy_sanity<S: Strategy>(
             }
         }
 
-        {
-            let mut state = state.clone();
-            let mut count = 0;
-            while state.simplify() || state.complicate() {
-                count += 1;
-                if count > 65536 {
-                    panic!(
-                        "Failed to converge on any value. State:\n{:#?}",
-                        state
-                    );
-                }
-            }
-        }
+        assert_shrink_converges(&state);
 
         let mut num_simplifies = 0;
         let mut before_simplified;
@@ -923,27 +957,8 @@ pub fn check_strategy_sanity<S: Strategy>(
                 );
             }
 
-            let mut prev_complicated = complicated.clone();
-            let mut num_complications = 0;
-            loop {
-                if !complicated.complicate() {
-                    break;
-                }
-                prev_complicated = complicated.clone();
-                num_complications += 1;
-
-                if num_complications > 65_536 {
-                    panic!(
-                        "complicate() returned true over 65536 times in a \
-                         row; aborting due to possible infinite loop. \
-                         If this is not an infinite loop, it may be \
-                         necessary to reconsider how shrinking is \
-                         implemented or use a simpler test strategy. \
-                         Internal state:\n{:#?}",
-                        state
-                    );
-                }
-            }
+            let (prev_complicated, num_complications) =
+                complicate_to_fixed_point(&mut complicated, &state);
 
             assert_same!(
                 before_simplified.current(),

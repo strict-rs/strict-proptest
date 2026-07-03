@@ -41,6 +41,10 @@ const NESTED_TUPLE_CHUNK_SIZE: usize = 9;
 /// to rely on this (and the user shouldn't be able to..).
 const TOP_PARAM_NAME: &str = "_top";
 
+/// One summand of a union strategy: a constructor together with its relative
+/// selection weight.
+pub type WeightedCtor = (u32, Ctor);
+
 /// The name of the variable name used for user facing parameter types
 /// specified in a `#[proptest(params = "<type>")]` attribute.
 ///
@@ -168,10 +172,10 @@ pub fn pair_existential(ty: syn::Type, strat: syn::Expr) -> StratPair {
 }
 
 /// The type and constructor for a strategy that always returns the value
-/// provided in the expression `val`.
+/// provided in the expression `value_expr`.
 /// This is statically dispatched since no erasure is needed or used.
-pub fn pair_value(ty: syn::Type, val: syn::Expr) -> StratPair {
-    (Strategy::Value(ty), Ctor::Value(val))
+pub fn pair_value(ty: syn::Type, value_expr: syn::Expr) -> StratPair {
+    (Strategy::Value(ty), Ctor::Value(value_expr))
 }
 
 /// Same as `pair_existential` for the `Self` type.
@@ -180,8 +184,8 @@ pub fn pair_existential_self(strat: syn::Expr) -> StratPair {
 }
 
 /// Same as `pair_value` for the `Self` type.
-pub fn pair_value_self(val: syn::Expr) -> StratPair {
-    pair_value(self_ty(), val)
+pub fn pair_value_self(value_expr: syn::Expr) -> StratPair {
+    pair_value(self_ty(), value_expr)
 }
 
 /// Erased strategy for a fixed value.
@@ -226,7 +230,7 @@ pub fn pair_map(
 /// strategy that used the given strategies with probabilities based on the
 /// assigned relative weights for each strategy.
 pub fn pair_oneof(
-    (strats, ctors): (Vec<Strategy>, Vec<(u32, Ctor)>),
+    (strats, ctors): (Vec<Strategy>, Vec<WeightedCtor>),
 ) -> StratPair {
     (Strategy::Union(strats.into()), Ctor::Union(ctors.into()))
 }
@@ -436,7 +440,7 @@ pub enum Ctor {
     Map(Box<[Ctor]>, MapClosure),
     /// A strategy that randomly selects one of the given relative-weighted
     /// strategies.
-    Union(Box<[(u32, Ctor)]>),
+    Union(Box<[WeightedCtor]>),
     /// A let binding that moves to and declares the `ToReg` from the `FromReg`
     /// as well as the strategy that uses the `ToReg`.
     Extract(Box<Ctor>, ToReg, FromReg),
@@ -527,6 +531,12 @@ impl ToTokens for Ctor {
 
 struct NestedTuple<'a, T>(&'a [T]);
 
+/// The chunked tail of a `NestedTuple`: each rendering step emits one chunk
+/// of elements linearly and nests the remaining chunks as the final tuple
+/// element, so arbitrarily long element lists stay within proptest's fixed
+/// tuple arities.
+struct NestedTupleTail<'a, T>(::std::slice::Chunks<'a, T>);
+
 impl<'a, T: ToTokens> ToTokens for NestedTuple<'a, T> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let NestedTuple(elems) = self;
@@ -536,24 +546,23 @@ impl<'a, T: ToTokens> ToTokens for NestedTuple<'a, T> {
             x.to_tokens(tokens);
         } else {
             let chunks = elems.chunks(NESTED_TUPLE_CHUNK_SIZE);
-            Recurse(&chunks).to_tokens(tokens);
+            NestedTupleTail(chunks).to_tokens(tokens);
         }
+    }
+}
 
-        struct Recurse<'a, T: ToTokens>(&'a ::std::slice::Chunks<'a, T>);
-
-        impl<'a, T: ToTokens> ToTokens for Recurse<'a, T> {
-            fn to_tokens(&self, tokens: &mut TokenStream) {
-                let mut chunks = self.0.clone();
-                if let Some(head) = chunks.next() {
-                    if let [c] = head {
-                        // Only one element left - no need to nest.
-                        quote_append!(tokens, #c);
-                    } else {
-                        let tail = Recurse(&chunks);
-                        quote_append!(tokens, (#(#head,)* #tail));
-                    }
-                }
-            }
+impl<'a, T: ToTokens> ToTokens for NestedTupleTail<'a, T> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let mut chunks = self.0.clone();
+        let Some(head) = chunks.next() else {
+            return;
+        };
+        if let [c] = head {
+            // Only one element left - no need to nest.
+            quote_append!(tokens, #c);
+        } else {
+            let tail = NestedTupleTail(chunks);
+            quote_append!(tokens, (#(#head,)* #tail));
         }
     }
 }
@@ -613,7 +622,7 @@ fn map_ctor_to_tokens(
 ///         (19, ..)))
 /// ```
 #[cfg(not(feature = "boxed_union"))]
-fn union_ctor_to_tokens(tokens: &mut TokenStream, ctors: &[(u32, Ctor)]) {
+fn union_ctor_to_tokens(tokens: &mut TokenStream, ctors: &[WeightedCtor]) {
     if ctors.is_empty() {
         return;
     }
@@ -625,48 +634,17 @@ fn union_ctor_to_tokens(tokens: &mut TokenStream, ctors: &[(u32, Ctor)]) {
     }
 
     let mut chunks = ctors.chunks(UNION_CHUNK_SIZE);
-    let chunk = chunks.next().unwrap();
-    let head = chunk.iter().map(wrap_arc);
-    let tail = Recurse(weight_sum(ctors) - weight_sum(chunk), chunks);
+    let Some(chunk) = chunks.next() else {
+        // Unreachable in practice: a non-empty slice yields at least one
+        // chunk; the guard exists so this constructor path cannot panic.
+        return;
+    };
+    let head = chunk.iter().map(arc_weighted_ctor);
+    let tail = WeightedUnionTail(weight_sum(ctors) - weight_sum(chunk), chunks);
 
     quote_append!(tokens,
         _proptest::strategy::TupleUnion::new(( #(#head,)* #tail ))
     );
-
-    struct Recurse<'a>(u32, ::std::slice::Chunks<'a, (u32, Ctor)>);
-
-    impl<'a> ToTokens for Recurse<'a> {
-        fn to_tokens(&self, tokens: &mut TokenStream) {
-            let (tweight, mut chunks) = (self.0, self.1.clone());
-
-            if let Some(chunk) = chunks.next() {
-                if let [(w, c)] = chunk {
-                    // Only one element left - no need to nest.
-                    quote_append!(tokens, (#w, ::std::sync::Arc::new(#c)) );
-                } else {
-                    let head = chunk.iter().map(wrap_arc);
-                    let tail = Recurse(tweight - weight_sum(chunk), chunks);
-                    quote_append!(tokens,
-                        (#tweight, ::std::sync::Arc::new(
-                            _proptest::strategy::TupleUnion::new((
-                                #(#head,)* #tail
-                            ))))
-                    );
-                }
-            }
-        }
-    }
-
-    fn weight_sum(ctors: &[(u32, Ctor)]) -> u32 {
-        use std::num::Wrapping;
-        let Wrapping(x) = ctors.iter().map(|&(w, _)| Wrapping(w)).sum();
-        x
-    }
-
-    fn wrap_arc(arg: &(u32, Ctor)) -> TokenStream {
-        let (w, c) = arg;
-        quote!( (#w, ::std::sync::Arc::new(#c)) )
-    }
 }
 
 /// Tokenizes a weighted list of `Strategy`.
@@ -684,41 +662,98 @@ fn union_strat_to_tokens(tokens: &mut TokenStream, strats: &[Strategy]) {
     }
 
     let mut chunks = strats.chunks(UNION_CHUNK_SIZE);
-    let chunk = chunks.next().unwrap();
-    let head = chunk.iter().map(wrap_arc);
-    let tail = Recurse(chunks);
+    let Some(chunk) = chunks.next() else {
+        // Unreachable in practice: a non-empty slice yields at least one
+        // chunk; the guard exists so this type path cannot panic.
+        return;
+    };
+    let head = chunk.iter().map(arc_strategy_entry);
+    let tail = UnionTypeTail(chunks);
 
     quote_append!(tokens,
         _proptest::strategy::TupleUnion<( #(#head,)* #tail )>
     );
+}
 
-    struct Recurse<'a>(::std::slice::Chunks<'a, Strategy>);
+/// The chunked tail of a nested `TupleUnion` *constructor*: each rendering
+/// step emits one chunk of `(weight, Arc::new(ctor))` summands linearly and
+/// nests the remaining chunks as one weighted summand carrying the residual
+/// weight, mirroring the layout described on `union_ctor_to_tokens`.
+#[cfg(not(feature = "boxed_union"))]
+struct WeightedUnionTail<'a>(u32, ::std::slice::Chunks<'a, WeightedCtor>);
 
-    impl<'a> ToTokens for Recurse<'a> {
-        fn to_tokens(&self, tokens: &mut TokenStream) {
-            let mut chunks = self.0.clone();
+#[cfg(not(feature = "boxed_union"))]
+impl<'a> ToTokens for WeightedUnionTail<'a> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let (tweight, mut chunks) = (self.0, self.1.clone());
 
-            if let Some(chunk) = chunks.next() {
-                if let [s] = chunk {
-                    // Only one element left - no need to nest.
-                    quote_append!(tokens, (u32, ::std::sync::Arc<#s>) );
-                } else {
-                    let head = chunk.iter().map(wrap_arc);
-                    let tail = Recurse(chunks);
-                    quote_append!(tokens,
-                        (u32,
-                         ::std::sync::Arc<_proptest::strategy::TupleUnion<(
-                             #(#head,)* #tail
-                         )>>)
-                    );
-                }
-            }
+        let Some(chunk) = chunks.next() else {
+            return;
+        };
+        if let [(w, c)] = chunk {
+            // Only one element left - no need to nest.
+            quote_append!(tokens, (#w, ::std::sync::Arc::new(#c)) );
+        } else {
+            let head = chunk.iter().map(arc_weighted_ctor);
+            let tail = WeightedUnionTail(tweight - weight_sum(chunk), chunks);
+            quote_append!(tokens,
+                (#tweight, ::std::sync::Arc::new(
+                    _proptest::strategy::TupleUnion::new((
+                        #(#head,)* #tail
+                    ))))
+            );
         }
     }
+}
 
-    fn wrap_arc(s: &Strategy) -> TokenStream {
-        quote!( (u32, ::std::sync::Arc<#s>) )
+/// The chunked tail of a nested `TupleUnion` *type*: the type-level mirror
+/// of `WeightedUnionTail`, emitting `(u32, Arc<Strategy>)` entries.
+#[cfg(not(feature = "boxed_union"))]
+struct UnionTypeTail<'a>(::std::slice::Chunks<'a, Strategy>);
+
+#[cfg(not(feature = "boxed_union"))]
+impl<'a> ToTokens for UnionTypeTail<'a> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let mut chunks = self.0.clone();
+
+        let Some(chunk) = chunks.next() else {
+            return;
+        };
+        if let [s] = chunk {
+            // Only one element left - no need to nest.
+            quote_append!(tokens, (u32, ::std::sync::Arc<#s>) );
+        } else {
+            let head = chunk.iter().map(arc_strategy_entry);
+            let tail = UnionTypeTail(chunks);
+            quote_append!(tokens,
+                (u32,
+                 ::std::sync::Arc<_proptest::strategy::TupleUnion<(
+                     #(#head,)* #tail
+                 )>>)
+            );
+        }
     }
+}
+
+/// Wrapping sum of the relative weights of a weighted-constructor chunk.
+#[cfg(not(feature = "boxed_union"))]
+fn weight_sum(ctors: &[WeightedCtor]) -> u32 {
+    use std::num::Wrapping;
+    let Wrapping(x) = ctors.iter().map(|&(w, _)| Wrapping(w)).sum();
+    x
+}
+
+/// One `(weight, Arc::new(ctor))` summand of a `TupleUnion` constructor.
+#[cfg(not(feature = "boxed_union"))]
+fn arc_weighted_ctor(arg: &WeightedCtor) -> TokenStream {
+    let (w, c) = arg;
+    quote!( (#w, ::std::sync::Arc::new(#c)) )
+}
+
+/// One `(u32, Arc<Strategy>)` summand of a `TupleUnion` type.
+#[cfg(not(feature = "boxed_union"))]
+fn arc_strategy_entry(s: &Strategy) -> TokenStream {
+    quote!( (u32, ::std::sync::Arc<#s>) )
 }
 
 /// Tokenizes a weighted list of `Ctor`.
@@ -726,7 +761,10 @@ fn union_strat_to_tokens(tokens: &mut TokenStream, strats: &[Strategy]) {
 /// This can be used instead of `union_ctor_to_tokens` to generate a boxing
 /// macro.
 #[cfg(feature = "boxed_union")]
-fn union_ctor_to_tokens_boxed(tokens: &mut TokenStream, ctors: &[(u32, Ctor)]) {
+fn union_ctor_to_tokens_boxed(
+    tokens: &mut TokenStream,
+    ctors: &[WeightedCtor],
+) {
     if ctors.is_empty() {
         return;
     }
@@ -744,7 +782,7 @@ fn union_ctor_to_tokens_boxed(tokens: &mut TokenStream, ctors: &[(u32, Ctor)]) {
         _proptest::strategy::Union::new_weighted(vec![ #(#ctors_boxed,)* ])
     );
 
-    fn wrap_boxed(arg: &(u32, Ctor)) -> TokenStream {
+    fn wrap_boxed(arg: &WeightedCtor) -> TokenStream {
         let (w, c) = arg;
         quote!( (#w, _proptest::strategy::Strategy::boxed(#c)) )
     }

@@ -13,7 +13,6 @@ use std::fmt;
 use std::sync::mpsc::*;
 use std::sync::*;
 use std::thread;
-use std::time::Duration;
 
 use crate::arbitrary::*;
 use crate::strategy::statics::static_map;
@@ -25,15 +24,12 @@ use crate::strategy::*;
 
 // Not doing Weak because .upgrade() would always return None.
 
-#[cfg(not(feature = "unstable"))]
-wrap_ctor!(Mutex);
-#[cfg(feature = "unstable")]
-wrap_from!(Mutex);
-
-#[cfg(not(feature = "unstable"))]
-wrap_ctor!(RwLock);
-#[cfg(feature = "unstable")]
-wrap_from!(RwLock);
+// Mutex, RwLock, and Condvar are deliberately absent: the strict lint
+// policy bans the poisoning-prone std locks outright (clippy.toml
+// disallowed-types), so this crate offers no `Arbitrary` for them.
+// WaitTimeoutResult is likewise absent — it can only be produced by a real
+// `Condvar::wait_timeout` call, which needs those banned locks plus
+// panicking lock/unwrap internals.
 
 arbitrary!(Barrier, SMapped<u16, Self>;  // usize would be extreme!
     static_map(any::<u16>(), |n| Barrier::new(n as usize))
@@ -44,14 +40,7 @@ arbitrary!(BarrierWaitResult,
     prop_oneof![LazyJust::new(bwr_true), LazyJust::new(bwr_false)]
 );
 
-lazy_just!(
-    Condvar, Default::default;
-    Once, Once::new
-);
-
-arbitrary!(WaitTimeoutResult, TupleUnion<(WA<Just<Self>>, WA<Just<Self>>)>;
-    prop_oneof![Just(wtr_true()), Just(wtr_false())]
-);
+lazy_just!(Once, Once::new);
 
 fn bwr_true() -> BarrierWaitResult {
     Barrier::new(1).wait()
@@ -59,31 +48,31 @@ fn bwr_true() -> BarrierWaitResult {
 
 fn bwr_false() -> BarrierWaitResult {
     let barrier = Arc::new(Barrier::new(2));
-    let b2 = barrier.clone();
-    let jh = thread::spawn(move || b2.wait());
-    let bwr1 = barrier.wait();
-    let bwr2 = jh.join().unwrap();
-    if bwr1.is_leader() { bwr2 } else { bwr1 }
-}
-
-fn wtr_false() -> WaitTimeoutResult {
-    let cvar = Arc::new(Condvar::new());
-    let cvar2 = cvar.clone();
-    thread::spawn(move || {
-        cvar2.notify_one();
-    });
-    let lock = Mutex::new(());
-    let wt = cvar.wait_timeout(lock.lock().unwrap(), Duration::from_millis(1));
-    let (_unused, wtr) = wt.unwrap();
-    wtr
-}
-
-fn wtr_true() -> WaitTimeoutResult {
-    let cvar = Condvar::new();
-    let lock = Mutex::new(());
-    let wt = cvar.wait_timeout(lock.lock().unwrap(), Duration::from_millis(0));
-    let (_unused, wtr) = wt.unwrap();
-    wtr
+    let b2 = Arc::clone(&barrier);
+    // `thread::Builder::spawn` reports spawn failure as a `Result` where
+    // `thread::spawn` would panic. The second participant must exist before
+    // this thread may call `wait` (a lone `wait` on a 2-barrier blocks
+    // forever), so on spawn failure degrade to the single-participant
+    // (leader) result instead.
+    match thread::Builder::new().spawn(move || b2.wait()) {
+        Ok(join_handle) => {
+            let bwr1 = barrier.wait();
+            match join_handle.join() {
+                Ok(bwr2) => {
+                    if bwr1.is_leader() {
+                        bwr2
+                    } else {
+                        bwr1
+                    }
+                }
+                // `join` only fails if the child panicked, and
+                // `Barrier::wait` does not panic — keep this total by
+                // degrading to the already-held result.
+                Err(_) => bwr1,
+            }
+        }
+        Err(_) => bwr_true(),
+    }
 }
 
 arbitrary!(RecvError; RecvError);
@@ -142,13 +131,9 @@ arbitrary!([A: fmt::Debug] (SyncSender<A>, IntoIter<A>), SMapped<u16, Self>;
 #[cfg(test)]
 mod test {
     no_panic_test!(
-        mutex => Mutex<u8>,
-        rw_lock => RwLock<u8>,
         barrier => Barrier,
         barrier_wait_result => BarrierWaitResult,
-        condvar => Condvar,
         once => Once,
-        wait_timeout_result => WaitTimeoutResult,
         recv_error => RecvError,
         send_error => SendError<u8>,
         recv_timeout_error => RecvTimeoutError,

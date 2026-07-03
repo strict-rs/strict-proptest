@@ -78,12 +78,12 @@ impl<S: Strategy, F: FilterFn<S::Value> + Clone> Strategy for Filter<S, F> {
 
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
         loop {
-            let val = self.source.new_tree(runner)?;
-            if !self.fun.apply(&val.current()) {
+            let source_tree = self.source.new_tree(runner)?;
+            if !self.fun.apply(&source_tree.current()) {
                 runner.reject_local(self.whence.clone())?;
             } else {
                 return Ok(Filter {
-                    source: val,
+                    source: source_tree,
                     whence: "unused".into(),
                     fun: self.fun.clone(),
                 });

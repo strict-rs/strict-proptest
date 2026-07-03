@@ -35,7 +35,7 @@ fn parse_lit_int(mut s: &str) -> Option<u128> {
         _ => unreachable!(),
     };
 
-    let mut value = 0u128;
+    let mut magnitude = 0u128;
     loop {
         let b = byte(s, 0);
         let digit = match b {
@@ -57,11 +57,11 @@ fn parse_lit_int(mut s: &str) -> Option<u128> {
             panic!("Unexpected digit {:x} out of base range", digit);
         }
 
-        value = value.checked_mul(base)?.checked_add(digit)?;
+        magnitude = magnitude.checked_mul(base)?.checked_add(digit)?;
         s = &s[1..];
     }
 
-    Some(value)
+    Some(magnitude)
 }
 
 /// Parse a suffix of an integer literal.
@@ -77,27 +77,27 @@ fn parse_suffix(lit: &str) -> Option<&'static str> {
 
 /// Interprets an integer literal in a string.
 fn eval_str_int(lit: &str) -> Option<u128> {
-    let val = parse_lit_int(lit)?;
+    let parsed = parse_lit_int(lit)?;
     let checked_val = if let Some(suffix) = parse_suffix(lit) {
         match suffix {
-            "i8" if val <= i8::MAX as u128 => val,
-            "i16" if val <= i16::MAX as u128 => val,
-            "i32" if val <= i32::MAX as u128 => val,
-            "i64" if val <= i64::MAX as u128 => val,
-            "u8" if val <= u128::from(u8::MAX) => val,
-            "u16" if val <= u128::from(u16::MAX) => val,
-            "u32" if val <= u128::from(u32::MAX) => val,
-            "u64" if val <= u128::from(u64::MAX) => val,
-            "usize" if val <= usize::MAX as u128 => val,
-            "isize" if val <= isize::MAX as u128 => val,
-            "u128" => val,
-            "i128" if val <= i128::MAX as u128 => val,
+            "i8" if parsed <= i8::MAX as u128 => parsed,
+            "i16" if parsed <= i16::MAX as u128 => parsed,
+            "i32" if parsed <= i32::MAX as u128 => parsed,
+            "i64" if parsed <= i64::MAX as u128 => parsed,
+            "u8" if parsed <= u128::from(u8::MAX) => parsed,
+            "u16" if parsed <= u128::from(u16::MAX) => parsed,
+            "u32" if parsed <= u128::from(u32::MAX) => parsed,
+            "u64" if parsed <= u128::from(u64::MAX) => parsed,
+            "usize" if parsed <= usize::MAX as u128 => parsed,
+            "isize" if parsed <= isize::MAX as u128 => parsed,
+            "u128" => parsed,
+            "i128" if parsed <= i128::MAX as u128 => parsed,
 
             // Does not fit in suffix:
             _ => return None,
         }
     } else {
-        val
+        parsed
     };
 
     Some(checked_val)

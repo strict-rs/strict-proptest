@@ -20,7 +20,9 @@ lazy_just!(BorrowError, || {
     #[allow(clippy::let_and_return)]
     {
         let _rc = RefCell::new(());
-        let _bm = _rc.borrow_mut();
+        // The first borrow of a fresh cell always succeeds; holding the
+        // guard (inside the Ok) keeps the cell mutably borrowed.
+        let _bm = _rc.try_borrow_mut();
         let _tb = _rc.try_borrow();
         let ret = _rc.try_borrow().expect_err("reborrowed RefCell");
         ret
@@ -31,7 +33,9 @@ lazy_just!(BorrowMutError, || {
     #[allow(clippy::let_and_return)]
     {
         let _rc = RefCell::new(());
-        let _bm = _rc.borrow_mut();
+        // The first borrow of a fresh cell always succeeds; holding the
+        // guard (inside the Ok) keeps the cell mutably borrowed.
+        let _bm = _rc.try_borrow_mut();
         let _tb = _rc.try_borrow();
         let ret = _rc.try_borrow_mut().expect_err("reborrowed RefCell");
         ret

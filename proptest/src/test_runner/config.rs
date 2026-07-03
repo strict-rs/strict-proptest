@@ -22,6 +22,7 @@ pub fn contextualize_config(mut result: Config) -> Config {
     use std::ffi::OsString;
     use std::fmt;
     use std::str::FromStr;
+    use std::string::ToString;
 
     const CASES: &str = "PROPTEST_CASES";
 
@@ -44,104 +45,112 @@ pub fn contextualize_config(mut result: Config) -> Config {
     fn parse_or_warn<T: FromStr + fmt::Display>(
         src: &OsString,
         dst: &mut T,
-        typ: &str,
-        var: &str,
+        typ: &'static str,
+        var: &'static str,
     ) {
+        use crate::test_runner::diagnostics::{self, RunnerDiagnostic};
+        use std::borrow::ToOwned;
+        use std::string::ToString;
+
         if let Some(src) = src.to_str() {
-            if let Ok(value) = src.parse() {
-                *dst = value;
+            if let Ok(parsed) = src.parse() {
+                *dst = parsed;
             } else {
-                eprintln!(
-                    "proptest: The env-var {}={} can't be parsed as {}, \
-                     using default of {}.",
-                    var, src, typ, *dst
-                );
+                diagnostics::emit(RunnerDiagnostic::EnvVarUnparsable {
+                    var,
+                    value: src.to_owned(),
+                    typ,
+                    default: dst.to_string(),
+                });
             }
         } else {
-            eprintln!(
-                "proptest: The env-var {} is not valid, using \
-                 default of {}.",
-                var, *dst
-            );
+            diagnostics::emit(RunnerDiagnostic::EnvVarNotUnicode {
+                var,
+                default: dst.to_string(),
+            });
         }
     }
 
-    for (var, value) in
+    for (var, raw_value) in
         env::vars_os().filter_map(|(k, v)| k.into_string().ok().map(|k| (k, v)))
     {
         let var = var.as_str();
 
         #[cfg(feature = "fork")]
         if var == FORK {
-            parse_or_warn(&value, &mut result.fork, "bool", FORK);
+            parse_or_warn(&raw_value, &mut result.fork, "bool", FORK);
             continue;
         }
 
         #[cfg(feature = "timeout")]
         if var == TIMEOUT {
-            parse_or_warn(&value, &mut result.timeout, "timeout", TIMEOUT);
+            parse_or_warn(&raw_value, &mut result.timeout, "timeout", TIMEOUT);
             continue;
         }
 
         if var == CASES {
-            parse_or_warn(&value, &mut result.cases, "u32", CASES);
+            parse_or_warn(&raw_value, &mut result.cases, "u32", CASES);
         } else if var == MAX_LOCAL_REJECTS {
             parse_or_warn(
-                &value,
+                &raw_value,
                 &mut result.max_local_rejects,
                 "u32",
                 MAX_LOCAL_REJECTS,
             );
         } else if var == MAX_GLOBAL_REJECTS {
             parse_or_warn(
-                &value,
+                &raw_value,
                 &mut result.max_global_rejects,
                 "u32",
                 MAX_GLOBAL_REJECTS,
             );
         } else if var == MAX_FLAT_MAP_REGENS {
             parse_or_warn(
-                &value,
+                &raw_value,
                 &mut result.max_flat_map_regens,
                 "u32",
                 MAX_FLAT_MAP_REGENS,
             );
         } else if var == MAX_SHRINK_TIME {
             parse_or_warn(
-                &value,
+                &raw_value,
                 &mut result.max_shrink_time,
                 "u32",
                 MAX_SHRINK_TIME,
             );
         } else if var == MAX_SHRINK_ITERS {
             parse_or_warn(
-                &value,
+                &raw_value,
                 &mut result.max_shrink_iters,
                 "u32",
                 MAX_SHRINK_ITERS,
             );
         } else if var == MAX_DEFAULT_SIZE_RANGE {
             parse_or_warn(
-                &value,
+                &raw_value,
                 &mut result.max_default_size_range,
                 "usize",
                 MAX_DEFAULT_SIZE_RANGE,
             );
         } else if var == VERBOSE {
-            parse_or_warn(&value, &mut result.verbose, "u32", VERBOSE);
+            parse_or_warn(&raw_value, &mut result.verbose, "u32", VERBOSE);
         } else if var == RNG_ALGORITHM {
             parse_or_warn(
-                &value,
+                &raw_value,
                 &mut result.rng_algorithm,
                 "RngAlgorithm",
                 RNG_ALGORITHM,
             );
         } else if var == RNG_SEED {
-            parse_or_warn(&value, &mut result.rng_seed, "u64", RNG_SEED);
+            parse_or_warn(&raw_value, &mut result.rng_seed, "u64", RNG_SEED);
         } else if var == DISABLE_FAILURE_PERSISTENCE {
             result.failure_persistence = None;
         } else if var.starts_with("PROPTEST_") {
-            eprintln!("proptest: Ignoring unknown env-var {}.", var);
+            crate::test_runner::diagnostics::emit(
+                crate::test_runner::diagnostics::RunnerDiagnostic::EnvVarUnknown {
+                    var: var.to_string(),
+                },
+            );
         }
     }
 

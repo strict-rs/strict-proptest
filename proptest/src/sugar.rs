@@ -1145,9 +1145,8 @@ named_arguments_tuple!(0 AN AV 1 BN BV 2 CN CV 3 DN DV 4 EN EV
 #[doc(hidden)]
 pub fn force_no_fork(config: &mut crate::test_runner::Config) {
     if config.fork() {
-        eprintln!(
-            "proptest: Forking/timeout not supported in closure-style \
-             invocations; ignoring"
+        crate::test_runner::diagnostics::emit(
+            crate::test_runner::diagnostics::RunnerDiagnostic::ClosureForkUnsupported,
         );
 
         #[cfg(feature = "fork")]

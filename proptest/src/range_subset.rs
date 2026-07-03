@@ -45,17 +45,64 @@ where
     T: Copy + Ord + fmt::Debug,
     Range<T>: ExactSizeIterator<Item = T>,
 {
+    match try_range_subset(range, size) {
+        Ok(strategy) => strategy,
+        Err(error) => panic!("{}", error),
+    }
+}
+
+/// Error returned by [`try_range_subset`] when the requested size range
+/// cannot select a subset of the index range.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RangeSubsetError {
+    /// The requested size range is empty.
+    EmptySizeRange(crate::collection::EmptySizeRange),
+    /// The requested maximum subset size exceeds the range length.
+    TooLarge {
+        /// Inclusive maximum of the requested size range.
+        size_end_incl: usize,
+        /// Length of the input range.
+        len: usize,
+    },
+}
+
+impl fmt::Display for RangeSubsetError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::EmptySizeRange(inner) => inner.fmt(f),
+            Self::TooLarge { size_end_incl, len } => write!(
+                f,
+                "Maximum size of subset {} exceeds length of input {}",
+                size_end_incl, len
+            ),
+        }
+    }
+}
+
+impl core::error::Error for RangeSubsetError {}
+
+/// Fallible form of [`range_subset`]: returns a typed error instead of
+/// panicking when `size` is an empty range or exceeds the range length.
+pub fn try_range_subset<T>(
+    range: Range<T>,
+    size: impl Into<SizeRange>,
+) -> Result<RangeSubset<T>, RangeSubsetError>
+where
+    T: Copy + Ord + fmt::Debug,
+    Range<T>: ExactSizeIterator<Item = T>,
+{
     let len = range.len();
     let size = size.into();
 
-    size.assert_nonempty();
-    assert!(
-        size.end_incl() <= len,
-        "Maximum size of subset {} exceeds length of input {}",
-        size.end_incl(),
-        len
-    );
-    RangeSubset { range, size }
+    size.ensure_nonempty()
+        .map_err(RangeSubsetError::EmptySizeRange)?;
+    if size.end_incl() > len {
+        return Err(RangeSubsetError::TooLarge {
+            size_end_incl: size.end_incl(),
+            len,
+        });
+    }
+    Ok(RangeSubset { range, size })
 }
 
 /// Strategy to generate `Vec`s by sampling a subset from an index range.
@@ -146,8 +193,8 @@ where
         self.values
             .iter()
             .enumerate()
-            .filter_map(|(index, value)| {
-                self.included_values.test(index).then_some(*value)
+            .filter_map(|(index, sampled)| {
+                self.included_values.test(index).then_some(*sampled)
             })
             .collect()
     }
@@ -246,6 +293,47 @@ mod test {
     #[test]
     fn test_sample_sanity() {
         check_strategy_sanity(range_subset(0..5, 1..3), None);
+    }
+
+    #[test]
+    fn try_range_subset_accepts_a_valid_request() -> Result<(), TestFailure> {
+        let strategy = ensure_some(
+            try_range_subset(0..8, 3..7).ok(),
+            "try_range_subset accepts a size range within the range length",
+        )?;
+        let mut runner = TestRunner::deterministic();
+        let value = ensure_some(
+            strategy.new_tree(&mut runner).ok(),
+            "the fallibly constructed strategy generates",
+        )?
+        .current();
+        ensure(
+            (3..7).contains(&value.len()),
+            "the sampled subset honors the size range",
+        )
+    }
+
+    #[test]
+    fn try_range_subset_rejects_invalid_requests() -> Result<(), TestFailure> {
+        ensure(
+            matches!(
+                try_range_subset(0..8, 2..2),
+                Err(RangeSubsetError::EmptySizeRange(_))
+            ),
+            "try_range_subset rejects an empty size range",
+        )?;
+        ensure_eq(
+            &ensure_some(
+                try_range_subset(0..3, 1..=9).err(),
+                "try_range_subset rejects a size range beyond the range \
+                 length",
+            )?,
+            &RangeSubsetError::TooLarge {
+                size_end_incl: 9,
+                len: 3,
+            },
+            "the typed error names the requested size and range length",
+        )
     }
 
     #[test]

@@ -70,23 +70,23 @@ fn derive_proptest_arbitrary(
     // Compile into our own high level IR for the impl:
     let the_impl = match ast.data {
         // Deal with structs:
-        Struct(data) => derive_struct(
+        Struct(struct_data) => derive_struct(
             ctx,
             DeriveData {
                 tracker,
                 attrs,
                 ident: ast.ident,
-                body: fields_to_vec(data.fields),
+                body: fields_to_vec(struct_data.fields),
             },
         ),
         // Deal with enums:
-        Enum(data) => derive_enum(
+        Enum(enum_data) => derive_enum(
             ctx,
             DeriveData {
                 tracker,
                 attrs,
                 ident: ast.ident,
-                body: data.variants.into_iter().collect(),
+                body: enum_data.variants.into_iter().collect(),
             },
         ),
         // Unions are not supported:
@@ -202,7 +202,7 @@ fn add_top_params(
 fn derive_product_has_params(
     ctx: Ctx,
     ut: &mut UseTracker,
-    item: &str,
+    item_kind: &str,
     closure: MapClosure,
     fields: Vec<Field>,
 ) -> DeriveResult<StratPair> {
@@ -216,10 +216,10 @@ fn derive_product_has_params(
             let attrs = attr::parse_attributes(ctx, &field.attrs)?;
 
             // Deny attributes that are only for enum variants:
-            error::if_enum_attrs_present(ctx, &attrs, item);
+            error::if_enum_attrs_present(ctx, &attrs, item_kind);
 
             // Deny setting parameters on the field since it has been set on parent:
-            error::if_specified_params(ctx, &attrs, item);
+            error::if_specified_params(ctx, &attrs, item_kind);
 
             // Determine the strategy for this field and add it to acc.
             let span = field.span();
@@ -244,7 +244,7 @@ fn product_handle_default_params(
         // (since we don't know about it):
         StratMode::Strategy(strat) => pair_existential(ty, strat),
         // Specific value - use the given expr:
-        StratMode::Value(value) => pair_value(ty, value),
+        StratMode::Value(value_expr) => pair_value(ty, value_expr),
         // Specific regex - dispatch to `_regex` function based on `ty`:
         StratMode::Regex(regex) => pair_regex(ty, regex),
         // Use Arbitrary for the given type and mark the type as used:
@@ -261,7 +261,7 @@ fn derive_product_no_params(
     ctx: Ctx,
     ut: &mut UseTracker,
     fields: Vec<Field>,
-    item: &str,
+    item_kind: &str,
 ) -> DeriveResult<PartsAcc<Ctor>> {
     // Fold into an accumulator of the strategy types and the expressions
     // that produces the strategy. We then just return that accumulator
@@ -271,7 +271,7 @@ fn derive_product_no_params(
         let attrs = attr::parse_attributes(ctx, &field.attrs)?;
 
         // Deny attributes that are only for enum variants:
-        error::if_enum_attrs_present(ctx, &attrs, item);
+        error::if_enum_attrs_present(ctx, &attrs, item_kind);
 
         let span = field.span();
         let ty = field.ty;
@@ -285,7 +285,7 @@ fn derive_product_no_params(
                     // Specific strategy - use the given expr and erase the type:
                     StratMode::Strategy(strat) => pair_existential(ty, strat),
                     // Specific value - use the given expr:
-                    StratMode::Value(value) => pair_value(ty, value),
+                    StratMode::Value(value_expr) => pair_value(ty, value_expr),
                     // Specific regex - dispatch to `_regex` function:
                     StratMode::Regex(regex) => pair_regex(ty, regex),
                     // Use Arbitrary for the given type and mark the type as used:
@@ -313,20 +313,20 @@ fn derive_product_no_params(
                                 pair_existential(ty, strat)
                             }
                             // Specific value - use the given expr in a closure and erase:
-                            StratMode::Value(value) => {
-                                pair_value_exist(ty, value)
+                            StratMode::Value(value_expr) => {
+                                pair_value_exist(ty, value_expr)
                             }
                             // Logic error by user; Pointless to specify params and
                             // regex because the params can never be used in the regex.
                             StratMode::Regex(regex) => {
-                                error::cant_set_param_and_regex(ctx, item);
+                                error::cant_set_param_and_regex(ctx, item_kind);
                                 pair_regex(ty, regex)
                             }
                             // Logic error by user.
                             // Pointless to specify params and not the strategy. Bail!
                             StratMode::Arbitrary => {
                                 error::cant_set_param_but_not_strat(
-                                    ctx, &ty, item,
+                                    ctx, &ty, item_kind,
                                 )?
                             }
                         },
@@ -460,9 +460,9 @@ fn derive_variant_with_fields<C>(
                 pair_existential_self(strat)
             }
             // Specific value - use the given expr:
-            StratMode::Value(value) => {
+            StratMode::Value(value_expr) => {
                 deny_all_attrs_on_fields(ctx, fields)?;
-                pair_value_self(value)
+                pair_value_self(value_expr)
             }
             StratMode::Regex(regex) => {
                 deny_all_attrs_on_fields(ctx, fields)?;
@@ -488,9 +488,9 @@ fn derive_variant_with_fields<C>(
                     pair_existential_self(strat)
                 }
                 // Specific value - use the given expr in a closure and erase:
-                StratMode::Value(value) => {
+                StratMode::Value(value_expr) => {
                     deny_all_attrs_on_fields(ctx, fields)?;
-                    pair_value_exist_self(value)
+                    pair_value_exist_self(value_expr)
                 }
                 // Logic error by user; Pointless to specify params and regex
                 // because the params can never be used in the regex.
@@ -561,9 +561,9 @@ fn variant_handle_default_params(
             pair_existential_self(strat)
         }
         // Specific value - use the given expr:
-        StratMode::Value(value) => {
+        StratMode::Value(value_expr) => {
             deny_all_attrs_on_fields(ctx, fields)?;
-            pair_value_self(value)
+            pair_value_self(value_expr)
         }
         StratMode::Regex(regex) => {
             deny_all_attrs_on_fields(ctx, fields)?;
@@ -669,21 +669,25 @@ fn keep_inhabited_variant(
 }
 
 /// Ensures that no other attributes than skip are present.
-fn ensure_has_only_skip_attr(ctx: Ctx, attrs: &ParsedAttributes, item: &str) {
+fn ensure_has_only_skip_attr(
+    ctx: Ctx,
+    attrs: &ParsedAttributes,
+    item_kind: &str,
+) {
     if attrs.params.is_set() {
-        error::skipped_variant_has_param(ctx, item);
+        error::skipped_variant_has_param(ctx, item_kind);
     }
 
     if attrs.strategy.is_set() {
-        error::skipped_variant_has_strat(ctx, item);
+        error::skipped_variant_has_strat(ctx, item_kind);
     }
 
     if attrs.weight.is_some() {
-        error::skipped_variant_has_weight(ctx, item);
+        error::skipped_variant_has_weight(ctx, item_kind);
     }
 
     if !attrs.filter.is_empty() {
-        error::skipped_variant_has_filter(ctx, item);
+        error::skipped_variant_has_filter(ctx, item_kind);
     }
 }
 
