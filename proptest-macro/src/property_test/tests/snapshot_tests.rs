@@ -23,8 +23,9 @@ macro_rules! snapshot_test {
 }
 
 snapshot_test!(basic_derive_example {
-    fn foo(x: i32, y: String) {
-        let x = 1;
+    fn foo(x: i32, y: String) -> ::proptest::strict::TestResult {
+        let _ = (x, y);
+        Ok(())
     }
 });
 
@@ -32,8 +33,9 @@ snapshot_test!(custom_strategy {
     fn foo(
         #[strategy = 123] x: i32,
         #[strategy = a + more()("complex") - expression!()] y: String,
-    ) {
-        let x = 1;
+    ) -> ::proptest::strict::TestResult {
+        let _ = (x, y);
+        Ok(())
     }
 });
 
@@ -41,7 +43,8 @@ snapshot_test!(mix_custom_and_default_strategies {
     fn foo(
         x: i32,
         #[strategy = a + more()("complex") - expression!()] y: String,
-    ) {
-        let x = 1;
+    ) -> ::proptest::strict::TestResult {
+        let _ = (x, y);
+        Ok(())
     }
 });

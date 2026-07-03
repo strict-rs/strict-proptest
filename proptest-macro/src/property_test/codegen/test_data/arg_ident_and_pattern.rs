@@ -9,4 +9,6 @@ fn foo(
     [f, g]: [i32; 2],
     h: i32,
     Point { x, y }: Point,
-) {}
+) -> ::proptest::strict::TestResult {
+    Ok(())
+}

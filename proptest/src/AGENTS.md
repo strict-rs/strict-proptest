@@ -13,7 +13,7 @@ Scope: `proptest/src/` — the core library source: the crate root (`lib.rs`), t
 - `extern crate` wiring, each `#[cfg]`-gated: `std` (when `std` *or* `test`, `#[macro_use]`), `alloc` (only when `alloc && !std`, `#[macro_use]`), `bitflags` (`#[macro_use]`, used by `num`'s `FloatTypes`), `bit_set` (feature `bit-set`), `rusty_fork` (feature `fork`, `#[macro_use]`).
 - `#[macro_use]` declaration order matters because `macro_rules!` is textually scoped — each must precede its users: `std_facade` (a `#[doc(hidden)] pub mod`, since its `multiplex_*` macros are used elsewhere) → `product_tuple` → `macros` → `sugar` (`#[doc(hidden)] pub`). Moving any of these down breaks the build.
 - `pub mod` list: `arbitrary`, `array`, `bits`, `bool`, `char`, `collection`, `num`, `strategy`, `test_runner`, `tuple`, `option`, `result`, `sample`, `prelude` are always present; `range_subset`, `path`, and `string` are `#[cfg(feature = "std")]`-gated (they pull in `std`-only types / `regex_syntax`); `strict` is `#[cfg(feature = "strict-test")]`-gated (with the `docsrs` badge) and absent from `no_std`/`alloc`-only builds.
-- Under `attr-macro`: re-exports `proptest_macro::property_test`, and defines the `compile_tests()` `#[test]` that runs `trybuild` over `tests/pass/*.rs`.
+- Under `attr-macro`: re-exports `proptest_macro::property_test`, and defines the `compile_tests()` `#[test]` that runs `trybuild` over `tests/pass/*.rs` and `tests/fail/*.rs` via an explicit `t.run()` (the trybuild fork has no drop-driven execution), returning the harness `Result`.
 
 ## Per-type strategy modules
 

@@ -8,7 +8,7 @@ Scope: `proptest/` — the core property-testing library crate (`proptest` v1.11
 
 - `src/` — the library source: the per-type strategy modules plus the `strategy`/`test_runner`/`arbitrary` subsystems. See `src/AGENTS.md`.
 - `examples/` — runnable examples that back the mdBook tutorial (`cargo run -p proptest --example <name>`); a few fail by design. See `examples/AGENTS.md`.
-- `tests/` — the crate's only integration targets: `attr_macro.rs` (behind the `attr-macro` feature) plus the trybuild compile-pass fixtures under `tests/pass/`. See `tests/AGENTS.md`.
+- `tests/` — the crate's only integration targets: `attr_macro.rs` (behind the `attr-macro` feature) plus the trybuild compile-pass fixtures under `tests/pass/` and compile-fail fixtures under `tests/fail/`. See `tests/AGENTS.md`.
 - `test-persistence-location/` — a standalone harness verifying *where* regression files get written; `exclude`d from the workspace and driven by its own `./run-tests.sh`, not by `cargo test`. See `test-persistence-location/AGENTS.md`.
 - `proptest-regressions/` — persisted minimized failing seeds, checked into source control. Don't delete them.
 - `CHANGELOG.md` — record any user-observable change under `## Unreleased` (the current dev line targets MSRV 1.96 and the rand 0.10 family).
@@ -34,7 +34,7 @@ Default set: `["std", "fork", "timeout", "bit-set", "strict-test"]`. The complet
 
 ## Dependencies (`Cargo.toml`)
 
-Always on: `bitflags`, `unarray`, `num-traits`, `rand` (with its `alloc` feature), `rand_chacha`, `rand_xorshift`. Optional / feature-gated: `regex-syntax` (`std`), `bit-set` + `bit-vec` (`bit-set`), `rusty-fork` + `tempfile` (`fork`), `x86` (`hardware-rng`), `proptest-macro` (`attr-macro`), `strict-test-support` (`strict-test`). Dev-only: `regex`, `trybuild`. Versions are pinned centrally in the workspace `[workspace.dependencies]`.
+Always on: `bitflags`, `unarray`, `num-traits`, `rand` (with its `alloc` feature), `rand_chacha`, `rand_xorshift`. Optional / feature-gated: `regex-syntax` (`std`), `bit-set` + `bit-vec` (`bit-set`), `rusty-fork` + `tempfile` (`fork`), `x86` (`hardware-rng`), `proptest-macro` (`attr-macro`), `strict-test-support` (`strict-test`). Dev-only: `regex`, `trybuild`, `strict-test-support` (the `ensure*` vocabulary for test targets and trybuild fixtures). Versions are pinned centrally in the workspace `[workspace.dependencies]`.
 
 ## Generated docs
 

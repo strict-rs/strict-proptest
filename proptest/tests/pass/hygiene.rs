@@ -1,4 +1,3 @@
-
 fn main() {}
 
 struct MyTestArgs {
@@ -6,6 +5,6 @@ struct MyTestArgs {
 }
 
 #[proptest::property_test]
-fn my_test(x: i32) {
-    assert_eq!(x, x);
+fn my_test(x: i32) -> proptest::strict::TestResult {
+    strict_test_support::ensure_eq(&x, &x, "a value equals itself")
 }

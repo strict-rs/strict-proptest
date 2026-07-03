@@ -19,26 +19,27 @@ The local `parse!` macro is the diagnostic backbone: on a `parse2` failure it `r
 
 ## Validation (`validate.rs`)
 
-`validate(f: &mut ItemFn) -> Result<(), TokenStream>` deliberately checks very little: the guiding principle (stated in its doc comment) is to **defer to rustc** wherever rustc already emits a good error, passing the offending syntax straight through to the generated fn. Only two checks run here:
+`validate(f: &mut ItemFn) -> Result<(), TokenStream>` deliberately checks little: the guiding principle (stated in its doc comment) is to **defer to rustc** wherever rustc already emits a good error, passing the offending syntax straight through to the generated fn. Three checks run here:
 
 - `all_args_non_self` — rejects any `FnArg::Receiver` with "`self` parameters are forbidden" (covers `self`, `&self`, `&mut self`, and `self: T` forms; see the `validate_fails_with_self_arg` test).
 - `validate_parameter_attrs` — permits only outer `#[strategy = <expr>]` attributes on parameters. Any other attribute, an inner `#![...]`, or a malformed `#[strategy(...)]` / bare `#[strategy]` (all of which `is_strategy` rejects) gets a "only `#[strategy = <expr>]` attributes are allowed here" error; a second `#[strategy = ...]` on one param gets a duplicate error. As a side effect it rewrites each param's `attrs` down to at most the one valid strategy attr, so `strip_args` later sees a clean list.
+- `returns_strict_result` — rejects a missing return type (`ReturnType::Default`) and a literal `-> ()` with the stable `UNIT_RETURN_ERROR` message pointing the author at `Result<(), TestFailure>` (`proptest::strict::TestResult`) and an `Ok(())` body ending. The check is **syntactic** (a `type Foo = ()` alias is not caught — that case falls through to rustc's type error at the generated `ensure_property` call); it deviates from defer-to-rustc deliberately, because the post-expansion inference error would not name the actual contract. Runs after the other checks so their diagnostics keep priority.
 
-Everything else about the signature — generics, where-clauses, `async` / `const`, `unsafe`, return type, argument patterns/types — is intentionally **not** inspected. `unsafe` is the canonical example: it is passed through verbatim so rustc emits its own "test fn cannot be unsafe" error rather than this macro re-implementing the diagnostic.
+Everything else about the signature — generics, where-clauses, `async` / `const`, `unsafe`, argument patterns/types — is intentionally **not** inspected. `unsafe` is the canonical example: it is passed through verbatim so rustc emits its own "test fn cannot be unsafe" error rather than this macro re-implementing the diagnostic.
 
-Errors are **accumulated, not bailed-on**: `validate_parameter_attrs` builds a single `TokenStream` of every `compile_error!` across all params and returns it only at the end, so one invocation can report multiple problems at once. (`all_args_non_self` does still short-circuit on the first receiver.)
+Errors are **accumulated, not bailed-on**: `validate_parameter_attrs` builds a single `TokenStream` of every `compile_error!` across all params and returns it only at the end, so one invocation can report multiple problems at once. (`all_args_non_self` does still short-circuit on the first receiver.) The shared `err()` helper emits statement-form `compile_error!("...");` tokens — the trailing semicolon matters, because the tokens are spliced at statement/item position.
 
 ## Options (`options.rs`)
 
 `Options` (derives `Default`) is the parsed attribute body, with three fields:
 
-- `config: Option<Expr>` — from `config = <expr>`; threaded into the generated runner's `Config` (codegen falls back to `Config::default()` when absent).
+- `config: Option<Expr>` — from `config = <expr>`; when present, codegen routes through `<proptest>::strict::ensure_property_with_config` with `test_name`/`source_file` forced over the user's expression. When absent, codegen calls plain `ensure_property`, which applies the strict defaults (deterministic `STRICT_TEST_SEED` seeding, persistence off, `PROPTEST_*` env passthrough).
 - `proptest_path: Option<Path>` — from `proptest_path = <path>`, the path to the proptest crate (for a re-exported or renamed proptest). The value must be a plain `Expr::Path` with no qself; otherwise a `compile_error!` describing the expected form is recorded.
 - `errors: Vec<TokenStream>` — accumulated, *recoverable* parse errors.
 
 `true_proptest_path() -> TokenStream` resolves the path codegen prefixes onto every emitted item: `::proptest` when `proptest_path` is unset, else the user's path.
 
-The `Parse` impl reads the attribute *contents* (`foo = bar, baz = qux`, not the wrapping `#[...]`) as `Punctuated<MetaNameValue, ,>`. Crucially it almost never returns `syn::Err`: an unknown key (`random = 123`) or a bad `proptest_path` value is pushed onto `errors` and parsing continues, returning `Ok` with whatever was understood (see the `simple_parse_example` and `invalid_proptest_path` tests). Those deferred errors are emitted later by codegen — `test_body` splats `#(#errors)*` into the expansion — so the user still sees them as real diagnostics while getting the rest of a usable expansion. Only a syntactic failure of the `MetaNameValue` list itself yields `Err`.
+The `Parse` impl reads the attribute *contents* (`foo = bar, baz = qux`, not the wrapping `#[...]`) as `Punctuated<MetaNameValue, ,>`. Crucially it almost never returns `syn::Err`: an unknown key (`random = 123`) or a bad `proptest_path` value is pushed onto `errors` and parsing continues, returning `Ok` with whatever was understood (see the `simple_parse_example` and `invalid_proptest_path` tests). Every pushed token stream is a full `compile_error!("...");` **statement** (trailing semicolon), and codegen's `generate()` splats `#(#errors)*` at **item position** beside the generated fn — not inside its body, where the `#[test]` cfg-strip would silently swallow the diagnostic in non-test builds (trybuild, rustdoc). Only a syntactic failure of the `MetaNameValue` list itself yields `Err`.
 
 ## Helpers (`utils.rs`)
 
@@ -53,7 +54,7 @@ The per-argument override threads across three files: `validate` permits/strips 
 
 ## Code generation (`codegen/`)
 
-`codegen::generate(item_fn, options)` turns the validated, argument-less fn plus its `Vec<Argument>` into a plain `#[test]` fn — a params struct, its `Arbitrary` impl, and `TestRunner` glue equivalent to a hand-written `proptest! { #[test] fn ...(x in any::<T>()) { ... } }`. See `codegen/AGENTS.md` for the emitted-code shape; don't duplicate that detail here.
+`codegen::generate(item_fn, options)` turns the validated, argument-less fn plus its `Vec<Argument>` into a `#[test]` fn returning `<proptest>::strict::TestResult` — a params struct, its `Arbitrary` impl, and a tail call into `<proptest>::strict::ensure_property` (or `ensure_property_with_config` under `config = …`). See `codegen/AGENTS.md` for the emitted-code shape; don't duplicate that detail here.
 
 ## Tests (`tests/`)
 

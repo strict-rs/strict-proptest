@@ -1,24 +1,24 @@
 use proc_macro2::TokenStream;
-use quote::{ToTokens, quote};
-use syn::{Block, Expr, Ident, Pat, ReturnType, Type, TypeTuple, parse2};
+use quote::quote;
+use syn::{Block, Ident, Pat, parse_quote, parse2};
 
 use crate::property_test::{options::Options, utils::Argument};
 
 use super::{nth_field_name, struct_name};
 
-/// Generate the new test body by putting the struct and arbitrary impl at the start, then adding
-/// the usual glue that `proptest!` adds
+/// Generate the new test body by putting the struct and arbitrary impl at the
+/// start, then handing the labeled strategy to the strict runner: the final
+/// expression is the `<proptest>::strict::ensure_property` (or
+/// `ensure_property_with_config`) call, whose verdict is the wrapper's return
+/// value
 pub(super) fn body(
     block: Block,
     args: &[Argument],
     struct_and_impl: TokenStream,
     fn_name: &Ident,
-    ret_ty: &ReturnType,
     options: &Options,
 ) -> Block {
     let struct_name = struct_name(fn_name);
-
-    let errors = &options.errors;
 
     // convert each arg to `field0: x`
     let struct_fields = args.iter().enumerate().map(|(index, arg)| {
@@ -47,78 +47,59 @@ pub(super) fn body(
         #struct_name { #(#struct_fields)* }
     };
 
-    let handle_result = handle_result(ret_ty);
-
-    let config = make_config(options.config.as_ref(), fn_name, options);
     let proptest = options.true_proptest_path();
 
-    let tokens = quote! ( {
+    let context = quote! {
+        concat!(module_path!(), "::", stringify!(#fn_name))
+    };
 
-        #(#errors)*
+    let property = quote! {
+        |#proptest::sugar::NamedArguments(_, #struct_pattern)| #block
+    };
+
+    // With an explicit `config = <expr>`, `test_name`/`source_file` are still
+    // forced over the caller's expression so failure reports keep naming the
+    // annotated test (matching the pre-strict runner glue); the config is then
+    // used verbatim by the strict runner. Without one, the strict defaults
+    // apply (deterministic `STRICT_TEST_SEED` seeding, persistence disabled).
+    let run = match options.config.as_ref() {
+        None => quote! {
+            #proptest::strict::ensure_property(&strategy, #context, #property)
+        },
+        Some(config) => quote! {
+            #proptest::strict::ensure_property_with_config(
+                &strategy,
+                #context,
+                #proptest::test_runner::Config {
+                    test_name: Some(concat!(module_path!(), "::", stringify!(#fn_name))),
+                    source_file: Some(file!()),
+                    ..#config
+                },
+                #property,
+            )
+        },
+    };
+
+    let tokens = quote!( {
 
         #struct_and_impl
 
-        #config
-
-        let mut runner = #proptest::test_runner::TestRunner::new(config);
-        
-        let result = runner.run(
-            &#proptest::strategy::Strategy::prop_map(#proptest::prelude::any::<#struct_name>(), |values| {
-                #proptest::sugar::NamedArguments(stringify!(#struct_name), values)
-            }),
-            |#proptest::sugar::NamedArguments(_, #struct_pattern)| {
-                let result = #block;
-                #handle_result
-            },
+        let strategy = #proptest::strategy::Strategy::prop_map(
+            #proptest::prelude::any::<#struct_name>(),
+            |values| #proptest::sugar::NamedArguments(stringify!(#struct_name), values),
         );
 
-        match result {
-            Ok(()) => {}
-            Err(e) => panic!("{}", e),
-        }
+        #run
     } );
 
-    // unwrap here is fine because the double braces create a block
-    parse2(tokens).unwrap()
-}
-
-/// rough heuristic for whether we should use result-style syntax - if the function returns either
-/// nothing (i.e. `()`) or an empty tuple, it will be non-result handling, otherwise it uses
-/// result-style handling
-///
-/// Note, this won't catch cases like `type Foo = ();`, since type information isn't available yet,
-/// it's just looking for the syntax `fn foo() {}` or `fn foo() -> () {}`
-fn handle_result(ret_ty: &ReturnType) -> TokenStream {
-    let default_body = || quote! { Ok(result) };
-    let result_body = || quote! { result };
-
-    match ret_ty {
-        ReturnType::Default => default_body(),
-        ReturnType::Type(_, ty) => match ty.as_ref() {
-            Type::Tuple(TypeTuple { elems, .. }) if elems.is_empty() => {
-                default_body()
-            }
-            _ => result_body(),
-        },
-    }
-}
-
-fn make_config(
-    config: Option<&Expr>,
-    fn_name: &Ident,
-    options: &Options,
-) -> TokenStream {
-    let proptest = options.true_proptest_path();
-    let trailing = match config {
-        None => quote! { #proptest::test_runner::Config::default() },
-        Some(config) => config.to_token_stream(),
-    };
-
-    quote! {
-        let config = #proptest::test_runner::Config {
-            test_name: Some(concat!(module_path!(), "::", stringify!(#fn_name))),
-            source_file: Some(file!()),
-            ..#trailing
-        };
-    }
+    // Every accumulated diagnostic is emitted as a full `compile_error!(...);`
+    // statement, so this block always parses; the fallback exists so any
+    // future emission bug surfaces as a compile error at the use site rather
+    // than a proc-macro panic.
+    parse2(tokens).unwrap_or_else(|error| {
+        let message = error.to_string();
+        parse_quote!({
+            ::core::compile_error!(#message);
+        })
+    })
 }

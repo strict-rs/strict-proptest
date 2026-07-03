@@ -95,7 +95,9 @@ pub use proptest_macro::property_test;
 
 #[cfg(feature = "attr-macro")]
 #[test]
-fn compile_tests() {
-    let t = trybuild::TestCases::new();
+fn compile_tests() -> Result<(), trybuild::TryBuildError> {
+    let mut t = trybuild::TestCases::new();
     t.pass("tests/pass/*.rs");
+    t.compile_fail("tests/fail/*.rs");
+    t.run()
 }

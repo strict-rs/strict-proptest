@@ -39,18 +39,18 @@ impl Parse for Options {
             let path_string = path.get_ident().map(Ident::to_string);
 
             match path_string.as_deref() {
-                None => errors.push(quote_spanned!(path.span() => compile_error!("unknown argument"))),
+                None => errors.push(quote_spanned!(path.span() => compile_error!("unknown argument");)),
                 Some("config") => config = Some(value),
                 Some("proptest_path") => {
                     let Expr::Path(path) = &value else {
                         errors.push(quote_spanned!(value.span() =>
-                            compile_error!("argument to `proptest_path` must be a path to the proptest crate, e.g. `proptest_path = ::path::to::proptest`")
+                            compile_error!("argument to `proptest_path` must be a path to the proptest crate, e.g. `proptest_path = ::path::to::proptest`");
                         ));
                         continue;
                     };
                     if path.qself.is_some() {
                         errors.push(quote_spanned!(value.span() =>
-                            compile_error!("argument to `proptest_path` must be a path to the proptest crate, e.g. `proptest_path = ::path::to::proptest`")
+                            compile_error!("argument to `proptest_path` must be a path to the proptest crate, e.g. `proptest_path = ::path::to::proptest`");
                         ));
                         continue;
                     }
@@ -59,7 +59,7 @@ impl Parse for Options {
                 Some(other) => {
                     let error_message = format!("unknown argument: {other}");
                     let error_message = LitStr::new(&error_message, other.span());
-                    let error = quote_spanned!(other.span() => compile_error!(#error_message));
+                    let error = quote_spanned!(other.span() => compile_error!(#error_message););
                     errors.push(error);
                 }
             }

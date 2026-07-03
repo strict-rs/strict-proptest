@@ -94,3 +94,4 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dev-dependencies]
 regex = { workspace = true }
 trybuild = { workspace = true }
+strict-test-support = { workspace = true }

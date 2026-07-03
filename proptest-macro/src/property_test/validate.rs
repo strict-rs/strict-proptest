@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote_spanned};
-use syn::{FnArg, ItemFn, Meta, spanned::Spanned};
+use syn::{FnArg, ItemFn, Meta, ReturnType, Type, spanned::Spanned};
 
 use super::utils::is_strategy;
 
@@ -12,8 +12,34 @@ use super::utils::is_strategy;
 pub(super) fn validate(f: &mut ItemFn) -> Result<(), TokenStream> {
     all_args_non_self(f)?;
     validate_parameter_attrs(f)?;
+    returns_strict_result(f)?;
 
     Ok(())
+}
+
+/// The error emitted for property tests whose signature declares no return
+/// type or the literal `-> ()`.
+const UNIT_RETURN_ERROR: &str = "strict property tests must return `Result<(), TestFailure>` (`proptest::strict::TestResult`), not `()`; declare `-> proptest::strict::TestResult` and end the body with `Ok(())`";
+
+/// Reject a property test whose signature returns `()`.
+///
+/// The generated wrapper drives the body through the strict runner as
+/// `Result<(), TestFailure>` (`proptest::strict::TestResult`), so a unit body
+/// would otherwise only surface as a cryptic type-inference error inside the
+/// generated `ensure_property` call; rejecting it here gives a spanned,
+/// actionable diagnostic instead. Like the rest of this module the check is
+/// purely syntactic: a type alias that resolves to `()` is not caught here
+/// and is left to rustc's type error.
+fn returns_strict_result(f: &ItemFn) -> Result<(), TokenStream> {
+    match &f.sig.output {
+        ReturnType::Default => err(&f.sig.ident, UNIT_RETURN_ERROR),
+        ReturnType::Type(_, ty) => match ty.as_ref() {
+            Type::Tuple(tuple) if tuple.elems.is_empty() => {
+                err(ty, UNIT_RETURN_ERROR)
+            }
+            _ => Ok(()),
+        },
+    }
 }
 
 fn all_args_non_self(f: &mut ItemFn) -> Result<(), TokenStream> {
@@ -84,8 +110,13 @@ fn validate_parameter_attrs(f: &mut ItemFn) -> Result<(), TokenStream> {
 }
 
 /// Helper function to generate `compile_error!()` outputs
+///
+/// The trailing semicolon matters: the caller returns these tokens as the
+/// whole macro output, and `compile_error!(...)` without one is malformed in
+/// item position, which would bury the real diagnostic under a delimiter
+/// error.
 fn err(span: impl Spanned, s: &str) -> Result<(), TokenStream> {
-    Err(quote_spanned! { span.span() => compile_error!(#s) })
+    Err(quote_spanned! { span.span() => compile_error!(#s); })
 }
 
 #[cfg(test)]
@@ -121,5 +152,39 @@ mod tests {
 
         let error = validate(&mut function).unwrap_err();
         assert!(error.to_string().contains("compile_error"));
+    }
+
+    #[test]
+    fn validate_accepts_result_returning_fn() {
+        let mut valid: syn::ItemFn = parse_quote! {
+            fn foo(x: i32) -> proptest::strict::TestResult {
+                Ok(())
+            }
+        };
+        assert!(validate(&mut valid).is_ok());
+
+        let mut spelled_out: syn::ItemFn = parse_quote! {
+            fn foo(x: i32) -> Result<(), TestFailure> {
+                Ok(())
+            }
+        };
+        assert!(validate(&mut spelled_out).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_unit_returning_fn() {
+        let mut implicit_unit: syn::ItemFn = parse_quote! {
+            fn foo(x: i32) {}
+        };
+        let error = validate(&mut implicit_unit).unwrap_err();
+        assert!(error.to_string().contains("compile_error"));
+        assert!(error.to_string().contains("proptest::strict::TestResult"));
+
+        let mut explicit_unit: syn::ItemFn = parse_quote! {
+            fn foo(x: i32) -> () {}
+        };
+        let error = validate(&mut explicit_unit).unwrap_err();
+        assert!(error.to_string().contains("compile_error"));
+        assert!(error.to_string().contains("proptest::strict::TestResult"));
     }
 }

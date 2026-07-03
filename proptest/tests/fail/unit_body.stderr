@@ -1,0 +1,5 @@
+error: strict property tests must return `Result<(), TestFailure>` (`proptest::strict::TestResult`), not `()`; declare `-> proptest::strict::TestResult` and end the body with `Ok(())`
+ --> tests/fail/unit_body.rs:4:4
+  |
+4 | fn unit_body(x: i32) {
+  |    ^^^^^^^^^
