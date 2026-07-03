@@ -12,7 +12,7 @@ Scope: `proptest/src/` — the core library source: the crate root (`lib.rs`), t
 - Nightly feature gates via `cfg_attr`: `unstable` → `feature(allocator_api, coroutine_trait, never_type)`; `f16` → `feature(f16)`; `std` + `unstable` together → `feature(ip)`; `docsrs` → `feature(doc_cfg)` (for the `#[doc(cfg(...))]` badges on `std`/`bit-set`-gated items).
 - `extern crate` wiring, each `#[cfg]`-gated: `std` (when `std` *or* `test`, `#[macro_use]`), `alloc` (only when `alloc && !std`, `#[macro_use]`), `bitflags` (`#[macro_use]`, used by `num`'s `FloatTypes`), `bit_set` (feature `bit-set`), `rusty_fork` (feature `fork`, `#[macro_use]`).
 - `#[macro_use]` declaration order matters because `macro_rules!` is textually scoped — each must precede its users: `std_facade` (a `#[doc(hidden)] pub mod`, since its `multiplex_*` macros are used elsewhere) → `product_tuple` → `macros` → `sugar` (`#[doc(hidden)] pub`). Moving any of these down breaks the build.
-- `pub mod` list: `arbitrary`, `array`, `bits`, `bool`, `char`, `collection`, `num`, `strategy`, `test_runner`, `tuple`, `option`, `result`, `sample`, `prelude` are always present; `range_subset`, `path`, and `string` are `#[cfg(feature = "std")]`-gated (they pull in `std`-only types / `regex_syntax`).
+- `pub mod` list: `arbitrary`, `array`, `bits`, `bool`, `char`, `collection`, `num`, `strategy`, `test_runner`, `tuple`, `option`, `result`, `sample`, `prelude` are always present; `range_subset`, `path`, and `string` are `#[cfg(feature = "std")]`-gated (they pull in `std`-only types / `regex_syntax`); `strict` is `#[cfg(feature = "strict-test")]`-gated (with the `docsrs` badge) and absent from `no_std`/`alloc`-only builds.
 - Under `attr-macro`: re-exports `proptest_macro::property_test`, and defines the `compile_tests()` `#[test]` that runs `trybuild` over `tests/pass/*.rs`.
 
 ## Per-type strategy modules
@@ -40,6 +40,10 @@ High-level pointers only — each has its own `AGENTS.md` with the internals:
 - `strategy/` — the `Strategy` + `ValueTree` traits and every combinator (`prop_map`, `prop_filter`, `prop_flat_map`, unions, `prop_recursive`, boxing, …). See `strategy/AGENTS.md`.
 - `test_runner/` — the runner/shrink loop, `Config`/`PROPTEST_*` env vars, the seedable `TestRng`, result cache, and failure persistence (incl. fork/timeout). See `test_runner/AGENTS.md`.
 - `arbitrary/` — the `Arbitrary` trait, `any()`/`any_with()`, and the per-type impls split across `_core`/`_alloc`/`_std` tiers. See `arbitrary/AGENTS.md`.
+
+## `strict.rs` (feature `strict-test`)
+
+The Result-returning property harness. `ensure_property(strategy, context, property)` and `ensure_property_with_config(strategy, context, config, property)` drive `TestRunner::run` with a closure returning `Result<(), TestFailure>` and map outcomes onto `TestFailure::PropertyFalsified` (carrying the engine's rendering of the shrunk minimal failing input) / `TestFailure::PropertyAborted` instead of panicking; a closure `Err` converts through `TestCaseError::fail`, so shrinking still runs. `TestFailure` is re-exported from `strict-test-support` (not redefined), and `TestResult` aliases `Result<(), TestFailure>`. `strict_default_config()` starts from `Config::default()` (ordinary `PROPTEST_*` env behavior preserved), disables failure persistence (a strict run never writes a `proptest-regressions/` file), and resolves the RNG seed from `STRICT_TEST_SEED`: unset or unparseable → fixed `0x5EED`, `random` → `RngSeed::Random`, `<integer>` → that fixed seed. `ensure_property_with_config` uses the caller's `Config` verbatim. Preconditions belong in the strategy as `Strategy::prop_filter` (an over-strict filter surfaces as `PropertyAborted`), not in the closure. The module's own tests return `Result<(), TestFailure>` and use the `ensure*` helpers.
 
 ## Macros & no_std plumbing
 

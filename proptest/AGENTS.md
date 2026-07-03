@@ -29,7 +29,7 @@ Default set: `["std", "fork", "timeout", "bit-set", "strict-test"]`. The complet
 - `hardware-rng` — use an x86 hardware RNG instead of a static seed on x86 `no_std` targets; pulls the `x86` dep.
 - `atomic64bit` — gates `Arbitrary` for the 64-bit atomics (`AtomicI64`/`AtomicU64`, only alongside `unstable`); per its comment, excludable on no_std targets that lack 64-bit atomics.
 - `handle-panics` — hide intermediate panic spew flowing to stderr during the shrink phase; **requires `std`**.
-- `strict-test` — pulls the optional `strict-test-support` dep (Result-returning test vocabulary: `TestFailure` and the `ensure*` helpers) and **requires `std`** (enables it explicitly). On by default.
+- `strict-test` — gates the `strict` module (`proptest::strict`, the Result-returning property harness); pulls the optional `strict-test-support` dep (`TestFailure` and the `ensure*` helpers) and **requires `std`** (enables it explicitly). On by default.
 - `default-code-coverage` — a coverage-friendly mirror of `default` (`std`, `fork`, `timeout`, `bit-set` — without `strict-test`).
 
 ## Dependencies (`Cargo.toml`)

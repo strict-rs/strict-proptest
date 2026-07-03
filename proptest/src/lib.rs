@@ -81,6 +81,9 @@ pub mod option;
 pub mod path;
 pub mod result;
 pub mod sample;
+#[cfg(feature = "strict-test")]
+#[cfg_attr(docsrs, doc(cfg(feature = "strict-test")))]
+pub mod strict;
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub mod string;
