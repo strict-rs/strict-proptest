@@ -18,8 +18,10 @@ use std::collections::{HashMap, HashSet};
 use std::thread;
 
 use proptest::prelude::*;
+use proptest::strict::{TestFailure, TestResult};
 use proptest::test_runner::Config;
 use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
+use strict_test_support::{ensure, ensure_eq, ensure_ok, ensure_some};
 
 use system_under_test::{
     ClientDialer, Msg, ServerDialer, Transport, init_client, init_server,
@@ -58,8 +60,11 @@ prop_state_machine! {
     );
 }
 
-fn main() {
-    run_echo_server_test();
+fn main() -> TestResult {
+    // The generated test fn returns the strict verdict; returning it from
+    // `main` reports a falsified property through the process exit status
+    // instead of a panic.
+    run_echo_server_test()
 }
 
 /// The reference state of the server and clients.
@@ -224,7 +229,7 @@ impl StateMachineTest for EchoServerTest {
         mut state: Self::SystemUnderTest,
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
         transition: <Self::Reference as ReferenceStateMachine>::Transition,
-    ) -> Self::SystemUnderTest {
+    ) -> Result<Self::SystemUnderTest, TestFailure> {
         match transition {
             Transition::StartServer => {
                 // Assign port dynamically
@@ -241,11 +246,17 @@ impl StateMachineTest for EchoServerTest {
                 })
             }
             Transition::StopServer => {
-                let server = state.server.take().unwrap();
+                let server = ensure_some(
+                    state.server.take(),
+                    "stopping the server requires a running server",
+                )?;
                 server.dialer.handler.stop();
 
                 // Wait for the server listener to stop
-                server.listener_handle.join().unwrap();
+                ensure(
+                    server.listener_handle.join().is_ok(),
+                    "the server listener thread stops cleanly",
+                )?;
 
                 if !state.clients.is_empty() {
                     println!(
@@ -259,7 +270,10 @@ impl StateMachineTest for EchoServerTest {
                         client.dialer.handler.stop();
                         println!("Asking client {} listener to stop.", id);
                         // Wait for it to actually stop
-                        client.listener_handle.join().unwrap();
+                        ensure(
+                            client.listener_handle.join().is_ok(),
+                            "a client listener thread stops cleanly",
+                        )?;
                         println!("Client {} listener stopped.", id);
                     }
                     println!("All clients have stopped.");
@@ -267,7 +281,12 @@ impl StateMachineTest for EchoServerTest {
             }
             Transition::StartClient(id) => {
                 // Get the address of the server.
-                let server_addr = state.server.as_ref().unwrap().dialer.address;
+                let server_addr = ensure_some(
+                    state.server.as_ref(),
+                    "starting a client requires a running server",
+                )?
+                .dialer
+                .address;
 
                 let (listener, dialer) =
                     init_client(ref_state.transport, server_addr);
@@ -278,7 +297,10 @@ impl StateMachineTest for EchoServerTest {
 
                 let listener_handle = std::thread::spawn(move || {
                     run_client(listener, |msg| {
-                        msgs_send.send(msg).unwrap();
+                        // The listener thread cannot propagate a TestFailure;
+                        // a send error only means the receiver was dropped
+                        // because the test case is already over.
+                        let _ = msgs_send.send(msg);
                     })
                 });
 
@@ -293,14 +315,23 @@ impl StateMachineTest for EchoServerTest {
             }
             Transition::StopClient(id) => {
                 // Remove the client
-                let client = state.clients.remove(&id).unwrap();
+                let client = ensure_some(
+                    state.clients.remove(&id),
+                    "stopping a client requires it to be running",
+                )?;
                 // Ask the client to stop
                 client.dialer.handler.stop();
                 // Wait for it to actually stop
-                client.listener_handle.join().unwrap();
+                ensure(
+                    client.listener_handle.join().is_ok(),
+                    "the stopped client listener thread stops cleanly",
+                )?;
             }
             Transition::ClientMsg(id, msg) => {
-                let client = state.clients.get_mut(&id).unwrap();
+                let client = ensure_some(
+                    state.clients.get_mut(&id),
+                    "messaging the server requires the client to be running",
+                )?;
 
                 // We use the broken implementation of msg_server, which should
                 // be discovered by the test.
@@ -318,11 +349,18 @@ impl StateMachineTest for EchoServerTest {
                     "WARN: Because we're using a blocking call here, this will \
                     halt when the message gets lost when `msg_server_wrong` is used."
                 );
-                let recv_msg = client.msgs_recv.recv().unwrap();
-                assert_eq!(recv_msg, msg)
+                let recv_msg = ensure_ok(
+                    client.msgs_recv.recv(),
+                    "the server sends a response back to the client",
+                )?;
+                ensure_eq(
+                    &recv_msg,
+                    &msg,
+                    "the server echoes the client's message unchanged",
+                )?;
             }
         }
-        state
+        Ok(state)
     }
 }
 

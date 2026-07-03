@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{self, AtomicUsize};
 
 use crate::strategy::ReferenceStateMachine;
+use proptest::strict::{TestFailure, TestResult};
 use proptest::test_runner::Config;
 
 /// State machine test that relies on a reference state machine model
@@ -35,7 +36,9 @@ pub trait StateMachineTest {
 
     /// Apply a transition in the SUT state and check post-conditions.
     /// The post-conditions are properties of your state machine that you want
-    /// to assert.
+    /// to uphold; express them with the `strict_test_support` `ensure*`
+    /// helpers (or any other `TestFailure` constructor) and propagate them
+    /// with `?`, returning the new SUT state on success.
     ///
     /// Note that the `ref_state` is the state *after* this `transition` is
     /// applied. You can use it to compare it with your SUT after you apply
@@ -44,34 +47,38 @@ pub trait StateMachineTest {
         state: Self::SystemUnderTest,
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
         transition: <Self::Reference as ReferenceStateMachine>::Transition,
-    ) -> Self::SystemUnderTest;
+    ) -> Result<Self::SystemUnderTest, TestFailure>;
 
-    /// Check some invariant on the SUT state after every transition.
+    /// Check some invariant on the SUT state after every transition,
+    /// returning a violated invariant as a [`TestFailure`] instead of
+    /// panicking. The default implementation checks nothing.
     ///
     /// Note that just like in [`StateMachineTest::apply`] you can use
     /// the `ref_state` to compare it with your SUT.
     fn check_invariants(
         state: &Self::SystemUnderTest,
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
-    ) {
+    ) -> TestResult {
         // This is to avoid `unused_variables` warning
         let _ = (state, ref_state);
+        Ok(())
     }
 
     /// Override this function to add some teardown logic on the SUT state
-    /// at the end of each test case. The default implementation simply drops
-    /// the state.
+    /// at the end of each test case, returning a teardown failure as a
+    /// [`TestFailure`]. The default implementation simply drops the state.
     fn teardown(
         state: Self::SystemUnderTest,
         ref_state: <Self::Reference as ReferenceStateMachine>::State,
-    ) {
+    ) -> TestResult {
         // This is to avoid `unused_variables` warning
         let _ = state;
         let _ = ref_state;
+        Ok(())
     }
 
-    /// Run the test sequentially. You typically don't need to override this
-    /// method.
+    /// Run the test sequentially, returning the strict test verdict.
+    /// You typically don't need to override this method.
     fn test_sequential(
         config: Config,
         mut ref_state: <Self::Reference as ReferenceStateMachine>::State,
@@ -79,7 +86,7 @@ pub trait StateMachineTest {
             <Self::Reference as ReferenceStateMachine>::Transition,
         >,
         mut seen_counter: Option<Arc<AtomicUsize>>,
-    ) {
+    ) -> TestResult {
         #[cfg(feature = "std")]
         use proptest::test_runner::INFO_LOG;
 
@@ -95,7 +102,7 @@ pub trait StateMachineTest {
         let mut concrete_state = Self::init_test(&ref_state);
 
         // Check the invariants on the initial state
-        Self::check_invariants(&concrete_state, &ref_state);
+        Self::check_invariants(&concrete_state, &ref_state)?;
 
         for (ix, transition) in transitions.into_iter().enumerate() {
             // The counter is `Some` only before shrinking. When it's `Some` it
@@ -126,13 +133,14 @@ pub trait StateMachineTest {
                 &transition,
             );
             concrete_state =
-                Self::apply(concrete_state, &ref_state, transition);
+                Self::apply(concrete_state, &ref_state, transition)?;
 
             // Check the invariants after the transition is applied
-            Self::check_invariants(&concrete_state, &ref_state);
+            Self::check_invariants(&concrete_state, &ref_state)?;
         }
 
-        Self::teardown(concrete_state, ref_state)
+        Self::teardown(concrete_state, ref_state)?;
+        Ok(())
     }
 }
 
@@ -164,15 +172,28 @@ pub trait StateMachineTest {
 ///
 /// impl StateMachineTest for MyTest {}
 ///
-/// proptest! {
-///     #[test]
-///     fn run_with_macro(
-///         (initial_state, transitions) in MyTest::sequential_strategy(1..20)
-///     ) {
-///        MyTest::test_sequential(initial_state, transitions)
-///     }
+/// #[test]
+/// fn run_with_macro() -> ::proptest::strict::TestResult {
+///     let strategy = <<MyTest as StateMachineTest>::Reference
+///         as ReferenceStateMachine>::sequential_strategy(1..20);
+///     ::proptest::strict::ensure_property(
+///         &strategy,
+///         stringify!(run_with_macro),
+///         |(initial_state, transitions, seen_counter)| {
+///             MyTest::test_sequential(
+///                 ::proptest::test_runner::Config::default(),
+///                 initial_state,
+///                 transitions,
+///                 seen_counter,
+///             )
+///         },
+///     )
 /// }
 /// ```
+///
+/// The generated test returns `::proptest::strict::TestResult`: a falsified
+/// property surfaces as `TestFailure::PropertyFalsified` carrying the shrunk
+/// minimal failing transition sequence instead of a panic.
 #[macro_export]
 macro_rules! prop_state_machine {
     // With proptest config annotation
@@ -182,16 +203,21 @@ macro_rules! prop_state_machine {
         fn $test_name:ident(sequential $size:expr => $test:ident $(< $( $ty_param:tt ),+ >)?);
     )*) => {
         $(
-            ::proptest::proptest! {
-                #![proptest_config($config)]
-                $(#[$meta])*
-                fn $test_name(
-                    (initial_state, transitions, seen_counter) in <<$test $(< $( $ty_param ),+ >)? as $crate::StateMachineTest>::Reference as $crate::ReferenceStateMachine>::sequential_strategy($size)
-                ) {
-
-                    let config = $config.__sugar_to_owned();
-                    <$test $(::< $( $ty_param ),+ >)? as $crate::StateMachineTest>::test_sequential(config, initial_state, transitions, seen_counter)
-                }
+            $(#[$meta])*
+            fn $test_name() -> ::proptest::strict::TestResult {
+                let strategy = <<$test $(< $( $ty_param ),+ >)? as $crate::StateMachineTest>::Reference as $crate::ReferenceStateMachine>::sequential_strategy($size);
+                ::proptest::strict::ensure_property(
+                    &strategy,
+                    stringify!($test_name),
+                    |(initial_state, transitions, seen_counter)| {
+                        // Evaluated per generated case, matching the legacy
+                        // per-case `__sugar_to_owned` evaluation; it now feeds
+                        // only `test_sequential`'s verbose logging because the
+                        // strict runner builds its own configuration.
+                        let config = $config.__sugar_to_owned();
+                        <$test $(::< $( $ty_param ),+ >)? as $crate::StateMachineTest>::test_sequential(config, initial_state, transitions, seen_counter)
+                    },
+                )
             }
         )*
     };
@@ -202,14 +228,17 @@ macro_rules! prop_state_machine {
         fn $test_name:ident(sequential $size:expr => $test:ident $(< $( $ty_param:tt ),+ >)?);
     )*) => {
         $(
-            ::proptest::proptest! {
-                $(#[$meta])*
-                fn $test_name(
-                    (initial_state, transitions, seen_counter) in <<$test $(< $( $ty_param ),+ >)? as $crate::StateMachineTest>::Reference as $crate::ReferenceStateMachine>::sequential_strategy($size)
-                ) {
-                    <$test $(::< $( $ty_param ),+ >)? as $crate::StateMachineTest>::test_sequential(
-                        ::proptest::test_runner::Config::default(), initial_state, transitions, seen_counter)
-                }
+            $(#[$meta])*
+            fn $test_name() -> ::proptest::strict::TestResult {
+                let strategy = <<$test $(< $( $ty_param ),+ >)? as $crate::StateMachineTest>::Reference as $crate::ReferenceStateMachine>::sequential_strategy($size);
+                ::proptest::strict::ensure_property(
+                    &strategy,
+                    stringify!($test_name),
+                    |(initial_state, transitions, seen_counter)| {
+                        <$test $(::< $( $ty_param ),+ >)? as $crate::StateMachineTest>::test_sequential(
+                            ::proptest::test_runner::Config::default(), initial_state, transitions, seen_counter)
+                    },
+                )
             }
         )*
     };
@@ -262,7 +291,9 @@ mod tests {
                 _: Self::SystemUnderTest,
                 _: &<Self::Reference as crate::ReferenceStateMachine>::State,
                 _: <Self::Reference as crate::ReferenceStateMachine>::Transition,
-            ) -> Self::SystemUnderTest {
+            ) -> Result<Self::SystemUnderTest, proptest::strict::TestFailure>
+            {
+                Ok(())
             }
         }
 
@@ -280,6 +311,147 @@ mod tests {
 
             #[test]
             fn with_config_annotation(sequential 1..2 => Test);
+        }
+    }
+
+    mod strict_behavior {
+        //! Positive-polarity coverage: a model with real state-mutating
+        //! transitions runs through the strict macro path and the
+        //! `test_sequential` driver, returning `Ok(())` end to end.
+
+        use proptest::strategy::{BoxedStrategy, Just, Strategy};
+        use proptest::strict::{TestFailure, TestResult};
+        use proptest::test_runner::Config;
+        use strict_test_support::ensure;
+
+        use crate::{ReferenceStateMachine, StateMachineTest};
+
+        #[derive(Clone, Debug, PartialEq)]
+        enum Op {
+            Push(u8),
+            Pop,
+        }
+
+        /// Model: a stack of bytes. `Pop` is precondition-gated to non-empty
+        /// states, so generation filters invalid transitions at the strategy
+        /// level.
+        struct StackModel;
+
+        impl ReferenceStateMachine for StackModel {
+            type State = Vec<u8>;
+            type Transition = Op;
+
+            fn init_state() -> BoxedStrategy<Self::State> {
+                Just(Vec::new()).boxed()
+            }
+
+            fn transitions(
+                state: &Self::State,
+            ) -> BoxedStrategy<Self::Transition> {
+                use proptest::prelude::any;
+                if state.is_empty() {
+                    any::<u8>().prop_map(Op::Push).boxed()
+                } else {
+                    proptest::prop_oneof![
+                        any::<u8>().prop_map(Op::Push),
+                        Just(Op::Pop),
+                    ]
+                    .boxed()
+                }
+            }
+
+            fn apply(
+                mut state: Self::State,
+                transition: &Self::Transition,
+            ) -> Self::State {
+                match transition {
+                    Op::Push(value) => state.push(*value),
+                    Op::Pop => {
+                        state.pop();
+                    }
+                }
+                state
+            }
+
+            fn preconditions(
+                state: &Self::State,
+                transition: &Self::Transition,
+            ) -> bool {
+                match transition {
+                    Op::Pop => !state.is_empty(),
+                    Op::Push(_) => true,
+                }
+            }
+        }
+
+        /// SUT mirroring the model; every transition re-checks the
+        /// precondition and the model alignment through `ensure`.
+        struct StackSut;
+
+        impl StateMachineTest for StackSut {
+            type SystemUnderTest = Vec<u8>;
+            type Reference = StackModel;
+
+            fn init_test(ref_state: &Vec<u8>) -> Self::SystemUnderTest {
+                ref_state.clone()
+            }
+
+            fn apply(
+                mut state: Self::SystemUnderTest,
+                ref_state: &Vec<u8>,
+                transition: Op,
+            ) -> Result<Self::SystemUnderTest, TestFailure> {
+                match transition {
+                    Op::Push(value) => state.push(value),
+                    Op::Pop => {
+                        ensure(
+                            !state.is_empty(),
+                            "Pop only reaches a non-empty stack",
+                        )?;
+                        state.pop();
+                    }
+                }
+                ensure(
+                    state == *ref_state,
+                    "the SUT mirrors the model after every transition",
+                )?;
+                Ok(state)
+            }
+
+            fn check_invariants(
+                state: &Self::SystemUnderTest,
+                ref_state: &Vec<u8>,
+            ) -> TestResult {
+                ensure(
+                    state.len() == ref_state.len(),
+                    "SUT and model agree on the stack depth",
+                )
+            }
+        }
+
+        // The macro path itself is the positive proof: the expansion is an
+        // ordinary `#[test]` returning `TestResult`, so a passing model
+        // means the harness sees `Ok(())` from a run whose generated
+        // transitions really mutate state.
+        prop_state_machine! {
+            #[test]
+            fn passing_stack_model_runs_through_the_strict_macro(
+                sequential 1..16 => StackSut
+            );
+        }
+
+        /// Driving `test_sequential` directly with a hand-built valid
+        /// sequence returns `Ok(())`.
+        #[test]
+        fn test_sequential_returns_ok_for_a_valid_sequence()
+        -> Result<(), TestFailure> {
+            let transitions = vec![Op::Push(1), Op::Push(2), Op::Pop];
+            <StackSut as StateMachineTest>::test_sequential(
+                Config::default(),
+                Vec::new(),
+                transitions,
+                None,
+            )
         }
     }
 }

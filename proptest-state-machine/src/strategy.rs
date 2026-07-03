@@ -986,8 +986,9 @@ mod test {
         use proptest::{
             collection,
             strategy::Strategy,
-            test_runner::{Config, TestError, TestRunner},
+            test_runner::{Config, TestCaseError, TestError, TestRunner},
         };
+        use strict_test_support::ensure;
 
         use crate::{ReferenceStateMachine, StateMachineTest};
 
@@ -1032,13 +1033,15 @@ mod test {
                 (): Self::SystemUnderTest,
                 ref_state: &FailIfLessThan,
                 transition: u32,
-            ) -> Self::SystemUnderTest {
+            ) -> Result<Self::SystemUnderTest, proptest::strict::TestFailure>
+            {
                 // Fail on any transition that is less than the ref state's limit.
                 let FailIfLessThan(limit) = ref_state;
                 println!("{transition} < {}?", limit);
-                if transition < ref_state.0 {
-                    panic!("{transition} < {}", limit);
-                }
+                ensure(
+                    transition >= ref_state.0,
+                    "transition is at least the reference limit",
+                )
             }
         }
 
@@ -1055,13 +1058,18 @@ mod test {
                 let result = runner.run(
                     &FailIfLessThan::sequential_strategy(10..50_usize),
                     |(ref_state, transitions, seen_counter)| {
+                        // The strict TestFailure is this manual runner's
+                        // failure signal: convert it exactly the way the
+                        // strict runner does, so shrinking still drives.
                         FailIfLessThanTest::test_sequential(
                             Default::default(),
                             ref_state,
                             transitions,
                             seen_counter,
-                        );
-                        Ok(())
+                        )
+                        .map_err(|failure| {
+                            TestCaseError::fail(failure.to_string())
+                        })
                     },
                 );
                 if let Err(TestError::Fail(
@@ -1077,6 +1085,176 @@ mod test {
                         "If the state machine doesn't fail as intended, we need a case that fails.");
                 }
             }
+        }
+    }
+
+    /// Dual-polarity coverage for the strict runner path: the negative case
+    /// proves a threshold-crossing model falsifies with the minimal
+    /// transition sequence, and the positive case proves precondition-gated
+    /// generation keeps a mirrored SUT aligned.
+    mod strict_runner_behavior {
+        use proptest::strict::{self, TestFailure, TestResult};
+        use proptest::test_runner::Config;
+        use strict_test_support::{
+            ensure, ensure_contains, ensure_eq, ensure_some,
+        };
+
+        use super::heap_state_machine::{HeapStateMachine, TestTransition};
+        use crate::{ReferenceStateMachine, StateMachineTest};
+
+        /// Model transition: a counter that only increments. The
+        /// single-variant enum keeps the reported minimal sequence's
+        /// `Debug` rendering stable for the assertions below.
+        #[derive(Clone, Debug)]
+        enum Tick {
+            Increment,
+        }
+
+        struct CountingModel;
+
+        impl ReferenceStateMachine for CountingModel {
+            type State = u32;
+            type Transition = Tick;
+
+            fn init_state() -> proptest::strategy::BoxedStrategy<u32> {
+                use proptest::strategy::{Just, Strategy};
+                Just(0).boxed()
+            }
+
+            fn transitions(_: &u32) -> proptest::strategy::BoxedStrategy<Tick> {
+                use proptest::strategy::{Just, Strategy};
+                Just(Tick::Increment).boxed()
+            }
+
+            fn apply(state: u32, _: &Tick) -> u32 {
+                state.saturating_add(1)
+            }
+        }
+
+        /// SUT that violates its invariant once the counter reaches three,
+        /// so the shortest failing sequence is exactly three increments.
+        struct FailsAtThree;
+
+        impl StateMachineTest for FailsAtThree {
+            type SystemUnderTest = u32;
+            type Reference = CountingModel;
+
+            fn init_test(ref_state: &u32) -> u32 {
+                *ref_state
+            }
+
+            fn apply(state: u32, _: &u32, _: Tick) -> Result<u32, TestFailure> {
+                Ok(state.saturating_add(1))
+            }
+
+            fn check_invariants(state: &u32, _: &u32) -> TestResult {
+                ensure(*state < 3, "the counter stays below three")
+            }
+        }
+
+        #[test]
+        fn falsified_model_reports_the_minimal_transition_sequence()
+        -> Result<(), TestFailure> {
+            let strategy =
+                <CountingModel as ReferenceStateMachine>::sequential_strategy(
+                    1..8,
+                );
+            let outcome = strict::ensure_property(
+                &strategy,
+                "the counter stays below three",
+                |(initial_state, transitions, seen_counter)| {
+                    <FailsAtThree as StateMachineTest>::test_sequential(
+                        Config::default(),
+                        initial_state,
+                        transitions,
+                        seen_counter,
+                    )
+                },
+            );
+            let failure = ensure_some(
+                outcome.err(),
+                "a threshold-crossing model must falsify the property",
+            )?;
+            let rendered = failure.to_string();
+            ensure(
+                matches!(failure, TestFailure::PropertyFalsified { .. }),
+                "the strict runner reports the falsified-property variant",
+            )?;
+            ensure_contains(
+                &rendered,
+                "minimal failing input:",
+                "the report carries the engine's minimal-input banner",
+            )?;
+            // The report renders the minimal triple with alternate Debug
+            // (`{:#?}`), one transition per line, so pin the sequence by
+            // counting transitions: exactly three increments reach the
+            // threshold, and no never-executed tail transition survives the
+            // seen-transition shrink phase.
+            ensure_eq(
+                &rendered.matches("Increment").count(),
+                &3,
+                "shrinking lands on the three increments reaching the threshold",
+            )
+        }
+
+        #[test]
+        fn precondition_gated_generation_keeps_a_mirrored_sut_aligned()
+        -> Result<(), TestFailure> {
+            struct MirroredHeap;
+
+            impl StateMachineTest for MirroredHeap {
+                type SystemUnderTest = Vec<i32>;
+                type Reference = HeapStateMachine;
+
+                fn init_test(ref_state: &Vec<i32>) -> Vec<i32> {
+                    ref_state.clone()
+                }
+
+                fn apply(
+                    mut state: Vec<i32>,
+                    ref_state: &Vec<i32>,
+                    transition: TestTransition,
+                ) -> Result<Vec<i32>, TestFailure> {
+                    match transition {
+                        TestTransition::PopEmpty => {
+                            ensure(
+                                state.is_empty(),
+                                "PopEmpty is only generated on an empty heap",
+                            )?;
+                            state.pop();
+                        }
+                        TestTransition::PopNonEmpty => {
+                            ensure(
+                                !state.is_empty(),
+                                "PopNonEmpty is only generated on a non-empty heap",
+                            )?;
+                            state.pop();
+                        }
+                        TestTransition::Push(value) => state.push(value),
+                    }
+                    ensure(
+                        state == *ref_state,
+                        "the SUT mirrors the model after every transition",
+                    )?;
+                    Ok(state)
+                }
+            }
+
+            let strategy = <HeapStateMachine as ReferenceStateMachine>::sequential_strategy(
+                1..12,
+            );
+            strict::ensure_property(
+                &strategy,
+                "precondition-gated transitions keep the mirrored SUT aligned",
+                |(initial_state, transitions, seen_counter)| {
+                    <MirroredHeap as StateMachineTest>::test_sequential(
+                        Config::default(),
+                        initial_state,
+                        transitions,
+                        seen_counter,
+                    )
+                },
+            )
         }
     }
 

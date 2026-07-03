@@ -29,3 +29,4 @@ proptest = { workspace = true, features = [
 
 [dev-dependencies]
 message-io = { workspace = true, features = ["tcp", "udp", "websocket"] }
+strict-test-support = { workspace = true }

@@ -15,8 +15,10 @@
 extern crate proptest_state_machine;
 
 use proptest::prelude::*;
+use proptest::strict::{TestFailure, TestResult};
 use proptest::test_runner::Config;
 use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
+use strict_test_support::ensure;
 use system_under_test::MyHeap;
 
 // Setup the state machine test using the `prop_state_machine!` macro
@@ -48,8 +50,11 @@ prop_state_machine! {
     );
 }
 
-fn main() {
-    run_my_heap_test();
+fn main() -> TestResult {
+    // The generated test fn returns the strict verdict; returning it from
+    // `main` reports a falsified property through the process exit status
+    // instead of a panic.
+    run_my_heap_test()
 }
 
 /// An empty type used for the `ReferenceStateMachine` implementation. The
@@ -112,7 +117,7 @@ impl StateMachineTest for MyHeap<i32> {
         mut state: Self::SystemUnderTest,
         _ref_state: &<Self::Reference as ReferenceStateMachine>::State,
         transition: Transition,
-    ) -> Self::SystemUnderTest {
+    ) -> Result<Self::SystemUnderTest, TestFailure> {
         match transition {
             Transition::Pop => {
                 // We read the state before applying the transition.
@@ -130,35 +135,44 @@ impl StateMachineTest for MyHeap<i32> {
                 // Check a post-condition.
                 match result {
                     Some(value) => {
-                        assert!(!was_empty);
+                        ensure(
+                            !was_empty,
+                            "a popped value implies the heap was non-empty",
+                        )?;
                         // The heap must not contain any value which was
                         // greater than the "maximum" we were just given.
                         for in_heap in state.iter() {
-                            assert!(
+                            ensure(
                                 value >= *in_heap,
-                                "Popped value {:?}, which was less \
-                                    than {:?} still in the heap",
-                                value,
-                                in_heap
-                            );
+                                "the popped value is greater than or equal \
+                                 to every value still in the heap",
+                            )?;
                         }
                     }
-                    None => assert!(was_empty),
+                    None => ensure(
+                        was_empty,
+                        "an empty pop implies the heap was empty",
+                    )?,
                 }
             }
             Transition::Push(value) => state.push(value),
         }
-        state
+        Ok(state)
     }
 
     fn check_invariants(
         state: &Self::SystemUnderTest,
         _ref_state: &<Self::Reference as ReferenceStateMachine>::State,
-    ) {
+    ) -> TestResult {
         // Check that the heap's API gives consistent results
         match state.len() {
-            0 => assert!(state.is_empty()),
-            _ => assert!(!state.is_empty()),
+            0 => {
+                ensure(state.is_empty(), "a zero-length heap reports is_empty")
+            }
+            _ => ensure(
+                !state.is_empty(),
+                "a non-zero-length heap does not report is_empty",
+            ),
         }
     }
 }

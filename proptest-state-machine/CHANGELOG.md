@@ -3,6 +3,16 @@
 ### Breaking Changes
 
 - The minimum supported Rust version has been increased to 1.96.0.
+- `prop_state_machine!` now expands to ordinary `#[test]` functions that
+  return `proptest::strict::TestResult` and run the generated transition
+  sequence through `proptest::strict::ensure_property`, instead of expanding
+  to a `proptest!` block that panics on failure.
+- `StateMachineTest::apply` now returns
+  `Result<Self::SystemUnderTest, TestFailure>`, and `check_invariants`,
+  `teardown`, and `test_sequential` return `proptest::strict::TestResult`.
+  Post-condition and invariant failures propagate
+  `strict_test_support::TestFailure` values instead of panicking, so
+  implementations report failures with the `ensure*` helpers and `?`.
 
 ## 0.8.0
 
