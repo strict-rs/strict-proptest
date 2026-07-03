@@ -1076,9 +1076,12 @@ mod test {
     use super::*;
     use crate::strategy::Strategy;
     use crate::test_runner::{FileFailurePersistence, RngAlgorithm, TestRng};
+    use strict_test_support::{
+        TestFailure, ensure, ensure_eq, ensure_ok, ensure_some,
+    };
 
     #[test]
-    fn gives_up_after_too_many_rejections() {
+    fn gives_up_after_too_many_rejections() -> Result<(), TestFailure> {
         let config = Config::default();
         let mut runner = TestRunner::new(config.clone());
         let runs = Cell::new(0);
@@ -1086,25 +1089,32 @@ mod test {
             runs.set(runs.get() + 1);
             Err(TestCaseError::reject("reject"))
         });
-        match result {
-            Err(TestError::Abort(_)) => (),
-            e => panic!("Unexpected result: {:?}", e),
-        }
-        assert_eq!(config.max_global_rejects + 1, runs.get());
+        ensure(
+            matches!(result, Err(TestError::Abort(_))),
+            "exhausting the global reject budget aborts the run",
+        )?;
+        ensure_eq(
+            &(config.max_global_rejects + 1),
+            &runs.get(),
+            "the runner stops after the budget plus the aborting case",
+        )
     }
 
     #[test]
-    fn test_pass() {
+    fn test_pass() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
         let result = runner.run(&(1u32..), |v| {
-            assert!(v > 0);
-            Ok(())
+            if v > 0 {
+                Ok(())
+            } else {
+                Err(TestCaseError::fail("generated value must be positive"))
+            }
         });
-        assert_eq!(Ok(()), result);
+        ensure(result == Ok(()), "a passing property returns Ok")
     }
 
     #[test]
-    fn test_fail_via_result() {
+    fn test_fail_via_result() -> Result<(), TestFailure> {
         let mut runner = TestRunner::new(Config {
             failure_persistence: None,
             ..Config::default()
@@ -1117,11 +1127,16 @@ mod test {
             }
         });
 
-        assert_eq!(Err(TestError::Fail("not less than 5".into(), 5)), result);
+        ensure(
+            result == Err(TestError::Fail("not less than 5".into(), 5)),
+            "a result failure shrinks to the boundary value",
+        )
     }
 
+    // Legacy-surface test: the panic inside the closure IS the subject —
+    // it proves the runner converts a panicking case into TestError::Fail.
     #[test]
-    fn test_fail_via_panic() {
+    fn test_fail_via_panic() -> Result<(), TestFailure> {
         let mut runner = TestRunner::new(Config {
             failure_persistence: None,
             ..Config::default()
@@ -1130,12 +1145,29 @@ mod test {
             assert!(v < 5, "not less than 5");
             Ok(())
         });
-        assert_eq!(Err(TestError::Fail("not less than 5".into(), 5)), result);
+        ensure(
+            result == Err(TestError::Fail("not less than 5".into(), 5)),
+            "a panicking case is caught and shrinks to the boundary value",
+        )
+    }
+
+    /// Deletes its persistence file on drop, so a test leaves no residue on
+    /// the green path and on `Err` returns alike. Each persistence test owns
+    /// a distinct file: the tests run on parallel threads, and sharing one
+    /// path lets one test's persisted seeds inflate the other's replay count.
+    struct PersistenceFileGuard(&'static str);
+
+    impl Drop for PersistenceFileGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(self.0);
+        }
     }
 
     #[test]
-    fn persisted_cases_do_not_count_towards_total_cases() {
-        const FILE: &str = "persistence-test.txt";
+    fn persisted_cases_do_not_count_towards_total_cases()
+    -> Result<(), TestFailure> {
+        const FILE: &str = "persistence-test-counting.txt";
+        let _guard = PersistenceFileGuard(FILE);
         let _ = fs::remove_file(FILE);
 
         let config = Config {
@@ -1147,25 +1179,31 @@ mod test {
         };
 
         let max = 10_000_000i32;
-        {
+        ensure(
             TestRunner::new(config.clone())
                 .run(&(0i32..max), |_v| {
                     Err(TestCaseError::Fail("persist a failure".into()))
                 })
-                .expect_err("didn't fail?");
-        }
+                .is_err(),
+            "the seeding run must fail so a seed is persisted",
+        )?;
 
         let run_count = RefCell::new(0);
-        TestRunner::new(config.clone())
-            .run(&(0i32..max), |_v| {
+        ensure_ok(
+            TestRunner::new(config.clone()).run(&(0i32..max), |_v| {
                 *run_count.borrow_mut() += 1;
                 Ok(())
-            })
-            .expect("should succeed");
+            }),
+            "the replay run succeeds",
+        )?;
 
         // Persisted ran, and a new case ran, and only new case counts
         // against `cases: 1`.
-        assert_eq!(run_count.into_inner(), 2);
+        ensure_eq(
+            &run_count.into_inner(),
+            &2,
+            "the persisted replay does not count toward cases",
+        )
     }
 
     #[derive(Clone, Copy, PartialEq)]
@@ -1177,8 +1215,9 @@ mod test {
     }
 
     #[test]
-    fn failing_cases_persisted_and_reloaded() {
-        const FILE: &str = "persistence-test.txt";
+    fn failing_cases_persisted_and_reloaded() -> Result<(), TestFailure> {
+        const FILE: &str = "persistence-test-reload.txt";
+        let _guard = PersistenceFileGuard(FILE);
         let _ = fs::remove_file(FILE);
 
         let max = 10_000_000i32;
@@ -1193,7 +1232,7 @@ mod test {
         // First test with cases that fail above half max, and then below half
         // max, to ensure we can correctly parse both lines of the persistence
         // file.
-        let first_sub_failure = {
+        let first_sub_failure = ensure_some(
             TestRunner::new(config.clone())
                 .run(&input, |v| {
                     if v.0 < max / 2 {
@@ -1202,9 +1241,10 @@ mod test {
                         Err(TestCaseError::Fail("too big".into()))
                     }
                 })
-                .expect_err("didn't fail?")
-        };
-        let first_super_failure = {
+                .err(),
+            "the first sub-max run must fail",
+        )?;
+        let first_super_failure = ensure_some(
             TestRunner::new(config.clone())
                 .run(&input, |v| {
                     if v.0 >= max / 2 {
@@ -1213,9 +1253,10 @@ mod test {
                         Err(TestCaseError::Fail("too small".into()))
                     }
                 })
-                .expect_err("didn't fail?")
-        };
-        let second_sub_failure = {
+                .err(),
+            "the first super-max run must fail",
+        )?;
+        let second_sub_failure = ensure_some(
             TestRunner::new(config.clone())
                 .run(&input, |v| {
                     if v.0 < max / 2 {
@@ -1224,9 +1265,10 @@ mod test {
                         Err(TestCaseError::Fail("too big".into()))
                     }
                 })
-                .expect_err("didn't fail?")
-        };
-        let second_super_failure = {
+                .err(),
+            "the second sub-max run must fail",
+        )?;
+        let second_super_failure = ensure_some(
             TestRunner::new(config.clone())
                 .run(&input, |v| {
                     if v.0 >= max / 2 {
@@ -1235,24 +1277,31 @@ mod test {
                         Err(TestCaseError::Fail("too small".into()))
                     }
                 })
-                .expect_err("didn't fail?")
-        };
+                .err(),
+            "the second super-max run must fail",
+        )?;
 
-        assert_eq!(first_sub_failure, second_sub_failure);
-        assert_eq!(first_super_failure, second_super_failure);
+        ensure(
+            first_sub_failure == second_sub_failure,
+            "the persisted sub-max failure replays identically",
+        )?;
+        ensure(
+            first_super_failure == second_super_failure,
+            "the persisted super-max failure replays identically",
+        )
     }
 
     #[test]
-    fn new_rng_makes_separate_rng() {
+    fn new_rng_makes_separate_rng() -> Result<(), TestFailure> {
         use rand::RngExt;
         let mut runner = TestRunner::default();
         let from_1 = runner.new_rng().random::<[u8; 16]>();
         let from_2 = runner.rng().random::<[u8; 16]>();
-        assert_ne!(from_1, from_2);
+        ensure(from_1 != from_2, "a new rng draws a different stream")
     }
 
     #[test]
-    fn record_rng_use() {
+    fn record_rng_use() -> Result<(), TestFailure> {
         use rand::RngExt;
 
         // create value with recorder rng
@@ -1263,7 +1312,11 @@ mod test {
             TestRunner::new_with_rng(default_config.clone(), recorder_rng);
         let random_byte_array1 = runner.rng().random::<[u8; 16]>();
         let bytes_used = runner.bytes_used();
-        assert!(bytes_used.len() >= 16); // could use more bytes for some reason
+        // could use more bytes for some reason
+        ensure(
+            bytes_used.len() >= 16,
+            "the recorder captured at least the drawn bytes",
+        )?;
 
         // re-create value with pass-through rng
         let passthrough_rng =
@@ -1273,12 +1326,15 @@ mod test {
         let random_byte_array2 = runner.rng().random::<[u8; 16]>();
 
         // make sure the same value was created
-        assert_eq!(random_byte_array1, random_byte_array2);
+        ensure(
+            random_byte_array1 == random_byte_array2,
+            "replaying recorded bytes recreates the same value",
+        )
     }
 
     #[cfg(feature = "fork")]
     #[test]
-    fn run_successful_test_in_fork() {
+    fn run_successful_test_in_fork() -> Result<(), TestFailure> {
         let mut runner = TestRunner::new(Config {
             fork: true,
             test_name: Some(concat!(
@@ -1288,12 +1344,16 @@ mod test {
             ..Config::default()
         });
 
-        assert!(runner.run(&(0u32..1000), |_| Ok(())).is_ok());
+        ensure(
+            runner.run(&(0u32..1000), |_| Ok(())).is_ok(),
+            "a passing forked run returns Ok",
+        )
     }
 
     #[cfg(feature = "fork")]
     #[test]
-    fn normal_failure_in_fork_results_in_correct_failure() {
+    fn normal_failure_in_fork_results_in_correct_failure()
+    -> Result<(), TestFailure> {
         let mut runner = TestRunner::new(Config {
             fork: true,
             test_name: Some(concat!(
@@ -1303,23 +1363,34 @@ mod test {
             ..Config::default()
         });
 
-        let failure = runner
-            .run(&(0u32..1000), |v| {
-                prop_assert!(v < 500);
-                Ok(())
-            })
-            .err()
-            .unwrap();
+        let failure = ensure_some(
+            runner
+                .run(&(0u32..1000), |v| {
+                    if v < 500 {
+                        Ok(())
+                    } else {
+                        Err(TestCaseError::fail("value reached 500"))
+                    }
+                })
+                .err(),
+            "a failing forked run must return the failure",
+        )?;
 
         match failure {
-            TestError::Fail(_, value) => assert_eq!(500, value),
-            failure => panic!("Unexpected failure: {:?}", failure),
+            TestError::Fail(_, value) => {
+                ensure_eq(&500, &value, "the forked failure shrinks to 500")
+            }
+            TestError::Abort(_) => {
+                ensure(false, "the forked failure must be Fail, not Abort")
+            }
         }
     }
 
+    // Legacy-surface test: the child calling process::exit(1) IS the
+    // subject — it proves a crashing child is synthesized into a failure.
     #[cfg(feature = "fork")]
     #[test]
-    fn nonsuccessful_exit_finds_correct_failure() {
+    fn nonsuccessful_exit_finds_correct_failure() -> Result<(), TestFailure> {
         let mut runner = TestRunner::new(Config {
             fork: true,
             test_name: Some(concat!(
@@ -1329,25 +1400,33 @@ mod test {
             ..Config::default()
         });
 
-        let failure = runner
-            .run(&(0u32..1000), |v| {
-                if v >= 500 {
-                    ::std::process::exit(1);
-                }
-                Ok(())
-            })
-            .err()
-            .unwrap();
+        let failure = ensure_some(
+            runner
+                .run(&(0u32..1000), |v| {
+                    if v >= 500 {
+                        ::std::process::exit(1);
+                    }
+                    Ok(())
+                })
+                .err(),
+            "a crashing child must surface as a failure",
+        )?;
 
         match failure {
-            TestError::Fail(_, value) => assert_eq!(500, value),
-            failure => panic!("Unexpected failure: {:?}", failure),
+            TestError::Fail(_, value) => {
+                ensure_eq(&500, &value, "the crash shrinks to 500")
+            }
+            TestError::Abort(_) => {
+                ensure(false, "the crash must be Fail, not Abort")
+            }
         }
     }
 
+    // Legacy-surface test: the child calling process::exit(0) IS the
+    // subject — it proves a spuriously-succeeding child is caught.
     #[cfg(feature = "fork")]
     #[test]
-    fn spurious_exit_finds_correct_failure() {
+    fn spurious_exit_finds_correct_failure() -> Result<(), TestFailure> {
         let mut runner = TestRunner::new(Config {
             fork: true,
             test_name: Some(concat!(
@@ -1357,25 +1436,31 @@ mod test {
             ..Config::default()
         });
 
-        let failure = runner
-            .run(&(0u32..1000), |v| {
-                if v >= 500 {
-                    ::std::process::exit(0);
-                }
-                Ok(())
-            })
-            .err()
-            .unwrap();
+        let failure = ensure_some(
+            runner
+                .run(&(0u32..1000), |v| {
+                    if v >= 500 {
+                        ::std::process::exit(0);
+                    }
+                    Ok(())
+                })
+                .err(),
+            "a spuriously exiting child must surface as a failure",
+        )?;
 
         match failure {
-            TestError::Fail(_, value) => assert_eq!(500, value),
-            failure => panic!("Unexpected failure: {:?}", failure),
+            TestError::Fail(_, value) => {
+                ensure_eq(&500, &value, "the spurious exit shrinks to 500")
+            }
+            TestError::Abort(_) => {
+                ensure(false, "the spurious exit must be Fail, not Abort")
+            }
         }
     }
 
     #[cfg(feature = "timeout")]
     #[test]
-    fn long_sleep_timeout_finds_correct_failure() {
+    fn long_sleep_timeout_finds_correct_failure() -> Result<(), TestFailure> {
         let mut runner = TestRunner::new(Config {
             fork: true,
             timeout: 500,
@@ -1386,27 +1471,33 @@ mod test {
             ..Config::default()
         });
 
-        let failure = runner
-            .run(&(0u32..1000), |v| {
-                if v >= 500 {
-                    ::std::thread::sleep(::std::time::Duration::from_millis(
-                        10_000,
-                    ));
-                }
-                Ok(())
-            })
-            .err()
-            .unwrap();
+        let failure = ensure_some(
+            runner
+                .run(&(0u32..1000), |v| {
+                    if v >= 500 {
+                        ::std::thread::sleep(
+                            ::std::time::Duration::from_millis(10_000),
+                        );
+                    }
+                    Ok(())
+                })
+                .err(),
+            "a long-sleeping case must time out into a failure",
+        )?;
 
         match failure {
-            TestError::Fail(_, value) => assert_eq!(500, value),
-            failure => panic!("Unexpected failure: {:?}", failure),
+            TestError::Fail(_, value) => {
+                ensure_eq(&500, &value, "the timeout shrinks to 500")
+            }
+            TestError::Abort(_) => {
+                ensure(false, "the timeout must be Fail, not Abort")
+            }
         }
     }
 
     #[cfg(feature = "timeout")]
     #[test]
-    fn mid_sleep_timeout_finds_correct_failure() {
+    fn mid_sleep_timeout_finds_correct_failure() -> Result<(), TestFailure> {
         let mut runner = TestRunner::new(Config {
             fork: true,
             timeout: 500,
@@ -1417,37 +1508,44 @@ mod test {
             ..Config::default()
         });
 
-        let failure = runner
-            .run(&(0u32..1000), |v| {
-                if v >= 500 {
-                    // Sleep a little longer than the timeout. This means that
-                    // sometimes the test case itself will return before the parent
-                    // process has noticed the child is timing out, so it's up to
-                    // the child to mark it as a failure.
-                    ::std::thread::sleep(::std::time::Duration::from_millis(
-                        600,
-                    ));
-                } else {
-                    // Sleep a bit so that the parent and child timing don't stay
-                    // in sync.
-                    ::std::thread::sleep(::std::time::Duration::from_millis(
-                        100,
-                    ))
-                }
-                Ok(())
-            })
-            .err()
-            .unwrap();
+        let failure = ensure_some(
+            runner
+                .run(&(0u32..1000), |v| {
+                    if v >= 500 {
+                        // Sleep a little longer than the timeout. This means that
+                        // sometimes the test case itself will return before the parent
+                        // process has noticed the child is timing out, so it's up to
+                        // the child to mark it as a failure.
+                        ::std::thread::sleep(
+                            ::std::time::Duration::from_millis(600),
+                        );
+                    } else {
+                        // Sleep a bit so that the parent and child timing don't stay
+                        // in sync.
+                        ::std::thread::sleep(
+                            ::std::time::Duration::from_millis(100),
+                        )
+                    }
+                    Ok(())
+                })
+                .err(),
+            "a mid-sleep case must time out into a failure",
+        )?;
 
         match failure {
-            TestError::Fail(_, value) => assert_eq!(500, value),
-            failure => panic!("Unexpected failure: {:?}", failure),
+            TestError::Fail(_, value) => {
+                ensure_eq(&500, &value, "the mid-sleep timeout shrinks to 500")
+            }
+            TestError::Abort(_) => {
+                ensure(false, "the mid-sleep timeout must be Fail, not Abort")
+            }
         }
     }
 
     #[cfg(feature = "std")]
     #[test]
-    fn duplicate_tests_not_run_with_basic_result_cache() {
+    fn duplicate_tests_not_run_with_basic_result_cache()
+    -> Result<(), TestFailure> {
         use std::cell::{Cell, RefCell};
         use std::collections::HashSet;
         use std::rc::Rc;
@@ -1464,24 +1562,37 @@ mod test {
             let result =
                 runner.run(&(0u32..65536u32).prop_map(|v| v % 10), |val| {
                     if !seen.borrow_mut().insert(val) {
-                        println!("Value {} seen more than once", val);
                         pass.set(false);
                     }
 
-                    prop_assert!(val <= 5);
-                    Ok(())
+                    if val <= 5 {
+                        Ok(())
+                    } else {
+                        Err(TestCaseError::fail("value above 5"))
+                    }
                 });
 
-            assert!(pass.get());
-            if let Err(TestError::Fail(_, val)) = result {
-                assert_eq!(6, val);
-            } else {
-                panic!("Incorrect result: {:?}", result);
+            ensure(pass.get(), "no cached value ran more than once")?;
+            match result {
+                Err(TestError::Fail(_, val)) => {
+                    ensure_eq(&6, &val, "the failure shrinks to 6")?;
+                }
+                _ => {
+                    ensure(
+                        false,
+                        "the cached run must fail with Fail, not pass or abort",
+                    )?;
+                }
             }
         }
+        Ok(())
     }
 }
 
+// Legacy-surface module: `rusty_fork_test!` only accepts unit-returning
+// `#[test]` bodies (the fork protocol reads the child's exit status), so
+// these tests cannot return `Result<(), TestFailure>` — a panic in the
+// child is the failure signal the harness is built around.
 #[cfg(all(feature = "fork", feature = "timeout", test))]
 mod timeout_tests {
     use std::thread;
@@ -1545,8 +1656,11 @@ mod timeout_tests {
         let mut runner = TestRunner::new(config);
         let result = runner.run(&crate::num::u64::ANY, |v| {
             thread::sleep(Duration::from_millis(250));
-            prop_assert!(v <= u32::MAX as u64);
-            Ok(())
+            if v <= u32::MAX as u64 {
+                Ok(())
+            } else {
+                Err(TestCaseError::fail("value exceeds u32::MAX"))
+            }
         });
 
         if let Err(TestError::Fail(_, value)) = result {

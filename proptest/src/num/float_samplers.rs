@@ -249,6 +249,10 @@ macro_rules! float_sampler {
             #[cfg(test)]
             mod test {
 
+                use strict_test_support::{
+                    TestFailure, ensure, ensure_eq, ensure_ok, ensure_some,
+                };
+
                 use super::*;
                 use crate::prelude::*;
 
@@ -268,6 +272,15 @@ macro_rules! float_sampler {
                     | prop::num::$typ::ZERO
                 }
 
+                fn finite_above_min() -> impl Strategy<Value = $typ> {
+                    // The legacy tests rejected `MIN` with `prop_assume!`;
+                    // the precondition lives in the strategy instead.
+                    finite().prop_filter(
+                        "value must be above the type minimum",
+                        |val| *val > $typ::MIN,
+                    )
+                }
+
                 fn bounds() -> impl Strategy<Value = ($typ, $typ)> {
                     (finite(), finite())
                         .prop_filter("Bounds can't be equal", |(a, b)| a != b)
@@ -275,225 +288,361 @@ macro_rules! float_sampler {
                 }
 
                 #[test]
-                fn range_test() {
+                fn range_test() -> Result<(), TestFailure> {
                     use crate::test_runner::{RngAlgorithm, TestRng};
 
                     let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
                     let (low, high) = (-1., 10.);
-                    let uniform = FloatUniform::new($wrapper(low), $wrapper(high)).expect("not uniform");
+                    let uniform = ensure_ok(
+                        FloatUniform::new($wrapper(low), $wrapper(high)),
+                        "the bounds form a uniform sampler",
+                    )?;
 
                     let samples = (0..100)
                         .map(|_| $typ::from(uniform.sample(&mut test_rng)));
                     for s in samples {
-                        assert!(low <= s && s < high);
+                        ensure(
+                            low <= s && s < high,
+                            "every sample stays within the half-open range",
+                        )?;
                     }
+                    Ok(())
                 }
 
                 #[test]
-                fn range_end_bound_test() {
+                fn range_end_bound_test() -> Result<(), TestFailure> {
                     use crate::test_runner::{RngAlgorithm, TestRng};
 
                     let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
                     let (low, high) = (1., 1. + $typ::EPSILON);
-                    let uniform = FloatUniform::new($wrapper(low), $wrapper(high)).expect("not uniform");
+                    let uniform = ensure_ok(
+                        FloatUniform::new($wrapper(low), $wrapper(high)),
+                        "the bounds form a uniform sampler",
+                    )?;
 
                     let mut samples = (0..100)
                         .map(|_| $typ::from(uniform.sample(&mut test_rng)));
-                    assert!(samples.all(|x| x == 1.));
+                    ensure(
+                        samples.all(|x| x == 1.),
+                        "a one-ulp half-open range only yields its base",
+                    )
                 }
 
                 #[test]
-                fn inclusive_range_test() {
+                fn inclusive_range_test() -> Result<(), TestFailure> {
                     use crate::test_runner::{RngAlgorithm, TestRng};
 
                     let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
                     let (low, high) = (-1., 10.);
-                    let uniform = FloatUniform::new_inclusive($wrapper(low), $wrapper(high)).expect("not uniform");
+                    let uniform = ensure_ok(
+                        FloatUniform::new_inclusive($wrapper(low), $wrapper(high)),
+                        "the bounds form a uniform sampler",
+                    )?;
 
                     let samples = (0..100)
                         .map(|_| $typ::from(uniform.sample(&mut test_rng)));
                     for s in samples {
-                        assert!(low <= s && s <= high);
+                        ensure(
+                            low <= s && s <= high,
+                            "every sample stays within the inclusive range",
+                        )?;
                     }
+                    Ok(())
                 }
 
                 #[test]
-                fn inclusive_range_end_bound_test() {
+                fn inclusive_range_end_bound_test() -> Result<(), TestFailure> {
                     use crate::test_runner::{RngAlgorithm, TestRng};
 
                     let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
                     let (low, high) = (1., 1. + $typ::EPSILON);
-                    let uniform = FloatUniform::new_inclusive($wrapper(low), $wrapper(high)).expect("not uniform");
+                    let uniform = ensure_ok(
+                        FloatUniform::new_inclusive($wrapper(low), $wrapper(high)),
+                        "the bounds form a uniform sampler",
+                    )?;
 
                     let mut samples = (0..100)
                         .map(|_| $typ::from(uniform.sample(&mut test_rng)));
-                    assert!(samples.any(|x| x == 1. + $typ::EPSILON));
+                    ensure(
+                        samples.any(|x| x == 1. + $typ::EPSILON),
+                        "the inclusive end bound is sampled",
+                    )
                 }
 
                 #[test]
-                fn inclusive_range_single_point() {
+                fn inclusive_range_single_point() -> Result<(), TestFailure> {
                     use crate::test_runner::{RngAlgorithm, TestRng};
 
                     let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
                     let point: $typ = 0.0;
-                    let uniform = FloatUniform::new_inclusive($wrapper(point), $wrapper(point)).expect("not uniform");
+                    let uniform = ensure_ok(
+                        FloatUniform::new_inclusive($wrapper(point), $wrapper(point)),
+                        "a single-point range forms a uniform sampler",
+                    )?;
                     for _ in 0..16 {
-                        assert_eq!($typ::from(uniform.sample(&mut test_rng)), point);
+                        ensure_eq(
+                            &$typ::from(uniform.sample(&mut test_rng)),
+                            &point,
+                            "a single-point range always yields its point",
+                        )?;
                     }
+                    Ok(())
                 }
 
                 #[test]
-                fn inclusive_range_single_point_strategy() {
+                fn inclusive_range_single_point_strategy() -> Result<(), TestFailure> {
                     use crate::test_runner::TestRunner;
                     use crate::strategy::{Strategy, ValueTree};
 
                     let mut runner = TestRunner::default();
-                    let tree = (1.5 as $typ ..= 1.5 as $typ).new_tree(&mut runner).unwrap();
-                    assert_eq!(tree.current(), 1.5 as $typ);
+                    let tree = ensure_some(
+                        (1.5 as $typ ..= 1.5 as $typ).new_tree(&mut runner).ok(),
+                        "a single-point inclusive range generates a value tree",
+                    )?;
+                    ensure_eq(
+                        &tree.current(),
+                        &(1.5 as $typ),
+                        "the single-point strategy yields its point",
+                    )
                 }
 
                 #[test]
-                fn all_floats_in_range_are_possible_1() {
+                fn all_floats_in_range_are_possible_1() -> Result<(), TestFailure> {
                     use crate::test_runner::{RngAlgorithm, TestRng};
 
                     let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
                     let (low, high) = (1. - $typ::EPSILON, 1. + $typ::EPSILON);
-                    let uniform = FloatUniform::new_inclusive($wrapper(low), $wrapper(high)).expect("not uniform");
+                    let uniform = ensure_ok(
+                        FloatUniform::new_inclusive($wrapper(low), $wrapper(high)),
+                        "the bounds form a uniform sampler",
+                    )?;
 
                     let mut samples = (0..100)
                         .map(|_| $typ::from(uniform.sample(&mut test_rng)));
-                    assert!(samples.any(|x| x == 1. - $typ::EPSILON / 2.));
+                    ensure(
+                        samples.any(|x| x == 1. - $typ::EPSILON / 2.),
+                        "an interior float of the range is sampled",
+                    )
                 }
 
                 #[test]
-                fn all_floats_in_range_are_possible_2() {
+                fn all_floats_in_range_are_possible_2() -> Result<(), TestFailure> {
                     use crate::test_runner::{RngAlgorithm, TestRng};
 
                     let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
                     let (low, high) = (0., MAX_PRECISE_INT as $typ);
-                    let uniform = FloatUniform::new_inclusive($wrapper(low), $wrapper(high)).expect("not uniform");
+                    let uniform = ensure_ok(
+                        FloatUniform::new_inclusive($wrapper(low), $wrapper(high)),
+                        "the bounds form a uniform sampler",
+                    )?;
 
                     let mut samples = (0..100)
                         .map(|_| $typ::from(uniform.sample(&mut test_rng)))
                         .map(|x| x.fract());
 
-                    assert!(samples.any(|x| x != 0.));
+                    ensure(
+                        samples.any(|x| x != 0.),
+                        "fractional values are sampled across the range",
+                    )
                 }
 
                 #[test]
-                fn max_precise_int_plus_one_is_rounded_down() {
-                    assert_eq!(((MAX_PRECISE_INT + 1) as $typ) as $int_typ, MAX_PRECISE_INT);
+                fn max_precise_int_plus_one_is_rounded_down() -> Result<(), TestFailure> {
+                    ensure_eq(
+                        &(((MAX_PRECISE_INT + 1) as $typ) as $int_typ),
+                        &MAX_PRECISE_INT,
+                        "the first imprecise integer rounds back down",
+                    )
                 }
 
-                proptest! {
-                    #[test]
-                    fn next_down_less_than_float(val in finite()) {
-                        prop_assume!(val > $typ::MIN);
-                        prop_assert!(next_down(val) <  val);
-                    }
+                #[test]
+                fn next_down_less_than_float() -> Result<(), TestFailure> {
+                    crate::strict::ensure_property(
+                        &finite_above_min(),
+                        "next_down is strictly below its input",
+                        |val| {
+                            ensure(
+                                next_down(val) < val,
+                                "next_down yields a smaller float",
+                            )
+                        },
+                    )
+                }
 
-                    #[test]
-                    fn no_value_between_float_and_next_down(val in finite()) {
-                        prop_assume!(val > $typ::MIN);
-                        let prev = next_down(val);
-                        let avg = prev / 2. + val / 2.;
-                        prop_assert!(avg == prev || avg == val);
-                    }
+                #[test]
+                fn no_value_between_float_and_next_down() -> Result<(), TestFailure> {
+                    crate::strict::ensure_property(
+                        &finite_above_min(),
+                        "next_down is the immediate predecessor",
+                        |val| {
+                            let prev = next_down(val);
+                            let avg = prev / 2. + val / 2.;
+                            ensure(
+                                avg == prev || avg == val,
+                                "no float lies between a value and its \
+                                 next_down",
+                            )
+                        },
+                    )
+                }
 
-                    #[test]
-                    fn values_less_than_or_equal_to_max_precise_int_are_not_rounded(i in 0..=MAX_PRECISE_INT) {
-                        prop_assert_eq!((i as $typ) as $int_typ, i);
-                    }
+                #[test]
+                fn values_less_than_or_equal_to_max_precise_int_are_not_rounded() -> Result<(), TestFailure> {
+                    crate::strict::ensure_property(
+                        &(0..=MAX_PRECISE_INT),
+                        "precise integers survive a float round trip",
+                        |i| {
+                            ensure_eq(
+                                &((i as $typ) as $int_typ),
+                                &i,
+                                "the round-tripped integer is unchanged",
+                            )
+                        },
+                    )
+                }
 
-                    #[test]
-                    fn indivisible_intervals_are_split_to_self(val in finite()) {
-                        prop_assume!(val > $typ::MIN);
-                        let prev = next_down(val);
-                        let intervals = split_interval([prev, val]);
-                        prop_assert_eq!(intervals.count, 1);
-                    }
+                #[test]
+                fn indivisible_intervals_are_split_to_self() -> Result<(), TestFailure> {
+                    crate::strict::ensure_property(
+                        &finite_above_min(),
+                        "a one-ulp interval is indivisible",
+                        |val| {
+                            let prev = next_down(val);
+                            let intervals = split_interval([prev, val]);
+                            ensure_eq(
+                                &intervals.count,
+                                &1,
+                                "the indivisible interval splits to itself",
+                            )
+                        },
+                    )
+                }
 
-                    #[test]
-                    fn split_intervals_are_the_same_size(
-                            (low, high) in bounds(),
-                            indices: [prop::sample::Index; 32]) {
+                #[test]
+                fn split_intervals_are_the_same_size() -> Result<(), TestFailure> {
+                    // The legacy test `prop_assume!`d a non-trivial split;
+                    // the precondition lives in the strategy filter instead.
+                    let inputs = (bounds(), any::<[prop::sample::Index; 32]>())
+                        .prop_filter(
+                            "the bounds must split into at least two \
+                             intervals",
+                            |((low, high), _)| {
+                                split_interval([*low, *high]).count > 1
+                            },
+                        );
+                    crate::strict::ensure_property(
+                        &inputs,
+                        "split intervals share one width",
+                        |((low, high), indices)| {
+                            let intervals = split_interval([low, high]);
+                            let size = (intervals.count - 1) as usize;
 
-                        let intervals = split_interval([low, high]);
+                            let mut it = indices.iter()
+                                .map(|i| i.index(size) as $int_typ)
+                                .map(|i| intervals.get(i))
+                                .map(|[low, high]| high - low);
 
-                        let size = (intervals.count - 1) as usize;
-                        prop_assume!(size > 0);
+                            let interval_size = ensure_some(
+                                it.next(),
+                                "at least one interval is sampled",
+                            )?;
+                            ensure(
+                                it.all(|g| g == interval_size),
+                                "every sampled interval has the same width",
+                            )
+                        },
+                    )
+                }
 
-                        let mut it = indices.iter()
-                            .map(|i| i.index(size) as $int_typ)
-                            .map(|i| intervals.get(i))
-                            .map(|[low, high]| high - low);
+                #[test]
+                fn split_intervals_are_consecutive() -> Result<(), TestFailure> {
+                    let inputs = (bounds(), any::<[prop::sample::Index; 32]>())
+                        .prop_filter(
+                            "the bounds must split into at least three \
+                             intervals",
+                            |((low, high), _)| {
+                                split_interval([*low, *high]).count > 2
+                            },
+                        );
+                    crate::strict::ensure_property(
+                        &inputs,
+                        "split intervals are consecutive",
+                        |((low, high), indices)| {
+                            let intervals = split_interval([low, high]);
+                            let size = (intervals.count - 1) as usize;
 
-                        let interval_size = it.next().unwrap();
-                        let all_equal = it.all(|g| g == interval_size);
-                        prop_assert!(all_equal);
-                    }
+                            let mut it = indices.iter()
+                                .map(|i| i.index(size - 1) as $int_typ)
+                                .map(|i| (intervals.get(i), intervals.get(i + 1)));
 
-                    #[test]
-                    fn split_intervals_are_consecutive(
-                        (low, high) in bounds(),
-                        indices: [prop::sample::Index; 32]) {
+                            let ascending = it.all(|([_, h1], [l2, _])| h1 == l2);
+                            let descending = it.all(|([l1, _], [_, h2])| l1 == h2);
 
-                        let intervals = split_interval([low, high]);
+                            ensure(
+                                ascending || descending,
+                                "adjacent intervals share a bound in one \
+                                 direction",
+                            )
+                        },
+                    )
+                }
 
-                        let size = (intervals.count - 1) as usize;
-                        prop_assume!(size > 1);
+                #[test]
+                fn first_split_might_slightly_overshoot_one_bound() -> Result<(), TestFailure> {
+                    crate::strict::ensure_property(
+                        &bounds(),
+                        "the first split covers the bounds with at most one \
+                         overshoot",
+                        |(low, high)| {
+                            let intervals = split_interval([low, high]);
+                            let start = intervals.get(0);
+                            let end = intervals.get(intervals.count - 1);
+                            let (low_interval, high_interval) = if start[0] < end[0] {
+                                (start, end)
+                            } else {
+                                (end, start)
+                            };
 
-                        let mut it = indices.iter()
-                            .map(|i| i.index(size - 1) as $int_typ)
-                            .map(|i| (intervals.get(i), intervals.get(i + 1)));
+                            ensure(
+                                low == low_interval[0] && high_interval[0] < high && high <= high_interval[1] ||
+                                low_interval[0] <= low && low < low_interval[1] && high == high_interval[1],
+                                "exactly one bound may overshoot",
+                            )
+                        },
+                    )
+                }
 
-                        let ascending = it.all(|([_, h1], [l2, _])| h1 == l2);
-                        let descending = it.all(|([l1, _], [_, h2])| l1 == h2);
+                #[test]
+                fn subsequent_splits_always_match_bounds() -> Result<(), TestFailure> {
+                    crate::strict::ensure_property(
+                        &(bounds(), any::<prop::sample::Index>()),
+                        "recursive splits stay within their interval",
+                        |((low, high), index)| {
+                            // This property is true because the distances of split intervals of
+                            // are powers of two so the smaller one always divides the larger.
 
-                        prop_assert!(ascending || descending);
-                    }
+                            let intervals = split_interval([low, high]);
+                            let size = (intervals.count - 1) as usize;
 
-                    #[test]
-                    fn first_split_might_slightly_overshoot_one_bound((low, high) in bounds()) {
-                        let intervals = split_interval([low, high]);
-                        let start = intervals.get(0);
-                        let end = intervals.get(intervals.count - 1);
-                        let (low_interval, high_interval) = if  start[0] < end[0] {
-                            (start, end)
-                        } else {
-                            (end, start)
-                        };
+                            let interval = intervals.get(index.index(size) as $int_typ);
+                            let small_intervals = split_interval(interval);
 
-                        prop_assert!(
-                            low == low_interval[0] && high_interval[0] < high && high <= high_interval[1] ||
-                            low_interval[0] <= low && low < low_interval[1] && high == high_interval[1]);
-                    }
+                            let start = small_intervals.get(0);
+                            let end = small_intervals.get(small_intervals.count - 1);
+                            let (low_interval, high_interval) = if start[0] < end[0] {
+                                (start, end)
+                            } else {
+                                (end, start)
+                            };
 
-                    #[test]
-                    fn subsequent_splits_always_match_bounds(
-                        (low, high) in bounds(),
-                        index: prop::sample::Index) {
-                        // This property is true because the distances of split intervals of
-                        // are powers of two so the smaller one always divides the larger.
-
-                        let intervals = split_interval([low, high]);
-                        let size = (intervals.count - 1) as usize;
-
-                        let interval = intervals.get(index.index(size) as $int_typ);
-                        let small_intervals = split_interval(interval);
-
-                        let start = small_intervals.get(0);
-                        let end = small_intervals.get(small_intervals.count - 1);
-                        let (low_interval, high_interval) = if  start[0] < end[0] {
-                            (start, end)
-                        } else {
-                            (end, start)
-                        };
-
-                        prop_assert!(
-                            interval[0] == low_interval[0] &&
-                            interval[1] == high_interval[1]);
-                    }
+                            ensure(
+                                interval[0] == low_interval[0] &&
+                                interval[1] == high_interval[1],
+                                "the sub-split spans exactly its parent \
+                                 interval",
+                            )
+                        },
+                    )
                 }
             }
         }

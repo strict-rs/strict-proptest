@@ -676,30 +676,42 @@ impl<T: ValueTree> ValueTree for VecValueTree<T> {
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
+
     use super::*;
 
     use crate::bits;
+    use crate::test_runner::TestCaseError;
 
     #[test]
-    fn test_vec() {
+    fn test_vec() -> Result<(), TestFailure> {
         let input = vec(1usize..20usize, 5..20);
         let mut num_successes = 0;
 
         let mut runner = TestRunner::deterministic();
         for _ in 0..256 {
-            let case = input.new_tree(&mut runner).unwrap();
+            let case = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "vec strategy generates a value tree",
+            )?;
             let start = case.current();
             // Has correct length
-            assert!(start.len() >= 5 && start.len() < 20);
+            ensure(
+                start.len() >= 5 && start.len() < 20,
+                "the generated vec has the requested length",
+            )?;
             // Has at least 2 distinct values
-            assert!(start.iter().copied().collect::<VarBitSet>().len() >= 2);
+            ensure(
+                start.iter().copied().collect::<VarBitSet>().len() >= 2,
+                "the generated vec has at least two distinct values",
+            )?;
 
             let result = runner.run_one(case, |v| {
-                prop_assert!(
-                    v.iter().copied().sum::<usize>() < 9,
-                    "greater than 8"
-                );
-                Ok(())
+                if v.iter().copied().sum::<usize>() < 9 {
+                    Ok(())
+                } else {
+                    Err(TestCaseError::fail("greater than 8"))
+                }
             });
 
             match result {
@@ -708,19 +720,23 @@ mod test {
                     // The minimal case always has between 5 (due to min
                     // length) and 9 (min element value = 1) elements, and
                     // always sums to exactly 9.
-                    assert!(
+                    ensure(
                         value.len() >= 5
                             && value.len() <= 9
                             && value.iter().copied().sum::<usize>() == 9,
-                        "Unexpected minimal value: {:?}",
-                        value
-                    );
+                        "the minimal value has 5..=9 elements summing to \
+                         exactly 9",
+                    )?;
                 }
-                e => panic!("Unexpected result: {:?}", e),
+                _ => ensure(
+                    false,
+                    "run_one yields either a success or a failed case",
+                )?,
             }
         }
 
-        assert!(num_successes < 256);
+        ensure(num_successes < 256, "at least one case falsified")?;
+        Ok(())
     }
 
     #[test]
@@ -729,50 +745,75 @@ mod test {
     }
 
     #[test]
-    fn test_parallel_vec() {
+    fn test_parallel_vec() -> Result<(), TestFailure> {
         let input =
             vec![(1u32..10).boxed(), bits::u32::masked(0xF0u32).boxed()];
 
         for _ in 0..256 {
             let mut runner = TestRunner::default();
-            let mut case = input.new_tree(&mut runner).unwrap();
+            let mut case = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "parallel vec strategy generates a value tree",
+            )?;
 
             loop {
                 let current = case.current();
-                assert_eq!(2, current.len());
-                assert!(current[0] >= 1 && current[0] <= 10);
-                assert_eq!(0, (current[1] & !0xF0));
+                ensure_eq(
+                    &2,
+                    &current.len(),
+                    "a parallel vec keeps its fixed length",
+                )?;
+                ensure(
+                    current[0] >= 1 && current[0] <= 10,
+                    "the first element obeys its range strategy",
+                )?;
+                ensure_eq(
+                    &0,
+                    &(current[1] & !0xF0),
+                    "the second element obeys its bit mask",
+                )?;
 
                 if !case.simplify() {
                     break;
                 }
             }
         }
+        Ok(())
     }
 
     #[cfg(feature = "std")]
     #[test]
-    fn test_map() {
+    fn test_map() -> Result<(), TestFailure> {
         // Only 8 possible keys
         let input = hash_map("[ab]{3}", "a", 2..3);
         let mut runner = TestRunner::deterministic();
 
         for _ in 0..256 {
-            let v = input.new_tree(&mut runner).unwrap().current();
-            assert_eq!(2, v.len());
+            let v = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "hash_map strategy generates a value tree",
+            )?
+            .current();
+            ensure_eq(&2, &v.len(), "the map has the requested size")?;
         }
+        Ok(())
     }
 
     #[cfg(feature = "std")]
     #[test]
-    fn test_set() {
+    fn test_set() -> Result<(), TestFailure> {
         // Only 8 possible values
         let input = hash_set("[ab]{3}", 2..3);
         let mut runner = TestRunner::deterministic();
 
         for _ in 0..256 {
-            let v = input.new_tree(&mut runner).unwrap().current();
-            assert_eq!(2, v.len());
+            let v = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "hash_set strategy generates a value tree",
+            )?
+            .current();
+            ensure_eq(&2, &v.len(), "the set has the requested size")?;
         }
+        Ok(())
     }
 }

@@ -216,10 +216,12 @@ pub(crate) fn static_map<S: Strategy, O: fmt::Debug>(
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TestFailure, ensure, ensure_some};
+
     use super::*;
 
     #[test]
-    fn test_static_filter() {
+    fn test_static_filter() -> Result<(), TestFailure> {
         #[derive(Clone, Copy, Debug)]
         struct MyFilter;
         impl FilterFn<i32> for MyFilter {
@@ -232,19 +234,32 @@ mod test {
 
         for _ in 0..256 {
             let mut runner = TestRunner::default();
-            let mut case = input.new_tree(&mut runner).unwrap();
+            let mut case = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "static filter generates a value tree",
+            )?;
 
-            assert!(0 == case.current() % 3);
+            ensure(
+                0 == case.current() % 3,
+                "the generated value satisfies the filter",
+            )?;
 
             while case.simplify() {
-                assert!(0 == case.current() % 3);
+                ensure(
+                    0 == case.current() % 3,
+                    "every simplified value satisfies the filter",
+                )?;
             }
-            assert!(0 == case.current() % 3);
+            ensure(
+                0 == case.current() % 3,
+                "the fully simplified value satisfies the filter",
+            )?;
         }
+        Ok(())
     }
 
     #[test]
-    fn test_static_map() {
+    fn test_static_map() -> Result<(), TestFailure> {
         #[derive(Clone, Copy, Debug)]
         struct MyMap;
         impl MapFn<i32> for MyMap {
@@ -256,11 +271,10 @@ mod test {
 
         let input = Map::new(0..10, MyMap);
 
-        TestRunner::default()
-            .run(&input, |v| {
-                assert!(0 == v % 2);
-                Ok(())
-            })
-            .unwrap();
+        crate::strict::ensure_property(
+            &input,
+            "the static map applies its function to every value",
+            |v| ensure(0 == v % 2, "the mapped value is even"),
+        )
     }
 }

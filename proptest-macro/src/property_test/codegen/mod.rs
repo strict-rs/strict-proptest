@@ -124,59 +124,65 @@ fn test_attr() -> Attribute {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use strict_test_support::{
+        TestFailure, ensure_contains, ensure_eq, ensure_ok, ensure_some,
+    };
     use syn::{ItemStruct, parse_quote, parse_str, parse2};
 
-    /// Simple helper that parses a function, and validates that the struct name and fields are
-    /// correct
+    /// Parse a function and check the generated struct's name and fields,
+    /// comparing a rendered `name: ty` listing so failures cite both sides.
     fn check_struct(
         fn_def: &str,
         expected_name: &'static str,
         expected_fields: impl IntoIterator<Item = (&'static str, &'static str)>,
-    ) {
-        let f: ItemFn = parse_str(fn_def).unwrap();
+    ) -> Result<(), TestFailure> {
+        let f: ItemFn = ensure_ok(parse_str(fn_def), "fixture fn parses")?;
         let (f, args) = strip_args(f);
         let tokens = generate_struct(&f.sig.ident, &args);
-        let s: ItemStruct = parse2(tokens).unwrap();
+        let s: ItemStruct =
+            ensure_ok(parse2(tokens), "generated struct parses")?;
 
-        let fields: Vec<_> = s
-            .fields
+        ensure_eq(
+            &s.ident.to_string(),
+            &expected_name.to_owned(),
+            "generated struct name matches",
+        )?;
+
+        let mut rendered_fields = Vec::new();
+        for field in s.fields {
+            let name = ensure_some(field.ident, "generated fields are named")?;
+            rendered_fields
+                .push(format!("{name}: {}", field.ty.to_token_stream()));
+        }
+        let rendered = rendered_fields.join(", ");
+        let expected = expected_fields
             .into_iter()
-            .map(|field| {
-                (
-                    field.ident.unwrap().to_string(),
-                    field.ty.to_token_stream().to_string(),
-                )
-            })
-            .collect();
-
-        assert_eq!(s.ident.to_string(), expected_name);
-        let expected_fields: Vec<_> = expected_fields
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-
-        assert_eq!(fields, expected_fields);
+            .map(|(name, ty)| format!("{name}: {ty}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        ensure_eq(&rendered, &expected, "generated struct fields match")
     }
 
     #[test]
-    fn derives_debug() {
-        let f: ItemFn = parse_str("fn foo(x: i32) {}").unwrap();
+    fn derives_debug() -> Result<(), TestFailure> {
+        let f: ItemFn =
+            ensure_ok(parse_str("fn foo(x: i32) {}"), "fixture fn parses")?;
         let (f, args) = strip_args(f);
         let string = generate_struct(&f.sig.ident, &args).to_string();
 
-        assert!(string.contains("derive"));
-        assert!(string.contains("Debug"));
+        ensure_contains(&string, "derive", "generated struct has a derive")?;
+        ensure_contains(&string, "Debug", "generated struct derives Debug")
     }
 
     #[test]
-    fn generates_correct_struct() {
-        check_struct("fn foo() {}", "FooArgs", []);
-        check_struct("fn foo(x: i32) {}", "FooArgs", [("x", "i32")]);
+    fn generates_correct_struct() -> Result<(), TestFailure> {
+        check_struct("fn foo() {}", "FooArgs", [])?;
+        check_struct("fn foo(x: i32) {}", "FooArgs", [("x", "i32")])?;
         check_struct(
             "fn foo(a: i32, b: String) {}",
             "FooArgs",
             [("a", "i32"), ("b", "String")],
-        );
+        )
     }
 
     #[test]
@@ -196,6 +202,7 @@ mod tests {
 #[cfg(test)]
 mod snapshot_tests {
     use super::*;
+    use strict_test_support::{TestFailure, ensure_ok};
     use syn::parse_str;
 
     macro_rules! snapshot_test {
@@ -207,17 +214,23 @@ mod snapshot_tests {
         };
         ($name:ident, $options:expr) => {
             #[test]
-            fn $name() {
+            fn $name() -> Result<(), TestFailure> {
                 const TEXT: &str = include_str!(concat!(
                     "test_data/",
                     stringify!($name),
                     ".rs"
                 ));
 
-                let tokens = generate(parse_str(TEXT).unwrap(), $options);
-                let file = syn::parse_file(&tokens.to_string()).unwrap();
+                let parsed =
+                    ensure_ok(parse_str(TEXT), "fixture source parses")?;
+                let tokens = generate(parsed, $options);
+                let file = ensure_ok(
+                    syn::parse_file(&tokens.to_string()),
+                    "generated code parses as a file",
+                )?;
                 let formatted = prettyplease::unparse(&file);
                 insta::assert_snapshot!(formatted);
+                Ok(())
             }
         };
     }
@@ -234,7 +247,10 @@ mod snapshot_tests {
         snapshot_test!(
             simple,
             Options {
-                proptest_path: Some(parse_str("::hello::world").unwrap()),
+                proptest_path: Some(ensure_ok(
+                    parse_str("::hello::world"),
+                    "custom proptest_path fixture parses",
+                )?),
                 ..Options::default()
             }
         );

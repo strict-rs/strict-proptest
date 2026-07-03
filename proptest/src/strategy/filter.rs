@@ -113,23 +113,38 @@ impl<S: ValueTree, F: Fn(&S::Value) -> bool> ValueTree for Filter<S, F> {
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TestFailure, ensure, ensure_some};
+
     use super::*;
 
     #[test]
-    fn test_filter() {
+    fn test_filter() -> Result<(), TestFailure> {
         let input = (0..256).prop_filter("%3", |&v| 0 == v % 3);
 
         for _ in 0..256 {
             let mut runner = TestRunner::default();
-            let mut case = input.new_tree(&mut runner).unwrap();
+            let mut case = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "filter strategy generates a value tree",
+            )?;
 
-            assert!(0 == case.current() % 3);
+            ensure(
+                0 == case.current() % 3,
+                "the generated value satisfies the filter",
+            )?;
 
             while case.simplify() {
-                assert!(0 == case.current() % 3);
+                ensure(
+                    0 == case.current() % 3,
+                    "every simplified value satisfies the filter",
+                )?;
             }
-            assert!(0 == case.current() % 3);
+            ensure(
+                0 == case.current() % 3,
+                "the fully simplified value satisfies the filter",
+            )?;
         }
+        Ok(())
     }
 
     #[test]

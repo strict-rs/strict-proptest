@@ -14,6 +14,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use strict_test_support::{TestFailure, ensure, ensure_ok, ensure_some};
 
 struct CargoArtifacts {
     deps_dir: PathBuf,
@@ -29,13 +30,28 @@ struct CargoFingerprint {
 }
 
 impl CargoFingerprint {
-    fn parse(json: &str) -> Self {
-        let json = serde_json::from_str(json).expect("Cargo fingerprint JSON");
-        Self {
-            rustc: json_u64(&json, "rustc"),
-            config: json_u64(&json, "config"),
-            features: parse_feature_set(json_str(&json, "features")),
-        }
+    fn parse(json: &str) -> Result<Self, TestFailure> {
+        let json: Value = ensure_ok(
+            serde_json::from_str(json),
+            "the Cargo fingerprint is valid JSON",
+        )?;
+        Ok(Self {
+            rustc: json_u64(
+                &json,
+                "rustc",
+                "the fingerprint carries a numeric rustc hash",
+            )?,
+            config: json_u64(
+                &json,
+                "config",
+                "the fingerprint carries a numeric config hash",
+            )?,
+            features: parse_feature_set(json_str(
+                &json,
+                "features",
+                "the fingerprint carries a feature list string",
+            )?)?,
+        })
     }
 
     fn matches_current_build(
@@ -52,34 +68,43 @@ impl CargoFingerprint {
 }
 
 impl CargoArtifacts {
-    fn current() -> Self {
-        let current_exe = env::current_exe().expect("current test binary path");
-        let deps_dir = current_exe
-            .parent()
-            .expect("test binary deps dir")
-            .to_owned();
-        let fingerprint_dir = deps_dir
-            .parent()
-            .expect("target profile dir")
-            .join(".fingerprint");
+    fn current() -> Result<Self, TestFailure> {
+        let current_exe = ensure_ok(
+            env::current_exe(),
+            "the current test binary path resolves",
+        )?;
+        let deps_dir = ensure_some(
+            current_exe.parent(),
+            "the test binary sits in the target deps dir",
+        )?
+        .to_owned();
+        let fingerprint_dir = ensure_some(
+            deps_dir.parent(),
+            "the deps dir sits in the target profile dir",
+        )?
+        .join(".fingerprint");
 
-        let exe_hash = artifact_hash(
-            &current_exe,
-            "compiletest-",
-            env::consts::EXE_EXTENSION,
-        )
-        .expect("compiletest artifact hash");
+        let exe_hash = ensure_some(
+            artifact_hash(
+                &current_exe,
+                "compiletest-",
+                env::consts::EXE_EXTENSION,
+            ),
+            "the compiletest binary name carries a Cargo hash",
+        )?;
         let test_fingerprint = fingerprint_dir
             .join(format!("{}-{}", env!("CARGO_PKG_NAME"), exe_hash))
             .join("test-integration-test-compiletest.json");
-        let test_fingerprint = fs::read_to_string(&test_fingerprint)
-            .expect("compiletest fingerprint");
+        let test_fingerprint = ensure_ok(
+            fs::read_to_string(&test_fingerprint),
+            "the compiletest fingerprint file is readable",
+        )?;
 
-        Self {
+        Ok(Self {
             deps_dir,
             fingerprint_dir,
-            current_fingerprint: CargoFingerprint::parse(&test_fingerprint),
-        }
+            current_fingerprint: CargoFingerprint::parse(&test_fingerprint)?,
+        })
     }
 
     fn extern_arg(
@@ -89,15 +114,17 @@ impl CargoArtifacts {
         file_prefix: &str,
         extension: &str,
         required_features: &[&str],
-    ) -> String {
+        missing_context: &'static str,
+    ) -> Result<String, TestFailure> {
         let path = self.resolve_artifact(
             package,
             lib_name,
             file_prefix,
             extension,
             required_features,
-        );
-        format!("--extern {}={}", lib_name, path_to_str(&path))
+            missing_context,
+        )?;
+        Ok(format!("--extern {}={}", lib_name, path_to_str(&path)?))
     }
 
     fn resolve_artifact(
@@ -107,8 +134,12 @@ impl CargoArtifacts {
         file_prefix: &str,
         extension: &str,
         required_features: &[&str],
-    ) -> PathBuf {
-        let entries = fs::read_dir(&self.deps_dir).expect("target deps dir");
+        missing_context: &'static str,
+    ) -> Result<PathBuf, TestFailure> {
+        let entries = ensure_ok(
+            fs::read_dir(&self.deps_dir),
+            "the target deps dir is readable",
+        )?;
         let mut candidates = entries
             .filter_map(Result::ok)
             .map(|entry| entry.path())
@@ -119,7 +150,14 @@ impl CargoArtifacts {
                     .join(format!("{}-{}", package, hash))
                     .join(format!("lib-{}.json", lib_name));
                 let fingerprint = fs::read_to_string(fingerprint).ok()?;
-                self.matches_current_build(&fingerprint, required_features)
+                // A stale or malformed candidate fingerprint means "not this
+                // artifact", never an abort — skip it and keep scanning.
+                let fingerprint = CargoFingerprint::parse(&fingerprint).ok()?;
+                fingerprint
+                    .matches_current_build(
+                        &self.current_fingerprint,
+                        required_features,
+                    )
                     .then_some(artifact)
             })
             .collect::<Vec<_>>();
@@ -129,18 +167,7 @@ impl CargoArtifacts {
                 .and_then(|metadata| metadata.modified())
                 .unwrap_or(SystemTime::UNIX_EPOCH)
         });
-        candidates
-            .pop()
-            .unwrap_or_else(|| panic!("no artifact found for {}", lib_name))
-    }
-
-    fn matches_current_build(
-        &self,
-        fingerprint: &str,
-        required_features: &[&str],
-    ) -> bool {
-        CargoFingerprint::parse(fingerprint)
-            .matches_current_build(&self.current_fingerprint, required_features)
+        ensure_some(candidates.pop(), missing_context)
     }
 }
 
@@ -157,64 +184,74 @@ fn artifact_hash<'a>(
     file_name.strip_suffix(&format!(".{}", extension))
 }
 
-fn json_u64(json: &Value, field: &str) -> u64 {
-    json.get(field).and_then(Value::as_u64).unwrap_or_else(|| {
-        panic!("missing numeric `{}` in Cargo fingerprint", field)
-    })
+fn json_u64(
+    json: &Value,
+    field: &str,
+    context: &'static str,
+) -> Result<u64, TestFailure> {
+    ensure_some(json.get(field).and_then(Value::as_u64), context)
 }
 
-fn json_str<'a>(json: &'a Value, field: &str) -> &'a str {
-    json.get(field).and_then(Value::as_str).unwrap_or_else(|| {
-        panic!("missing string `{}` in Cargo fingerprint", field)
-    })
+fn json_str<'a>(
+    json: &'a Value,
+    field: &str,
+    context: &'static str,
+) -> Result<&'a str, TestFailure> {
+    ensure_some(json.get(field).and_then(Value::as_str), context)
 }
 
-fn parse_feature_set(features: &str) -> BTreeSet<String> {
-    serde_json::from_str::<Vec<String>>(features)
-        .expect("Cargo fingerprint feature list")
-        .into_iter()
-        .collect()
+fn parse_feature_set(features: &str) -> Result<BTreeSet<String>, TestFailure> {
+    Ok(ensure_ok(
+        serde_json::from_str::<Vec<String>>(features),
+        "the fingerprint feature list is a JSON string array",
+    )?
+    .into_iter()
+    .collect())
 }
 
-fn path_to_str(path: &Path) -> &str {
-    let path = path.to_str().expect("artifact path is valid UTF-8");
-    assert!(
+fn path_to_str(path: &Path) -> Result<&str, TestFailure> {
+    let path = ensure_some(path.to_str(), "the artifact path is valid UTF-8")?;
+    ensure(
         !path.contains(char::is_whitespace),
-        "compiletest cannot split paths with whitespace: {}",
-        path
-    );
-    path
+        "compiletest cannot split paths with whitespace",
+    )?;
+    Ok(path)
 }
 
-fn rustc_flags() -> String {
-    let cargo = CargoArtifacts::current();
+fn rustc_flags() -> Result<String, TestFailure> {
+    let cargo = CargoArtifacts::current()?;
     let proptest = cargo.extern_arg(
         "proptest",
         "proptest",
         "libproptest-",
         "rlib",
         &["bit-set", "default", "fork", "std", "timeout"],
-    );
+        "a proptest rlib matching the current build exists in deps",
+    )?;
     let proptest_derive = cargo.extern_arg(
         "proptest-derive",
         "proptest_derive",
         &format!("{}proptest_derive-", env::consts::DLL_PREFIX),
         env::consts::DLL_EXTENSION,
         &[],
-    );
+        "a proptest_derive dylib matching the current build exists in deps",
+    )?;
 
-    format!(
+    Ok(format!(
         "-L {} {} {} --edition=2024",
-        path_to_str(&cargo.deps_dir),
+        path_to_str(&cargo.deps_dir)?,
         proptest,
         proptest_derive,
-    )
+    ))
 }
 
-fn run_mode(src: &'static str, mode: &'static str) {
+fn run_mode(src: &'static str, mode: &'static str) -> Result<(), TestFailure> {
     let mut config = ct::Config {
-        mode: mode.parse().expect("invalid mode"),
-        target_rustcflags: Some(rustc_flags()),
+        mode: ensure_some(
+            mode.parse().ok(),
+            "the compiletest mode string parses",
+        )?,
+        target_rustcflags: Some(rustc_flags()?),
         src_base: format!("tests/{}", src).into(),
         ..ct::Config::default()
     };
@@ -222,34 +259,55 @@ fn run_mode(src: &'static str, mode: &'static str) {
         config.filters = vec![name];
     }
 
+    // `compiletest_rs` owns the pass/fail verdict of the UI cases; its
+    // runner has no Result-returning entry point.
     ct::run_tests(&config);
+    Ok(())
 }
 
 #[test]
-fn compile_test() {
-    run_mode("compile-fail", "compile-fail");
+fn compile_test() -> Result<(), TestFailure> {
+    run_mode("compile-fail", "compile-fail")
 }
 
 #[test]
-fn fingerprint_parsing_uses_typed_fields() {
+fn fingerprint_parsing_uses_typed_fields() -> Result<(), TestFailure> {
     let fingerprint = CargoFingerprint::parse(
         r#"{"rustc":17,"config":23,"features":"[\"default\", \"std\"]"}"#,
-    );
+    )?;
 
-    assert_eq!(17, fingerprint.rustc);
-    assert_eq!(23, fingerprint.config);
-    assert!(fingerprint.features.contains("default"));
-    assert!(fingerprint.features.contains("std"));
+    ensure(
+        fingerprint.rustc == 17,
+        "the rustc hash is extracted as a number",
+    )?;
+    ensure(
+        fingerprint.config == 23,
+        "the config hash is extracted as a number",
+    )?;
+    ensure(
+        fingerprint.features.contains("default"),
+        "the decoded feature set carries default",
+    )?;
+    ensure(
+        fingerprint.features.contains("std"),
+        "the decoded feature set carries std",
+    )
 }
 
 #[test]
-fn fingerprint_feature_matching_uses_exact_tokens() {
+fn fingerprint_feature_matching_uses_exact_tokens() -> Result<(), TestFailure> {
     let current =
-        CargoFingerprint::parse(r#"{"rustc":1,"config":2,"features":"[]"}"#);
+        CargoFingerprint::parse(r#"{"rustc":1,"config":2,"features":"[]"}"#)?;
     let candidate = CargoFingerprint::parse(
         r#"{"rustc":1,"config":2,"features":"[\"default-code-coverage\", \"std\"]"}"#,
-    );
+    )?;
 
-    assert!(candidate.matches_current_build(&current, &["std"]));
-    assert!(!candidate.matches_current_build(&current, &["default"]));
+    ensure(
+        candidate.matches_current_build(&current, &["std"]),
+        "an exact feature token satisfies the requirement",
+    )?;
+    ensure(
+        !candidate.matches_current_build(&current, &["default"]),
+        "a prefixed feature token does not satisfy the requirement",
+    )
 }

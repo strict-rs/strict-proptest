@@ -6,8 +6,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use proptest::prelude::{Arbitrary, prop_assert_eq, proptest};
+use proptest::prelude::{Arbitrary, any};
+use proptest::strict::{TestResult, ensure_property};
 use proptest_derive::Arbitrary;
+use strict_test_support::ensure_eq;
 
 trait Func {
     type Out;
@@ -172,80 +174,136 @@ fn asserting_arbitrary() {
     assert_arbitrary::<T15<TypeA>>();
 }
 
-proptest! {
-    #[test]
-    fn t0_field_val_42(t: T0) {
-        prop_assert_eq!(t.field.val, 42);
+/// Every element of an associated-type collection field carries the pinned
+/// value.
+fn ensure_all_42<'a, I>(items: I) -> TestResult
+where
+    I: IntoIterator<Item = &'a OutTy>,
+{
+    for item in items {
+        ensure_eq(&item.val, &42, "every generated element is pinned to 42")?;
     }
+    Ok(())
+}
 
-    #[test]
-    fn t1_no_panic(_: T1) {}
+#[test]
+fn t0_field_val_42() -> TestResult {
+    ensure_property(&any::<T0>(), "a projected field generates", |t| {
+        ensure_eq(&t.field.val, &42, "the projected field is pinned")
+    })
+}
 
-    #[test]
-    fn t2_no_panic(_: T2) {}
+#[test]
+fn t1_no_panic() -> TestResult {
+    ensure_property(&any::<T1>(), "a projected field generates", |_| Ok(()))
+}
 
-    #[test]
-    fn t3_all_42(t: T3) {
-        t.field.iter().for_each(|x| assert_eq!(x.val, 42))
-    }
+#[test]
+fn t2_no_panic() -> TestResult {
+    ensure_property(&any::<T2>(), "a projected field generates", |_| Ok(()))
+}
 
-    #[test]
-    fn t4_field_val_42(t: T4<TypeB>) {
-        prop_assert_eq!(t.field.val, 42);
-    }
+#[test]
+fn t3_all_42() -> TestResult {
+    ensure_property(
+        &any::<T3>(),
+        "a projected collection field generates",
+        |t| ensure_all_42(t.field.iter()),
+    )
+}
 
-    #[test]
-    fn t5_field_val_42(t: T5<TypeB>) {
-        prop_assert_eq!(t.field.val, 42);
-    }
+#[test]
+fn t4_field_val_42() -> TestResult {
+    ensure_property(&any::<T4<TypeB>>(), "a projected field generates", |t| {
+        ensure_eq(&t.field.val, &42, "the projected field is pinned")
+    })
+}
 
-    #[test]
-    fn t6_field_val_42(t: T6<TypeB>) {
-        prop_assert_eq!(t.field.val, 42);
-    }
+#[test]
+fn t5_field_val_42() -> TestResult {
+    ensure_property(&any::<T5<TypeB>>(), "a projected field generates", |t| {
+        ensure_eq(&t.field.val, &42, "the projected field is pinned")
+    })
+}
 
-    #[test]
-    fn t7_field_val_42(t: T7<TypeA>) {
-        prop_assert_eq!(t.field.val, 42);
-    }
+#[test]
+fn t6_field_val_42() -> TestResult {
+    ensure_property(&any::<T6<TypeB>>(), "a projected field generates", |t| {
+        ensure_eq(&t.field.val, &42, "the projected field is pinned")
+    })
+}
 
-    #[test]
-    fn t8_field_val_42(t: T8<TypeA>) {
-        prop_assert_eq!(t.field.val, 42);
-    }
+#[test]
+fn t7_field_val_42() -> TestResult {
+    ensure_property(&any::<T7<TypeA>>(), "a projected field generates", |t| {
+        ensure_eq(&t.field.val, &42, "the projected field is pinned")
+    })
+}
 
-    #[test]
-    fn t9_field_val_42(t: T9<TypeA>) {
-        prop_assert_eq!(t.field.val, 42);
-    }
+#[test]
+fn t8_field_val_42() -> TestResult {
+    ensure_property(&any::<T8<TypeA>>(), "a projected field generates", |t| {
+        ensure_eq(&t.field.val, &42, "the projected field is pinned")
+    })
+}
 
-    #[test]
-    fn t10_all_42(t: T10<TypeB>) {
-        t.field.iter().for_each(|x| assert_eq!(x.val, 42))
-    }
+#[test]
+fn t9_field_val_42() -> TestResult {
+    ensure_property(&any::<T9<TypeA>>(), "a projected field generates", |t| {
+        ensure_eq(&t.field.val, &42, "the projected field is pinned")
+    })
+}
 
-    #[test]
-    fn t11_all_42(t: T11<TypeB>) {
-        t.field.iter().for_each(|x| assert_eq!(x.val, 42))
-    }
+#[test]
+fn t10_all_42() -> TestResult {
+    ensure_property(
+        &any::<T10<TypeB>>(),
+        "a projected collection field generates",
+        |t| ensure_all_42(t.field.iter()),
+    )
+}
 
-    #[test]
-    fn t12_all_42(t: T12<TypeB>) {
-        t.field.iter().for_each(|x| assert_eq!(x.val, 42))
-    }
+#[test]
+fn t11_all_42() -> TestResult {
+    ensure_property(
+        &any::<T11<TypeB>>(),
+        "a projected collection field generates",
+        |t| ensure_all_42(t.field.iter()),
+    )
+}
 
-    #[test]
-    fn t13_all_42(t: T13<TypeA>) {
-        t.field.iter().for_each(|x| assert_eq!(x.val, 42))
-    }
+#[test]
+fn t12_all_42() -> TestResult {
+    ensure_property(
+        &any::<T12<TypeB>>(),
+        "a projected collection field generates",
+        |t| ensure_all_42(t.field.iter()),
+    )
+}
 
-    #[test]
-    fn t14_all_42(t: T14<TypeA>) {
-        t.field.iter().for_each(|x| assert_eq!(x.val, 42))
-    }
+#[test]
+fn t13_all_42() -> TestResult {
+    ensure_property(
+        &any::<T13<TypeA>>(),
+        "a projected collection field generates",
+        |t| ensure_all_42(t.field.iter()),
+    )
+}
 
-    #[test]
-    fn t15_all_42(t: T15<TypeA>) {
-        t.field.iter().for_each(|x| assert_eq!(x.val, 42))
-    }
+#[test]
+fn t14_all_42() -> TestResult {
+    ensure_property(
+        &any::<T14<TypeA>>(),
+        "a projected collection field generates",
+        |t| ensure_all_42(t.field.iter()),
+    )
+}
+
+#[test]
+fn t15_all_42() -> TestResult {
+    ensure_property(
+        &any::<T15<TypeA>>(),
+        "a projected collection field generates",
+        |t| ensure_all_42(t.field.iter()),
+    )
 }

@@ -163,25 +163,43 @@ impl<V: ValueTree, F: Fn(V::Value) -> Option<O>, O: fmt::Debug> ValueTree
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TestFailure, ensure_eq, ensure_some};
+
     use super::*;
 
     #[test]
-    fn test_filter_map() {
+    fn test_filter_map() -> Result<(), TestFailure> {
         let input = (0..256).prop_filter_map("%3 + 1", |v| {
             if 0 == v % 3 { Some(v + 1) } else { None }
         });
 
         for _ in 0..256 {
             let mut runner = TestRunner::default();
-            let mut case = input.new_tree(&mut runner).unwrap();
+            let mut case = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "filter_map strategy generates a value tree",
+            )?;
 
-            assert_eq!(0, (case.current() - 1) % 3);
+            ensure_eq(
+                &0,
+                &((case.current() - 1) % 3),
+                "the generated value is a mapped survivor",
+            )?;
 
             while case.simplify() {
-                assert_eq!(0, (case.current() - 1) % 3);
+                ensure_eq(
+                    &0,
+                    &((case.current() - 1) % 3),
+                    "every simplified value is a mapped survivor",
+                )?;
             }
-            assert_eq!(0, (case.current() - 1) % 3);
+            ensure_eq(
+                &0,
+                &((case.current() - 1) % 3),
+                "the fully simplified value is a mapped survivor",
+            )?;
         }
+        Ok(())
     }
 
     #[test]

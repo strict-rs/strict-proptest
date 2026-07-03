@@ -420,11 +420,13 @@ impl Selector {
 mod test {
     use crate::std_facade::BTreeSet;
 
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
+
     use super::*;
     use crate::arbitrary::any;
 
     #[test]
-    fn sample_slice() {
+    fn sample_slice() -> Result<(), TestFailure> {
         static VALUES: &[usize] = &[0, 1, 2, 3, 4, 5, 6, 7];
         let mut size_counts = [0; 8];
         let mut value_counts = [0; 8];
@@ -433,18 +435,29 @@ mod test {
         let input = subsequence(VALUES, 3..7);
 
         for _ in 0..2048 {
-            let value = input.new_tree(&mut runner).unwrap().current();
+            let value = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "subsequence strategy generates a value tree",
+            )?
+            .current();
             // Generated the correct number of items
-            assert!((3..7).contains(&value.len()));
+            ensure(
+                (3..7).contains(&value.len()),
+                "the subsequence length stays within the requested range",
+            )?;
             // Chose distinct items
-            assert_eq!(
-                value.len(),
-                value.iter().cloned().collect::<BTreeSet<_>>().len()
-            );
+            ensure_eq(
+                &value.len(),
+                &value.iter().cloned().collect::<BTreeSet<_>>().len(),
+                "the subsequence contains only distinct items",
+            )?;
             // Values are in correct order
             let mut sorted = value.clone();
             sorted.sort();
-            assert_eq!(sorted, value);
+            ensure(
+                sorted == value,
+                "the subsequence preserves the source order",
+            )?;
 
             size_counts[value.len()] += 1;
 
@@ -453,38 +466,41 @@ mod test {
             }
         }
 
-        for (i, count) in size_counts.iter().enumerate().take(7).skip(3) {
-            assert!(
+        for count in size_counts.iter().take(7).skip(3) {
+            ensure(
                 (256..1024).contains(count),
-                "size {} was chosen {} times",
-                i,
-                count
-            );
+                "each size in the requested range is chosen a plausible \
+                 number of times",
+            )?;
         }
 
-        for (ix, &v) in value_counts.iter().enumerate() {
-            assert!(
+        for &v in value_counts.iter() {
+            ensure(
                 (1024..1500).contains(&v),
-                "Value {} was chosen {} times",
-                ix,
-                v
-            );
+                "each value is chosen a plausible number of times",
+            )?;
         }
+        Ok(())
     }
 
     #[test]
-    fn sample_vec() {
+    fn sample_vec() -> Result<(), TestFailure> {
         // Just test that the types work out
         let values = vec![0, 1, 2, 3, 4];
 
         let mut runner = TestRunner::deterministic();
         let input = subsequence(values, 1..3);
 
-        let _ = input.new_tree(&mut runner).unwrap().current();
+        let _ = ensure_some(
+            input.new_tree(&mut runner).ok(),
+            "subsequence strategy generates a value tree",
+        )?
+        .current();
+        Ok(())
     }
 
     #[test]
-    fn test_select() {
+    fn test_select() -> Result<(), TestFailure> {
         let values = vec![0, 1, 2, 3, 4, 5, 6, 7];
         let mut counts = [0; 8];
 
@@ -492,17 +508,20 @@ mod test {
         let input = select(values);
 
         for _ in 0..1024 {
-            counts[input.new_tree(&mut runner).unwrap().current()] += 1;
+            counts[ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "select strategy generates a value tree",
+            )?
+            .current()] += 1;
         }
 
-        for (ix, &count) in counts.iter().enumerate() {
-            assert!(
+        for &count in counts.iter() {
+            ensure(
                 (64..256).contains(&count),
-                "Generated value {} {} times",
-                ix,
-                count
-            );
+                "each value is generated a plausible number of times",
+            )?;
         }
+        Ok(())
     }
 
     #[test]
@@ -516,44 +535,66 @@ mod test {
     }
 
     #[test]
-    fn subseq_empty_vec_works() {
+    fn subseq_empty_vec_works() -> Result<(), TestFailure> {
         let mut runner = TestRunner::deterministic();
         let input = subsequence(Vec::<()>::new(), 0..1);
-        assert_eq!(
-            Vec::<()>::new(),
-            input.new_tree(&mut runner).unwrap().current()
-        );
+        ensure(
+            Vec::<()>::new()
+                == ensure_some(
+                    input.new_tree(&mut runner).ok(),
+                    "subsequence strategy generates a value tree",
+                )?
+                .current(),
+            "an empty source yields the empty subsequence",
+        )
     }
 
     #[test]
-    fn subseq_full_vec_works() {
+    fn subseq_full_vec_works() -> Result<(), TestFailure> {
         let v = vec![1u32, 2u32, 3u32];
         let mut runner = TestRunner::deterministic();
         let input = subsequence(v.clone(), 3);
-        assert_eq!(v, input.new_tree(&mut runner).unwrap().current());
+        ensure(
+            v == ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "subsequence strategy generates a value tree",
+            )?
+            .current(),
+            "a full-width subsequence covers the whole source",
+        )
     }
 
     #[test]
-    fn index_works() {
+    fn index_works() -> Result<(), TestFailure> {
         let mut runner = TestRunner::deterministic();
         let input = any::<Index>();
         let col = vec!["foo", "bar", "baz"];
         let mut seen = BTreeSet::new();
 
         for _ in 0..16 {
-            let mut tree = input.new_tree(&mut runner).unwrap();
+            let mut tree = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "index strategy generates a value tree",
+            )?;
             seen.insert(*tree.current().get(&col));
 
             while tree.simplify() {}
 
-            assert_eq!("foo", *tree.current().get(&col));
+            ensure_eq(
+                &"foo",
+                &*tree.current().get(&col),
+                "a fully simplified index lands on the first element",
+            )?;
         }
 
-        assert_eq!(col.into_iter().collect::<BTreeSet<_>>(), seen);
+        ensure(
+            col.into_iter().collect::<BTreeSet<_>>() == seen,
+            "sampling touched every element",
+        )
     }
 
     #[test]
-    fn selector_works() {
+    fn selector_works() -> Result<(), TestFailure> {
         let mut runner = TestRunner::deterministic();
         let input = any::<Selector>();
         let col: BTreeSet<&str> =
@@ -561,14 +602,22 @@ mod test {
         let mut seen = BTreeSet::new();
 
         for _ in 0..16 {
-            let mut tree = input.new_tree(&mut runner).unwrap();
+            let mut tree = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "selector strategy generates a value tree",
+            )?;
             seen.insert(*tree.current().select(&col));
 
             while tree.simplify() {}
 
-            assert_eq!("bar", *tree.current().select(&col));
+            ensure_eq(
+                &"bar",
+                &*tree.current().select(&col),
+                "a fully simplified selector lands on the first ordered \
+                 element",
+            )?;
         }
 
-        assert_eq!(col, seen);
+        ensure(col == seen, "selection touched every element")
     }
 }

@@ -23,3 +23,4 @@ convert_case = { workspace = true }
 [dev-dependencies]
 insta = { workspace = true }
 prettyplease = { workspace = true }
+strict-test-support = { workspace = true }

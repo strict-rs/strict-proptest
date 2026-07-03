@@ -7,7 +7,9 @@
 // except according to those terms.
 
 use proptest::prelude::*;
+use proptest::strict::{TestResult, ensure_property};
 use proptest_derive::Arbitrary;
+use strict_test_support::ensure;
 
 fn even(x: &usize) -> bool {
     x.is_multiple_of(2)
@@ -157,69 +159,176 @@ struct T7 {
     foo: usize,
 }
 
-proptest! {
-    #[test]
-    fn t0_test(v: T0) {
-        assert!(even(&v.foo) && rem3(&v.foo));
-        assert!(!even(&v.bar));
-        assert!(!even(&v.baz) && v.baz < 100);
-        assert!(even(&v.quux) && v.quux == 42);
-        assert!(even(&v.quux) && v.quux == 42);
-        assert!(v.wibble > 2 && v.wibble <= 100);
-    }
+#[test]
+fn t0_test() -> TestResult {
+    ensure_property(
+        &any::<T0>(),
+        "every filter spelling holds on a named struct",
+        |v| {
+            ensure(
+                even(&v.foo) && rem3(&v.foo),
+                "field and container filters compose",
+            )?;
+            ensure(!even(&v.bar), "the closure-string filter holds")?;
+            ensure(
+                !even(&v.baz) && v.baz < 100,
+                "the filter composes with a strategy",
+            )?;
+            ensure(
+                even(&v.quux) && v.quux == 42,
+                "the filter composes with a value",
+            )?;
+            ensure(
+                v.wibble > 2 && v.wibble <= 100,
+                "the filter composes with params and a strategy",
+            )
+        },
+    )
+}
 
-    #[test]
-    fn t1_test(v: T1) {
-        assert!(even(&v.foo) && v.foo % 3 == 0);
-        assert!(!even(&v.bar));
-        assert!(!even(&v.baz) && v.baz < 100);
-        assert!(even(&v.quux) && v.quux == 42);
-        assert!(v.wibble > 2 && v.wibble <= 100);
-    }
+#[test]
+fn t1_test() -> TestResult {
+    ensure_property(
+        &any::<T1>(),
+        "every filter spelling holds under container params",
+        |v| {
+            ensure(
+                even(&v.foo) && v.foo % 3 == 0,
+                "field and container filters compose",
+            )?;
+            ensure(!even(&v.bar), "the closure-string filter holds")?;
+            ensure(
+                !even(&v.baz) && v.baz < 100,
+                "the filter composes with a strategy",
+            )?;
+            ensure(
+                even(&v.quux) && v.quux == 42,
+                "the filter composes with a value",
+            )?;
+            ensure(
+                v.wibble > 2 && v.wibble <= 100,
+                "the filter composes with the params strategy",
+            )
+        },
+    )
+}
 
-    #[test]
-    fn t2_test(v: T2) {
-        assert!(even(&v.0) && v.0 % 3 == 0);
-        assert!(!even(&v.1));
-        assert!(!even(&v.2) && v.2 < 100);
-        assert!(even(&v.3) && v.3 == 42);
-        assert!(v.4 > 2 && v.4 <= 100);
-    }
+#[test]
+fn t2_test() -> TestResult {
+    ensure_property(
+        &any::<T2>(),
+        "every filter spelling holds on a tuple struct",
+        |v| {
+            ensure(
+                even(&v.0) && v.0 % 3 == 0,
+                "field and container filters compose",
+            )?;
+            ensure(!even(&v.1), "the closure-string filter holds")?;
+            ensure(
+                !even(&v.2) && v.2 < 100,
+                "the filter composes with a strategy",
+            )?;
+            ensure(
+                even(&v.3) && v.3 == 42,
+                "the filter composes with a value",
+            )?;
+            ensure(
+                v.4 > 2 && v.4 <= 100,
+                "the filter composes with params and a strategy",
+            )
+        },
+    )
+}
 
-    #[test]
-    fn t3_test(v: T3) {
-        assert!(even(&v.0) && v.0 % 3 == 0);
-        assert!(!even(&v.1));
-        assert!(!even(&v.2) && v.2 < 100);
-        assert!(even(&v.3) && v.3 == 42);
-        assert!(v.4 > 2 && v.4 <= 100);
-    }
+#[test]
+fn t3_test() -> TestResult {
+    ensure_property(
+        &any::<T3>(),
+        "the duplicate tuple-struct spelling holds",
+        |v| {
+            ensure(
+                even(&v.0) && v.0 % 3 == 0,
+                "field and container filters compose",
+            )?;
+            ensure(!even(&v.1), "the closure-string filter holds")?;
+            ensure(
+                !even(&v.2) && v.2 < 100,
+                "the filter composes with a strategy",
+            )?;
+            ensure(
+                even(&v.3) && v.3 == 42,
+                "the filter composes with a value",
+            )?;
+            ensure(
+                v.4 > 2 && v.4 <= 100,
+                "the filter composes with params and a strategy",
+            )
+        },
+    )
+}
 
-    #[test]
-    fn t4_test(v: T4) {
-        assert!(if let T4::V0 { field } = v { even(&field) } else { false });
-    }
+#[test]
+fn t4_test() -> TestResult {
+    ensure_property(
+        &any::<T4>(),
+        "a container fn-filter keeps only the matching variant",
+        |v| {
+            ensure(
+                if let T4::V0 { field } = v {
+                    even(&field)
+                } else {
+                    false
+                },
+                "only V0 with an even field survives the filters",
+            )
+        },
+    )
+}
 
-    #[test]
-    fn t5_test(v: T5) {
-        match v {
-            T5::V0 { field } => assert!(rem3(&field) && even(&field)),
-            T5::V1(field) => assert!(field < 1000 && field % 5 == 0),
-        }
-    }
+#[test]
+fn t5_test() -> TestResult {
+    ensure_property(
+        &any::<T5>(),
+        "variant-level filters hold per variant",
+        |v| match v {
+            T5::V0 { field } => ensure(
+                rem3(&field) && even(&field),
+                "V0 satisfies the variant and field filters",
+            ),
+            T5::V1(field) => ensure(
+                field < 1000 && field % 5 == 0,
+                "V1 satisfies the strategy filter",
+            ),
+        },
+    )
+}
 
-    #[test]
-    fn t6_test(v: T6) {
-        match v {
-            T6::V0 { field } => assert!(rem3(&field) && even(&field)),
-            T6::V1(field) => assert!(field < 100 && field % 5 == 0),
-        }
-    }
+#[test]
+fn t6_test() -> TestResult {
+    ensure_property(
+        &any::<T6>(),
+        "variant-level filters hold under container params",
+        |v| match v {
+            T6::V0 { field } => ensure(
+                rem3(&field) && even(&field),
+                "V0 satisfies the variant and field filters",
+            ),
+            T6::V1(field) => ensure(
+                field < 100 && field % 5 == 0,
+                "V1 satisfies the params strategy filter",
+            ),
+        },
+    )
+}
 
-    #[test]
-    fn t7_test(v: T7) {
-        assert!(even(&v.foo) && rem3(&v.foo));
-    }
+#[test]
+fn t7_test() -> TestResult {
+    ensure_property(&any::<T7>(), "repeated field filters accumulate", |v| {
+        ensure(
+            even(&v.foo) && rem3(&v.foo),
+            "both accumulated filters hold",
+        )
+    })
 }
 
 #[test]

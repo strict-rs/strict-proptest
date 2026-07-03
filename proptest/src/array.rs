@@ -214,10 +214,12 @@ small_array!(32 uniform32);
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TestFailure, ensure, ensure_some};
+
     use super::*;
 
     #[test]
-    fn shrinks_fully_ltr() {
+    fn shrinks_fully_ltr() -> Result<(), TestFailure> {
         fn pass(a: [i32; 2]) -> bool {
             a[0] * a[1] <= 9
         }
@@ -228,7 +230,10 @@ mod test {
         let mut cases_tested = 0;
         for _ in 0..256 {
             // Find a failing test case
-            let mut case = input.new_tree(&mut runner).unwrap();
+            let mut case = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "array strategy generates a value tree",
+            )?;
             if pass(case.current()) {
                 continue;
             }
@@ -246,15 +251,22 @@ mod test {
             }
 
             let last = case.current();
-            assert!(!pass(last));
+            ensure(!pass(last), "the shrunken case still fails")?;
             // Maximally shrunken
-            assert!(pass([last[0] - 1, last[1]]));
-            assert!(pass([last[0], last[1] - 1]));
+            ensure(
+                pass([last[0] - 1, last[1]]),
+                "decrementing the first element passes",
+            )?;
+            ensure(
+                pass([last[0], last[1] - 1]),
+                "decrementing the second element passes",
+            )?;
 
             cases_tested += 1;
         }
 
-        assert!(cases_tested > 32, "Didn't find enough test cases");
+        ensure(cases_tested > 32, "didn't find enough test cases")?;
+        Ok(())
     }
 
     #[test]

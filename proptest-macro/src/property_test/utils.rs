@@ -63,23 +63,36 @@ pub fn is_strategy(attr: &Attribute) -> bool {
 #[cfg(test)]
 mod tests {
     use quote::ToTokens;
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
     use syn::parse_quote;
 
     use super::*;
 
     #[test]
-    fn strip_args_works() {
+    fn strip_args_works() -> Result<(), TestFailure> {
         let f = parse_quote! { fn foo(i: i32) {} };
         let (f, mut args) = strip_args(f);
 
-        assert_eq!(f.to_token_stream().to_string(), "fn foo () { }");
+        ensure_eq(
+            &f.to_token_stream().to_string(),
+            &"fn foo () { }".to_owned(),
+            "stripped fn renders without arguments",
+        )?;
 
-        assert_eq!(args.len(), 1);
-        let arg = args.pop().unwrap();
-        assert_eq!(arg.pat_ty.to_token_stream().to_string(), "i : i32");
-        assert!(arg.strategy.is_none());
+        ensure_eq(&args.len(), &1_usize, "exactly one argument extracted")?;
+        let arg = ensure_some(args.pop(), "extracted argument is present")?;
+        ensure_eq(
+            &arg.pat_ty.to_token_stream().to_string(),
+            &"i : i32".to_owned(),
+            "extracted argument keeps its pattern and type",
+        )?;
+        ensure(arg.strategy.is_none(), "no strategy attribute extracted")
     }
 
+    // Kept as a `#[should_panic]` contract test on purpose: it pins
+    // `strip_args`'s documented invariant that receivers are rejected by
+    // `validate` first, so reaching one here is an internal bug, not a
+    // user-facing failure path.
     #[test]
     #[should_panic]
     fn strip_args_panics_with_self() {
@@ -88,31 +101,39 @@ mod tests {
     }
 
     #[test]
-    fn is_strategy_works() {
+    fn is_strategy_works() -> Result<(), TestFailure> {
         let attr = parse_quote! { #[strategy = 123] };
-        assert!(is_strategy(&attr));
+        ensure(is_strategy(&attr), "outer name-value strategy is accepted")?;
 
         let attr = parse_quote! { #![strategy = 123] };
-        assert!(!is_strategy(&attr));
+        ensure(!is_strategy(&attr), "inner strategy attribute is rejected")?;
 
         let attr = parse_quote! { #[not_strategy = 123] };
-        assert!(!is_strategy(&attr));
+        ensure(!is_strategy(&attr), "other attribute names are rejected")?;
 
         let attr = parse_quote! { #[strategy(but, no, equals)] };
-        assert!(!is_strategy(&attr));
+        ensure(!is_strategy(&attr), "list-form strategy is rejected")?;
 
         let attr = parse_quote! { #[strategy] };
-        assert!(!is_strategy(&attr));
+        ensure(!is_strategy(&attr), "bare strategy attribute is rejected")
     }
 
     #[test]
-    fn strip_strategy_works() {
+    fn strip_strategy_works() -> Result<(), TestFailure> {
         let f = parse_quote! {fn foo(#[strategy = 123] x: i32) {} };
-        let Argument { pat_ty, strategy } = strip_args(f).1.pop().unwrap();
-        // let Argument { pat_ty, strategy } = strip_strategy(parse_quote! {
-        //     #[strategy] x: i32
-        // });
-        assert_eq!(pat_ty.to_token_stream().to_string(), "x : i32");
-        assert_eq!(strategy.to_token_stream().to_string(), "123");
+        let Argument { pat_ty, strategy } = ensure_some(
+            strip_args(f).1.pop(),
+            "one argument extracted from the fixture",
+        )?;
+        ensure_eq(
+            &pat_ty.to_token_stream().to_string(),
+            &"x : i32".to_owned(),
+            "strategy attribute is stripped from the parameter",
+        )?;
+        ensure_eq(
+            &strategy.to_token_stream().to_string(),
+            &"123".to_owned(),
+            "strategy expression is extracted",
+        )
     }
 }

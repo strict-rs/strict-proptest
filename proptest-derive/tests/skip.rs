@@ -9,8 +9,10 @@
 #![feature(never_type)]
 #![allow(dead_code, unreachable_code)]
 
-use proptest::prelude::{Arbitrary, prop_assert, prop_assert_eq, proptest};
+use proptest::prelude::{Arbitrary, any};
+use proptest::strict::{TestResult, ensure_property};
 use proptest_derive::Arbitrary;
+use strict_test_support::ensure;
 
 #[derive(Debug, Arbitrary, PartialEq)]
 enum Ty1 {
@@ -30,16 +32,32 @@ enum Ty2 {
     V4,
 }
 
-proptest! {
-    #[test]
-    fn ty1_always_v1(v: Ty1) {
-        prop_assert_eq!(v, Ty1::V1);
-    }
+#[test]
+fn ty1_always_v1() -> TestResult {
+    ensure_property(
+        &any::<Ty1>(),
+        "skipped and uninhabited variants never generate",
+        |v| {
+            ensure(
+                v == Ty1::V1,
+                "only the inhabited, unskipped variant appears",
+            )
+        },
+    )
+}
 
-    #[test]
-    fn ty_always_1_or_2(v: Ty2) {
-        prop_assert!(v == Ty2::V1 || v == Ty2::V2);
-    }
+#[test]
+fn ty_always_1_or_2() -> TestResult {
+    ensure_property(
+        &any::<Ty2>(),
+        "multiple skipped variants never generate",
+        |v| {
+            ensure(
+                v == Ty2::V1 || v == Ty2::V2,
+                "only the unskipped variants appear",
+            )
+        },
+    )
 }
 
 #[test]

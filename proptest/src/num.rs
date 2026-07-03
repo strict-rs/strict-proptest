@@ -1067,48 +1067,65 @@ float_bin_search!(f64, F64U);
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
+
     use crate::strategy::*;
     use crate::test_runner::*;
 
     use super::*;
 
     #[test]
-    fn u8_inclusive_end_included() {
+    fn u8_inclusive_end_included() -> Result<(), TestFailure> {
         let mut runner = TestRunner::deterministic();
         let mut ok = 0;
         for _ in 0..20 {
-            let tree = (0..=1).new_tree(&mut runner).unwrap();
+            let tree = ensure_some(
+                (0..=1i32).new_tree(&mut runner).ok(),
+                "inclusive range generates a value tree",
+            )?;
             let test = runner.run_one(tree, |v| {
-                prop_assert_eq!(v, 1);
-                Ok(())
+                if v == 1 {
+                    Ok(())
+                } else {
+                    Err(TestCaseError::fail("not the inclusive end"))
+                }
             });
             if test.is_ok() {
                 ok += 1;
             }
         }
-        assert!(ok > 1, "inclusive end not included.");
+        ensure(ok > 1, "the inclusive end is included")
     }
 
     #[test]
-    fn u8_inclusive_to_end_included() {
+    fn u8_inclusive_to_end_included() -> Result<(), TestFailure> {
         let mut runner = TestRunner::deterministic();
         let mut ok = 0;
         for _ in 0..20 {
-            let tree = (..=1u8).new_tree(&mut runner).unwrap();
+            let tree = ensure_some(
+                (..=1u8).new_tree(&mut runner).ok(),
+                "inclusive-to range generates a value tree",
+            )?;
             let test = runner.run_one(tree, |v| {
-                prop_assert_eq!(v, 1);
-                Ok(())
+                if v == 1 {
+                    Ok(())
+                } else {
+                    Err(TestCaseError::fail("not the inclusive end"))
+                }
             });
             if test.is_ok() {
                 ok += 1;
             }
         }
-        assert!(ok > 1, "inclusive end not included.");
+        ensure(ok > 1, "the inclusive end is included")
     }
 
     #[test]
-    fn i8_binary_search_always_converges() {
-        fn assert_converges<P: Fn(i32) -> bool>(start: i8, pass: P) {
+    fn i8_binary_search_always_converges() -> Result<(), TestFailure> {
+        fn ensure_converges<P: Fn(i32) -> bool>(
+            start: i8,
+            pass: P,
+        ) -> Result<(), TestFailure> {
             let mut state = i8::BinarySearch::new(start);
             loop {
                 if !pass(state.current() as i32) {
@@ -1122,29 +1139,37 @@ mod test {
                 }
             }
 
-            assert!(!pass(state.current() as i32));
-            assert!(
+            ensure(
+                !pass(state.current() as i32),
+                "the converged value still fails",
+            )?;
+            ensure(
                 pass(state.current() as i32 - 1)
-                    || pass(state.current() as i32 + 1)
-            );
+                    || pass(state.current() as i32 + 1),
+                "a neighbour of the converged value passes",
+            )
         }
 
         for start in -128..0 {
             for target in start + 1..1 {
-                assert_converges(start as i8, |v| v > target);
+                ensure_converges(start as i8, |v| v > target)?;
             }
         }
 
         for start in 0..128 {
             for target in 0..start {
-                assert_converges(start as i8, |v| v < target);
+                ensure_converges(start as i8, |v| v < target)?;
             }
         }
+        Ok(())
     }
 
     #[test]
-    fn u8_binary_search_always_converges() {
-        fn assert_converges<P: Fn(u32) -> bool>(start: u8, pass: P) {
+    fn u8_binary_search_always_converges() -> Result<(), TestFailure> {
+        fn ensure_converges<P: Fn(u32) -> bool>(
+            start: u8,
+            pass: P,
+        ) -> Result<(), TestFailure> {
             let mut state = u8::BinarySearch::new(start);
             loop {
                 if !pass(state.current() as u32) {
@@ -1158,92 +1183,139 @@ mod test {
                 }
             }
 
-            assert!(!pass(state.current() as u32));
-            assert!(pass(state.current() as u32 - 1));
+            ensure(
+                !pass(state.current() as u32),
+                "the converged value still fails",
+            )?;
+            ensure(
+                pass(state.current() as u32 - 1),
+                "the predecessor of the converged value passes",
+            )
         }
 
         for start in 0..255 {
             for target in 0..start {
-                assert_converges(start as u8, |v| v <= target);
+                ensure_converges(start as u8, |v| v <= target)?;
             }
         }
+        Ok(())
     }
 
     #[test]
-    fn signed_integer_range_including_zero_converges_to_zero() {
+    fn signed_integer_range_including_zero_converges_to_zero()
+    -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
         for _ in 0..100 {
-            let mut state = (-42i32..64i32).new_tree(&mut runner).unwrap();
+            let mut state = ensure_some(
+                (-42i32..64i32).new_tree(&mut runner).ok(),
+                "signed range generates a value tree",
+            )?;
             let init_value = state.current();
-            assert!((-42..64).contains(&init_value));
+            ensure(
+                (-42..64).contains(&init_value),
+                "the initial value is in bounds",
+            )?;
 
             while state.simplify() {
                 let v = state.current();
-                assert!((-42..64).contains(&v));
+                ensure(
+                    (-42..64).contains(&v),
+                    "every simplified value stays in bounds",
+                )?;
             }
 
-            assert_eq!(0, state.current());
+            ensure_eq(
+                &0,
+                &state.current(),
+                "a range containing zero converges to zero",
+            )?;
         }
+        Ok(())
     }
 
     #[test]
-    fn negative_integer_range_stays_in_bounds() {
+    fn negative_integer_range_stays_in_bounds() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
         for _ in 0..100 {
-            let mut state = (..-42i32).new_tree(&mut runner).unwrap();
+            let mut state = ensure_some(
+                (..-42i32).new_tree(&mut runner).ok(),
+                "negative range generates a value tree",
+            )?;
             let init_value = state.current();
-            assert!(init_value < -42);
+            ensure(init_value < -42, "the initial value is in bounds")?;
 
             while state.simplify() {
-                assert!(
+                ensure(
                     state.current() < -42,
-                    "Violated bounds: {}",
-                    state.current()
-                );
+                    "every simplified value stays in bounds",
+                )?;
             }
 
-            assert_eq!(-43, state.current());
+            ensure_eq(
+                &-43,
+                &state.current(),
+                "the range converges to its upper bound",
+            )?;
         }
+        Ok(())
     }
 
     #[test]
-    fn positive_signed_integer_range_stays_in_bounds() {
+    fn positive_signed_integer_range_stays_in_bounds() -> Result<(), TestFailure>
+    {
         let mut runner = TestRunner::default();
         for _ in 0..100 {
-            let mut state = (42i32..).new_tree(&mut runner).unwrap();
+            let mut state = ensure_some(
+                (42i32..).new_tree(&mut runner).ok(),
+                "positive range generates a value tree",
+            )?;
             let init_value = state.current();
-            assert!(init_value >= 42);
+            ensure(init_value >= 42, "the initial value is in bounds")?;
 
             while state.simplify() {
-                assert!(
+                ensure(
                     state.current() >= 42,
-                    "Violated bounds: {}",
-                    state.current()
-                );
+                    "every simplified value stays in bounds",
+                )?;
             }
 
-            assert_eq!(42, state.current());
+            ensure_eq(
+                &42,
+                &state.current(),
+                "the range converges to its lower bound",
+            )?;
         }
+        Ok(())
     }
 
     #[test]
-    fn unsigned_integer_range_stays_in_bounds() {
+    fn unsigned_integer_range_stays_in_bounds() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
         for _ in 0..100 {
-            let mut state = (42u32..56u32).new_tree(&mut runner).unwrap();
+            let mut state = ensure_some(
+                (42u32..56u32).new_tree(&mut runner).ok(),
+                "unsigned range generates a value tree",
+            )?;
             let init_value = state.current();
-            assert!((42..56).contains(&init_value));
+            ensure(
+                (42..56).contains(&init_value),
+                "the initial value is in bounds",
+            )?;
 
             while state.simplify() {
-                assert!(
+                ensure(
                     state.current() >= 42,
-                    "Violated bounds: {}",
-                    state.current()
-                );
+                    "every simplified value stays in bounds",
+                )?;
             }
 
-            assert_eq!(42, state.current());
+            ensure_eq(
+                &42,
+                &state.current(),
+                "the range converges to its lower bound",
+            )?;
         }
+        Ok(())
     }
 
     mod contract_sanity {
@@ -1311,95 +1383,149 @@ mod test {
     }
 
     #[test]
-    fn positive_float_simplifies_to_zero() {
+    fn positive_float_simplifies_to_zero() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
-        let mut value = (0.0f64..2.0).new_tree(&mut runner).unwrap();
+        let mut value = ensure_some(
+            (0.0f64..2.0).new_tree(&mut runner).ok(),
+            "float range generates a value tree",
+        )?;
 
         while value.simplify() {}
 
-        assert_eq!(0.0, value.current());
+        ensure_eq(&0.0, &value.current(), "the range shrinks to zero")
     }
 
     #[test]
-    fn positive_float_simplifies_to_base() {
+    fn positive_float_simplifies_to_base() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
-        let mut value = (1.0f64..2.0).new_tree(&mut runner).unwrap();
+        let mut value = ensure_some(
+            (1.0f64..2.0).new_tree(&mut runner).ok(),
+            "float range generates a value tree",
+        )?;
 
         while value.simplify() {}
 
-        assert_eq!(1.0, value.current());
+        ensure_eq(&1.0, &value.current(), "the range shrinks to its base")
     }
 
     #[test]
-    fn negative_float_simplifies_to_zero() {
+    fn negative_float_simplifies_to_zero() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
-        let mut value = (-2.0f64..0.0).new_tree(&mut runner).unwrap();
+        let mut value = ensure_some(
+            (-2.0f64..0.0).new_tree(&mut runner).ok(),
+            "float range generates a value tree",
+        )?;
 
         while value.simplify() {}
 
-        assert_eq!(0.0, value.current());
+        ensure_eq(&0.0, &value.current(), "the range shrinks to zero")
     }
 
     #[test]
-    fn positive_float_complicates_to_original() {
+    fn positive_float_complicates_to_original() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
-        let mut value = (1.0f64..2.0).new_tree(&mut runner).unwrap();
+        let mut value = ensure_some(
+            (1.0f64..2.0).new_tree(&mut runner).ok(),
+            "float range generates a value tree",
+        )?;
         let orig = value.current();
 
-        assert!(value.simplify());
+        ensure(value.simplify(), "the tree simplifies once")?;
         while value.complicate() {}
 
-        assert_eq!(orig, value.current());
+        ensure_eq(
+            &orig,
+            &value.current(),
+            "complicating restores the original",
+        )
     }
 
     #[test]
-    fn positive_infinity_simplifies_directly_to_zero() {
+    fn positive_infinity_simplifies_directly_to_zero() -> Result<(), TestFailure>
+    {
         let mut value = f64::BinarySearch::new(f64::INFINITY);
 
-        assert!(value.simplify());
-        assert_eq!(0.0, value.current());
-        assert!(value.complicate());
-        assert_eq!(f64::INFINITY, value.current());
-        assert!(!value.clone().complicate());
-        assert!(!value.clone().simplify());
+        ensure(value.simplify(), "infinity simplifies once")?;
+        ensure_eq(&0.0, &value.current(), "infinity simplifies to zero")?;
+        ensure(value.complicate(), "the zero complicates back")?;
+        ensure_eq(
+            &f64::INFINITY,
+            &value.current(),
+            "complicating restores infinity",
+        )?;
+        ensure(
+            !value.clone().complicate(),
+            "the restored tree cannot complicate",
+        )?;
+        ensure(
+            !value.clone().simplify(),
+            "the restored tree cannot simplify",
+        )
     }
 
     #[test]
-    fn negative_infinity_simplifies_directly_to_zero() {
+    fn negative_infinity_simplifies_directly_to_zero() -> Result<(), TestFailure>
+    {
         let mut value = f64::BinarySearch::new(f64::NEG_INFINITY);
 
-        assert!(value.simplify());
-        assert_eq!(0.0, value.current());
-        assert!(value.complicate());
-        assert_eq!(f64::NEG_INFINITY, value.current());
-        assert!(!value.clone().complicate());
-        assert!(!value.clone().simplify());
+        ensure(value.simplify(), "negative infinity simplifies once")?;
+        ensure_eq(&0.0, &value.current(), "it simplifies to zero")?;
+        ensure(value.complicate(), "the zero complicates back")?;
+        ensure_eq(
+            &f64::NEG_INFINITY,
+            &value.current(),
+            "complicating restores negative infinity",
+        )?;
+        ensure(
+            !value.clone().complicate(),
+            "the restored tree cannot complicate",
+        )?;
+        ensure(
+            !value.clone().simplify(),
+            "the restored tree cannot simplify",
+        )
     }
 
     #[test]
-    fn nan_simplifies_directly_to_zero() {
+    fn nan_simplifies_directly_to_zero() -> Result<(), TestFailure> {
         let mut value = f64::BinarySearch::new(f64::NAN);
 
-        assert!(value.simplify());
-        assert_eq!(0.0, value.current());
-        assert!(value.complicate());
-        assert!(value.current().is_nan());
-        assert!(!value.clone().complicate());
-        assert!(!value.clone().simplify());
+        ensure(value.simplify(), "NaN simplifies once")?;
+        ensure_eq(&0.0, &value.current(), "NaN simplifies to zero")?;
+        ensure(value.complicate(), "the zero complicates back")?;
+        ensure(value.current().is_nan(), "complicating restores NaN")?;
+        ensure(
+            !value.clone().complicate(),
+            "the restored tree cannot complicate",
+        )?;
+        ensure(
+            !value.clone().simplify(),
+            "the restored tree cannot simplify",
+        )
     }
 
     #[test]
-    fn float_simplifies_to_smallest_normal() {
+    fn float_simplifies_to_smallest_normal() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
-        let mut value = (f64::MIN_POSITIVE..2.0).new_tree(&mut runner).unwrap();
+        let mut value = ensure_some(
+            (f64::MIN_POSITIVE..2.0).new_tree(&mut runner).ok(),
+            "float range generates a value tree",
+        )?;
 
         while value.simplify() {}
 
-        assert_eq!(f64::MIN_POSITIVE, value.current());
+        ensure_eq(
+            &f64::MIN_POSITIVE,
+            &value.current(),
+            "the range shrinks to the smallest normal",
+        )
     }
 
+    /// The shared body of the per-type `*_any_generates_desired_values`
+    /// properties: it evaluates to `Result<(), TestFailure>` so the strict
+    /// property closures can return it directly.
     macro_rules! float_generation_test_body {
-        ($strategy:ident, $typ:ident) => {
+        ($strategy:ident, $typ:ident) => {{
             use std::num::FpCategory;
 
             let strategy = $strategy;
@@ -1422,7 +1548,10 @@ mod test {
             let nan_fidelity = fidelity_1 != fidelity_2;
 
             for _ in 0..1024 {
-                let mut tree = strategy.new_tree(&mut runner).unwrap();
+                let mut tree = ensure_some(
+                    strategy.new_tree(&mut runner).ok(),
+                    "float class strategy generates a value tree",
+                )?;
                 let mut increment = 1;
 
                 loop {
@@ -1430,11 +1559,17 @@ mod test {
 
                     let sign = value.signum(); // So we correctly handle -0
                     if sign < 0.0 {
-                        prop_assert!(bits.contains(FloatTypes::NEGATIVE));
+                        ensure(
+                            bits.contains(FloatTypes::NEGATIVE),
+                            "a negative value implies the NEGATIVE class",
+                        )?;
                         seen_negative += increment;
                     } else if sign > 0.0 {
                         // i.e., not NaN
-                        prop_assert!(bits.contains(FloatTypes::POSITIVE));
+                        ensure(
+                            bits.contains(FloatTypes::POSITIVE),
+                            "a positive value implies the POSITIVE class",
+                        )?;
                         seen_positive += increment;
                     }
 
@@ -1443,14 +1578,18 @@ mod test {
                             let raw = value.to_bits();
                             let is_negative = raw << 1 >> 1 != raw;
                             if is_negative {
-                                prop_assert!(
-                                    bits.contains(FloatTypes::NEGATIVE)
-                                );
+                                ensure(
+                                    bits.contains(FloatTypes::NEGATIVE),
+                                    "a negative NaN implies the NEGATIVE \
+                                     class",
+                                )?;
                                 seen_negative += increment;
                             } else {
-                                prop_assert!(
-                                    bits.contains(FloatTypes::POSITIVE)
-                                );
+                                ensure(
+                                    bits.contains(FloatTypes::POSITIVE),
+                                    "a positive NaN implies the POSITIVE \
+                                     class",
+                                )?;
                                 seen_positive += increment;
                             }
 
@@ -1461,18 +1600,21 @@ mod test {
                                 // NaNs quite aggressively depending on what
                                 // registers LLVM decides to use to pass the
                                 // value around, so accept either case here.
-                                prop_assert!(
+                                ensure(
                                     bits.contains(FloatTypes::QUIET_NAN)
                                         || bits.contains(
-                                            FloatTypes::SIGNALING_NAN
-                                        )
-                                );
+                                            FloatTypes::SIGNALING_NAN,
+                                        ),
+                                    "a quiet NaN implies a NaN class",
+                                )?;
                                 seen_quiet_nan += increment;
                                 seen_signaling_nan += increment;
                             } else {
-                                prop_assert!(
-                                    bits.contains(FloatTypes::SIGNALING_NAN)
-                                );
+                                ensure(
+                                    bits.contains(FloatTypes::SIGNALING_NAN),
+                                    "a signaling NaN implies the \
+                                     SIGNALING_NAN class",
+                                )?;
                                 seen_signaling_nan += increment;
                             }
                         }
@@ -1487,25 +1629,38 @@ mod test {
                             seen_negative += increment;
                             seen_quiet_nan += increment;
                             seen_signaling_nan += increment;
-                            prop_assert!(
+                            ensure(
                                 bits.contains(FloatTypes::QUIET_NAN)
-                                    || bits.contains(FloatTypes::SIGNALING_NAN)
-                            );
+                                    || bits.contains(FloatTypes::SIGNALING_NAN),
+                                "a NaN implies a NaN class",
+                            )?;
                         }
                         FpCategory::Infinite => {
-                            prop_assert!(bits.contains(FloatTypes::INFINITE));
+                            ensure(
+                                bits.contains(FloatTypes::INFINITE),
+                                "an infinity implies the INFINITE class",
+                            )?;
                             seen_infinite += increment;
                         }
                         FpCategory::Zero => {
-                            prop_assert!(bits.contains(FloatTypes::ZERO));
+                            ensure(
+                                bits.contains(FloatTypes::ZERO),
+                                "a zero implies the ZERO class",
+                            )?;
                             seen_zero += increment;
                         }
                         FpCategory::Subnormal => {
-                            prop_assert!(bits.contains(FloatTypes::SUBNORMAL));
+                            ensure(
+                                bits.contains(FloatTypes::SUBNORMAL),
+                                "a subnormal implies the SUBNORMAL class",
+                            )?;
                             seen_subnormal += increment;
                         }
                         FpCategory::Normal => {
-                            prop_assert!(bits.contains(FloatTypes::NORMAL));
+                            ensure(
+                                bits.contains(FloatTypes::NORMAL),
+                                "a normal value implies the NORMAL class",
+                            )?;
                             seen_normal += increment;
                         }
                     }
@@ -1519,90 +1674,161 @@ mod test {
             }
 
             if bits.contains(FloatTypes::POSITIVE) {
-                prop_assert!(seen_positive > 200);
+                ensure(
+                    seen_positive > 200,
+                    "the POSITIVE class is well represented",
+                )?;
             }
             if bits.contains(FloatTypes::NEGATIVE) {
-                prop_assert!(seen_negative > 200);
+                ensure(
+                    seen_negative > 200,
+                    "the NEGATIVE class is well represented",
+                )?;
             }
             if bits.contains(FloatTypes::NORMAL) {
-                prop_assert!(seen_normal > 100);
+                ensure(
+                    seen_normal > 100,
+                    "the NORMAL class is well represented",
+                )?;
             }
             if bits.contains(FloatTypes::SUBNORMAL) {
-                prop_assert!(seen_subnormal > 5);
+                ensure(
+                    seen_subnormal > 5,
+                    "the SUBNORMAL class is represented",
+                )?;
             }
             if bits.contains(FloatTypes::ZERO) {
-                prop_assert!(seen_zero > 5);
+                ensure(seen_zero > 5, "the ZERO class is represented")?;
             }
             if bits.contains(FloatTypes::INFINITE) {
-                prop_assert!(seen_infinite > 0);
+                ensure(seen_infinite > 0, "the INFINITE class is represented")?;
             }
             if bits.contains(FloatTypes::QUIET_NAN) {
-                prop_assert!(seen_quiet_nan > 0);
+                ensure(
+                    seen_quiet_nan > 0,
+                    "the QUIET_NAN class is represented",
+                )?;
             }
             if bits.contains(FloatTypes::SIGNALING_NAN) {
-                prop_assert!(seen_signaling_nan > 0);
+                ensure(
+                    seen_signaling_nan > 0,
+                    "the SIGNALING_NAN class is represented",
+                )?;
             }
-        };
+            Ok(())
+        }};
     }
 
-    proptest! {
-        #![proptest_config(crate::test_runner::Config::with_cases(1024))]
+    /// Run one strict float-class property with the 1024-case config the
+    /// legacy `proptest!` block used.
+    fn run_float_class_property<S, F>(
+        strategy: &S,
+        context: &'static str,
+        property: F,
+    ) -> Result<(), TestFailure>
+    where
+        S: Strategy,
+        F: Fn(S::Value) -> Result<(), TestFailure>,
+    {
+        crate::strict::ensure_property_with_config(
+            strategy,
+            context,
+            crate::test_runner::Config {
+                failure_persistence: None,
+                ..crate::test_runner::Config::with_cases(1024)
+            },
+            property,
+        )
+    }
 
-        #[cfg(feature = "f16")]
-        #[test]
-        fn f16_any_generates_desired_values(
-            strategy in crate::bits::u32::ANY.prop_map(f16::Any::from_bits)
-        ) {
-            float_generation_test_body!(strategy, f16);
-        }
+    #[cfg(feature = "f16")]
+    #[test]
+    fn f16_any_generates_desired_values() -> Result<(), TestFailure> {
+        run_float_class_property(
+            &crate::bits::u32::ANY.prop_map(f16::Any::from_bits),
+            "every f16 class combination generates matching values",
+            |strategy| float_generation_test_body!(strategy, f16),
+        )
+    }
 
-        #[cfg(feature = "f16")]
-        #[test]
-        fn f16_any_sanity(
-            strategy in crate::bits::u32::ANY.prop_map(f16::Any::from_bits)
-        ) {
-            check_strategy_sanity(strategy, Some(CheckStrategySanityOptions {
-                strict_complicate_after_simplify: false,
-                .. CheckStrategySanityOptions::default()
-            }));
-        }
+    #[cfg(feature = "f16")]
+    #[test]
+    fn f16_any_sanity() -> Result<(), TestFailure> {
+        run_float_class_property(
+            &crate::bits::u32::ANY.prop_map(f16::Any::from_bits),
+            "every f16 class combination upholds the shrink contract",
+            |strategy| {
+                check_strategy_sanity(
+                    strategy,
+                    Some(CheckStrategySanityOptions {
+                        strict_complicate_after_simplify: false,
+                        ..CheckStrategySanityOptions::default()
+                    }),
+                );
+                Ok(())
+            },
+        )
+    }
 
-        #[test]
-        fn f32_any_generates_desired_values(
-            strategy in crate::bits::u32::ANY.prop_map(f32::Any::from_bits)
-        ) {
-            float_generation_test_body!(strategy, f32);
-        }
+    #[test]
+    fn f32_any_generates_desired_values() -> Result<(), TestFailure> {
+        run_float_class_property(
+            &crate::bits::u32::ANY.prop_map(f32::Any::from_bits),
+            "every f32 class combination generates matching values",
+            |strategy| float_generation_test_body!(strategy, f32),
+        )
+    }
 
-        #[test]
-        fn f32_any_sanity(
-            strategy in crate::bits::u32::ANY.prop_map(f32::Any::from_bits)
-        ) {
-            check_strategy_sanity(strategy, Some(CheckStrategySanityOptions {
-                strict_complicate_after_simplify: false,
-                .. CheckStrategySanityOptions::default()
-            }));
-        }
+    #[test]
+    fn f32_any_sanity() -> Result<(), TestFailure> {
+        run_float_class_property(
+            &crate::bits::u32::ANY.prop_map(f32::Any::from_bits),
+            "every f32 class combination upholds the shrink contract",
+            |strategy| {
+                check_strategy_sanity(
+                    strategy,
+                    Some(CheckStrategySanityOptions {
+                        strict_complicate_after_simplify: false,
+                        ..CheckStrategySanityOptions::default()
+                    }),
+                );
+                Ok(())
+            },
+        )
+    }
 
-        #[test]
-        fn f64_any_generates_desired_values(
-            strategy in crate::bits::u32::ANY.prop_map(f64::Any::from_bits)
-        ) {
-            float_generation_test_body!(strategy, f64);
-        }
+    #[test]
+    fn f64_any_generates_desired_values() -> Result<(), TestFailure> {
+        run_float_class_property(
+            &crate::bits::u32::ANY.prop_map(f64::Any::from_bits),
+            "every f64 class combination generates matching values",
+            |strategy| float_generation_test_body!(strategy, f64),
+        )
+    }
 
-        #[test]
-        fn f64_any_sanity(
-            strategy in crate::bits::u32::ANY.prop_map(f64::Any::from_bits)
-        ) {
-            check_strategy_sanity(strategy, Some(CheckStrategySanityOptions {
-                strict_complicate_after_simplify: false,
-                .. CheckStrategySanityOptions::default()
-            }));
-        }
+    #[test]
+    fn f64_any_sanity() -> Result<(), TestFailure> {
+        run_float_class_property(
+            &crate::bits::u32::ANY.prop_map(f64::Any::from_bits),
+            "every f64 class combination upholds the shrink contract",
+            |strategy| {
+                check_strategy_sanity(
+                    strategy,
+                    Some(CheckStrategySanityOptions {
+                        strict_complicate_after_simplify: false,
+                        ..CheckStrategySanityOptions::default()
+                    }),
+                );
+                Ok(())
+            },
+        )
     }
 
     mod panic_on_empty {
+        // These tests pin the *documented* panic contract of empty numeric
+        // ranges, so the panic is the behavior under test: it is observed
+        // through `catch_unwind` while the assertions themselves use the
+        // strict vocabulary.
         macro_rules! panic_on_empty {
             ($t:tt) => {
                 mod $t {
@@ -1610,30 +1836,32 @@ mod test {
                     use crate::test_runner::TestRunner;
                     use std::panic;
                     use std::string::String;
+                    use strict_test_support::{TestFailure, ensure};
 
                     const ZERO: $t = 0 as $t;
                     const ONE: $t = 1 as $t;
 
                     #[test]
-                    fn range() {
-                        assert_eq!(
+                    fn range() -> Result<(), TestFailure> {
+                        ensure(
                             panic::catch_unwind(|| {
                                 let mut runner = TestRunner::deterministic();
                                 let _ = (ZERO..ZERO).new_tree(&mut runner);
                             })
                             .err()
-                            .and_then(|a| a
-                                .downcast_ref::<String>()
-                                .map(|s| {
+                            .and_then(|a| {
+                                a.downcast_ref::<String>().map(|s| {
                                     s == "Invalid use of empty range 0..0."
-                                })),
-                            Some(true)
-                        );
+                                })
+                            }) == Some(true),
+                            "an empty range panics with the documented \
+                             message",
+                        )
                     }
 
                     #[test]
-                    fn range_inclusive() {
-                        assert_eq!(
+                    fn range_inclusive() -> Result<(), TestFailure> {
+                        ensure(
                             panic::catch_unwind(|| {
                                 let mut runner = TestRunner::deterministic();
                                 let _ =
@@ -1641,13 +1869,14 @@ mod test {
                                         .new_tree(&mut runner);
                             })
                             .err()
-                            .and_then(|a| a
-                                .downcast_ref::<String>()
-                                .map(|s| {
+                            .and_then(|a| {
+                                a.downcast_ref::<String>().map(|s| {
                                     s == "Invalid use of empty range 1..=0."
-                                })),
-                            Some(true)
-                        );
+                                })
+                            }) == Some(true),
+                            "an empty inclusive range panics with the \
+                             documented message",
+                        )
                     }
                 }
             };

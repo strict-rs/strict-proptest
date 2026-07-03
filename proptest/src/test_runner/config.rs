@@ -640,17 +640,20 @@ mod tests {
     use super::*;
     use crate::test_runner::errors::TestCaseResult;
     use crate::test_runner::result_cache::ResultCacheKey;
+    use strict_test_support::{TestFailure, ensure, ensure_all};
 
     #[test]
-    fn config_partial_eq_default_equals_self_and_clone() {
+    fn config_partial_eq_default_equals_self_and_clone()
+    -> Result<(), TestFailure> {
         let default = Config::default();
 
-        assert_eq!(default, default);
-        assert_eq!(default, default.clone());
+        ensure(default.eq(&default), "Config PartialEq is reflexive")?;
+        ensure(default == default.clone(), "default equals its clone")
     }
 
     #[test]
-    fn config_partial_eq_result_cache_factory_uses_explicit_helper() {
+    fn config_partial_eq_result_cache_factory_uses_explicit_helper()
+    -> Result<(), TestFailure> {
         struct TestResultCache;
 
         impl ResultCache for TestResultCache {
@@ -679,16 +682,29 @@ mod tests {
             ..default.clone()
         };
 
-        assert!(result_cache_eq(
-            default.result_cache,
-            same_factory.result_cache
-        ));
-        assert_eq!(default, same_factory);
-
-        assert!(!result_cache_eq(
-            default.result_cache,
-            different_factory.result_cache
-        ));
-        assert_ne!(default, different_factory);
+        ensure_all(&[
+            (
+                result_cache_eq(
+                    default.result_cache,
+                    same_factory.result_cache,
+                ),
+                "the same factory pointer compares equal",
+            ),
+            (
+                default == same_factory,
+                "configs sharing a factory are equal",
+            ),
+            (
+                !result_cache_eq(
+                    default.result_cache,
+                    different_factory.result_cache,
+                ),
+                "a different factory pointer compares unequal",
+            ),
+            (
+                default != different_factory,
+                "configs with different factories are unequal",
+            ),
+        ])
     }
 }

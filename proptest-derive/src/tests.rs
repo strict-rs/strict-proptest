@@ -14,7 +14,9 @@
 //==============================================================================
 
 // Borrowed from:
-// https://docs.rs/synstructure/0.7.0/src/synstructure/macros.rs.html#104-135
+// https://docs.rs/synstructure/0.7.0/src/synstructure/macros.rs.html#104-135,
+// reshaped so the comparison flows as `Result<(), TestFailure>` instead of
+// panicking.
 macro_rules! test_derive {
     ($name:path { $($i:tt)* } expands to { $($o:tt)* }) => {
         {
@@ -24,26 +26,29 @@ macro_rules! test_derive {
                 $($o)*
             }
 
-            test_derive!($name { $($i)* } expands to { $($o)* } no_build);
+            test_derive!($name { $($i)* } expands to { $($o)* } no_build)
         }
     };
     ($name:path { $($i:tt)* } expands to { $($o:tt)* } no_build) => {
         {
-            let expected = stringify!( $($o)* )
-                .parse::<proc_macro2::TokenStream>()
-                .expect("output should be a valid TokenStream");
+            let expected = ::strict_test_support::ensure_ok(
+                stringify!( $($o)* ).parse::<proc_macro2::TokenStream>(),
+                "output should be a valid TokenStream",
+            )?;
 
             let i = stringify!( $($i)* );
-            let parsed = $crate::syn::parse_str::<$crate::syn::DeriveInput>(i).expect(
+            let parsed = ::strict_test_support::ensure_ok(
+                $crate::syn::parse_str::<$crate::syn::DeriveInput>(i),
                 concat!("Failed to parse input to `#[derive(",
                     stringify!($name),
-                ")]`")
-            );
+                ")]`"),
+            )?;
             let res = $name(parsed);
-            assert_eq!(
-                format!("{}", res),
-                format!("{}", expected)
-            );
+            ::strict_test_support::ensure_eq(
+                &format!("{}", res),
+                &format!("{}", expected),
+                "the derive expansion matches the pinned tokens",
+            )
         }
     };
 }
@@ -51,20 +56,24 @@ macro_rules! test_derive {
 macro_rules! test {
     (no_build $test_name:ident { $($i:tt)* } expands to { $($o:tt)* }) => {
         #[test]
-        fn $test_name() {
+        fn $test_name(
+        ) -> ::core::result::Result<(), ::strict_test_support::TestFailure>
+        {
             test_derive!(
                 $crate::derive::impl_proptest_arbitrary { $($i)* }
                 expands to { $($o)* } no_build
-            );
+            )
         }
     };
     ($test_name:ident { $($i:tt)* } expands to { $($o:tt)* }) => {
         #[test]
-        fn $test_name() {
+        fn $test_name(
+        ) -> ::core::result::Result<(), ::strict_test_support::TestFailure>
+        {
             test_derive!(
                 $crate::derive::impl_proptest_arbitrary { $($i)* }
                 expands to { $($o)* }
-            );
+            )
         }
     };
 }

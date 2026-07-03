@@ -6,9 +6,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use proptest::prelude::{Arbitrary, BoxedStrategy, Strategy, proptest};
+use proptest::prelude::{Arbitrary, BoxedStrategy, Strategy, any};
+use proptest::strict::{TestResult, ensure_property};
 use proptest::string::StrategyFromRegex;
 use proptest_derive::Arbitrary;
+use strict_test_support::{ensure, ensure_ok};
 
 fn mk_regex() -> &'static str {
     "[0-9][0-9]"
@@ -101,78 +103,137 @@ impl StrategyFromRegex for NewString {
 #[derive(Debug, Arbitrary)]
 struct T4(#[proptest(regex = "a+")] NewString);
 
-fn check_aplus(x0: String) {
-    assert!(x0.chars().count() > 0);
-    assert!(x0.chars().all(|c: char| c == 'a'));
+fn ensure_aplus(x0: String) -> TestResult {
+    ensure(x0.chars().count() > 0, "the a+ string is non-empty")?;
+    ensure(
+        x0.chars().all(|c: char| c == 'a'),
+        "the a+ string is all a's",
+    )
 }
 
-fn assert_adherence(
+fn ensure_adherence(
     x0: String,
     x1: String,
     x2: String,
     y0: Vec<u8>,
     y1: Vec<u8>,
     y2: Vec<u8>,
-) {
-    check_aplus(x0);
+) -> TestResult {
+    ensure_aplus(x0)?;
 
-    assert!(x1.chars().count() > 0);
-    assert!(x1.chars().all(|c: char| c == 'b'));
+    ensure(x1.chars().count() > 0, "the b+ string is non-empty")?;
+    ensure(
+        x1.chars().all(|c: char| c == 'b'),
+        "the b+ string is all b's",
+    )?;
 
-    assert!(x2.parse::<u8>().unwrap() < 100);
+    let parsed =
+        ensure_ok(x2.parse::<u8>(), "the two-digit regex string parses as u8")?;
+    ensure(parsed < 100, "the two-digit value stays below one hundred")?;
 
-    assert!(!y0.is_empty());
-    assert!(y0.iter().all(|c: &u8| b"ab".contains(c)));
+    ensure(!y0.is_empty(), "the (a|b)+ bytes are non-empty")?;
+    ensure(
+        y0.iter().all(|c: &u8| b"ab".contains(c)),
+        "the (a|b)+ bytes stay in the alphabet",
+    )?;
 
-    assert!(!y1.is_empty() && y1.len() < 4);
-    assert!(y1.iter().all(|c: &u8| b"abc".contains(c)));
+    ensure(
+        !y1.is_empty() && y1.len() < 4,
+        "the filtered [abc]+ bytes keep the length filter",
+    )?;
+    ensure(
+        y1.iter().all(|c: &u8| b"abc".contains(c)),
+        "the [abc]+ bytes stay in the alphabet",
+    )?;
 
-    assert!(!y2.is_empty());
-    let test = y2.iter().all(u8::is_ascii_digit);
-    assert!(test);
+    ensure(!y2.is_empty(), "the fn-regex bytes are non-empty")?;
+    ensure(
+        y2.iter().all(u8::is_ascii_digit),
+        "the fn-regex bytes are all digits",
+    )
 }
 
-proptest! {
-    #[test]
-    fn t0_adhering_to_regex(v: T0) {
-        let T0 {
-            foo: x0, bar: x1, baz: x2,
-            quux: y0, wibble: y1, wobble: y2
-        } = v;
-        assert_adherence(x0, x1, x2, y0, y1, y2);
-    }
+#[test]
+fn t0_adhering_to_regex() -> TestResult {
+    ensure_property(
+        &any::<T0>(),
+        "named struct regex fields adhere to their regexes",
+        |v| {
+            let T0 {
+                foo: x0,
+                bar: x1,
+                baz: x2,
+                quux: y0,
+                wibble: y1,
+                wobble: y2,
+            } = v;
+            ensure_adherence(x0, x1, x2, y0, y1, y2)
+        },
+    )
+}
 
-    #[test]
-    fn t1_adhering_to_regex(v: T1) {
-        let T1(x0, x1, x2, y0, y1, y2) = v;
-        assert_adherence(x0, x1, x2, y0, y1, y2);
-    }
+#[test]
+fn t1_adhering_to_regex() -> TestResult {
+    ensure_property(
+        &any::<T1>(),
+        "tuple struct regex fields adhere to their regexes",
+        |v| {
+            let T1(x0, x1, x2, y0, y1, y2) = v;
+            ensure_adherence(x0, x1, x2, y0, y1, y2)
+        },
+    )
+}
 
-    #[test]
-    fn t1_r_adhering_to_regex(v: T1r) {
-        let T1r(x0, x1, x2, y0, y1, y2) = v;
-        assert_adherence(x0, x1, x2, y0, y1, y2);
-    }
+#[test]
+fn t1_r_adhering_to_regex() -> TestResult {
+    ensure_property(
+        &any::<T1r>(),
+        "raw-string regex fields adhere to their regexes",
+        |v| {
+            let T1r(x0, x1, x2, y0, y1, y2) = v;
+            ensure_adherence(x0, x1, x2, y0, y1, y2)
+        },
+    )
+}
 
-    #[test]
-    fn t2_adhering_to_regex(v: T2) {
-        let T2::V0 {
-            foo: x0, bar: x1, baz: x2,
-            quux: y0, wibble: y1, wobble: y2
-        } = v;
-        assert_adherence(x0, x1, x2, y0, y1, y2);
-    }
+#[test]
+fn t2_adhering_to_regex() -> TestResult {
+    ensure_property(
+        &any::<T2>(),
+        "struct-variant regex fields adhere to their regexes",
+        |v| {
+            let T2::V0 {
+                foo: x0,
+                bar: x1,
+                baz: x2,
+                quux: y0,
+                wibble: y1,
+                wobble: y2,
+            } = v;
+            ensure_adherence(x0, x1, x2, y0, y1, y2)
+        },
+    )
+}
 
-    #[test]
-    fn t3_adhering_to_regex(v: T3) {
-        let T3::V0(x0, x1, x2, y0, y1, y2) = v;
-        assert_adherence(x0, x1, x2, y0, y1, y2);
-    }
+#[test]
+fn t3_adhering_to_regex() -> TestResult {
+    ensure_property(
+        &any::<T3>(),
+        "tuple-variant regex fields adhere to their regexes",
+        |v| {
+            let T3::V0(x0, x1, x2, y0, y1, y2) = v;
+            ensure_adherence(x0, x1, x2, y0, y1, y2)
+        },
+    )
+}
 
-    #[test]
-    fn t4_adhering_to_regex(v: T4) {
-        check_aplus((v.0).0);
-    }
+#[test]
+fn t4_adhering_to_regex() -> TestResult {
+    ensure_property(
+        &any::<T4>(),
+        "a custom StrategyFromRegex type adheres to its regex",
+        |v| ensure_aplus((v.0).0),
+    )
 }
 
 #[test]

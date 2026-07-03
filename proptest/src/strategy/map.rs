@@ -252,50 +252,64 @@ mod test {
 
     use rand::Rng;
 
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
+
     use super::*;
     use crate::strategy::just::Just;
 
     #[test]
-    fn test_map() {
-        TestRunner::default()
-            .run(&(0..10).prop_map(|v| v * 2), |v| {
-                assert!(0 == v % 2);
-                Ok(())
-            })
-            .unwrap();
+    fn test_map() -> Result<(), TestFailure> {
+        crate::strict::ensure_property(
+            &(0..10).prop_map(|v| v * 2),
+            "prop_map applies the mapping to every value",
+            |v| ensure(0 == v % 2, "the mapped value is even"),
+        )
     }
 
     #[test]
-    fn test_map_into() {
-        TestRunner::default()
-            .run(&(0..10u8).prop_map_into::<usize>(), |v| {
-                assert!(v < 10);
-                Ok(())
-            })
-            .unwrap();
+    fn test_map_into() -> Result<(), TestFailure> {
+        crate::strict::ensure_property(
+            &(0..10u8).prop_map_into::<usize>(),
+            "prop_map_into converts every value",
+            |v| ensure(v < 10, "the converted value keeps its bound"),
+        )
     }
 
     #[test]
-    fn perturb_uses_same_rng_every_time() {
+    fn perturb_uses_same_rng_every_time() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
         let input = Just(1).prop_perturb(|v, mut rng| v + rng.next_u32());
 
         for _ in 0..16 {
-            let value = input.new_tree(&mut runner).unwrap();
-            assert_eq!(value.current(), value.current());
+            let value = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "perturb strategy generates a value tree",
+            )?;
+            ensure_eq(
+                &value.current(),
+                &value.current(),
+                "current() is stable across calls",
+            )?;
         }
+        Ok(())
     }
 
     #[test]
-    fn perturb_uses_varying_random_seeds() {
+    fn perturb_uses_varying_random_seeds() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
         let input = Just(1).prop_perturb(|v, mut rng| v + rng.next_u32());
 
         let mut seen = HashSet::new();
         for _ in 0..64 {
-            seen.insert(input.new_tree(&mut runner).unwrap().current());
+            seen.insert(
+                ensure_some(
+                    input.new_tree(&mut runner).ok(),
+                    "perturb strategy generates a value tree",
+                )?
+                .current(),
+            );
         }
 
-        assert_eq!(64, seen.len());
+        ensure_eq(&64, &seen.len(), "every tree drew a distinct seed")
     }
 }

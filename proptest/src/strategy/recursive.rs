@@ -141,6 +141,8 @@ impl<
 mod test {
     use std::cmp::max;
 
+    use strict_test_support::{TestFailure, ensure, ensure_some};
+
     use super::*;
     use crate::strategy::just::Just;
 
@@ -170,7 +172,7 @@ mod test {
     }
 
     #[test]
-    fn test_recursive() {
+    fn test_recursive() -> Result<(), TestFailure> {
         let mut max_depth = 0;
         let mut max_count = 0;
 
@@ -180,30 +182,41 @@ mod test {
 
         let mut runner = TestRunner::deterministic();
         for _ in 0..65536 {
-            let tree = strat.new_tree(&mut runner).unwrap().current();
+            let tree = ensure_some(
+                strat.new_tree(&mut runner).ok(),
+                "recursive strategy generates a value tree",
+            )?
+            .current();
             let (depth, count) = tree.stats();
-            assert!(depth <= 4, "Got depth {}", depth);
-            assert!(count <= 128, "Got count {}", count);
+            ensure(depth <= 4, "the depth budget is respected")?;
+            ensure(count <= 128, "the size budget is respected")?;
             max_depth = max(depth, max_depth);
             max_count = max(count, max_count);
         }
 
-        assert!(max_depth >= 3, "Only got max depth {}", max_depth);
-        assert!(max_count > 48, "Only got max count {}", max_count);
+        ensure(max_depth >= 3, "deep trees are actually generated")?;
+        ensure(max_count > 48, "large trees are actually generated")
     }
 
     #[test]
-    fn simplifies_to_non_recursive() {
+    fn simplifies_to_non_recursive() -> Result<(), TestFailure> {
         let strat = Just(Tree::Leaf).prop_recursive(4, 64, 16, |element| {
             crate::collection::vec(element, 8..16).prop_map(Tree::Branch)
         });
 
         let mut runner = TestRunner::deterministic();
         for _ in 0..256 {
-            let mut value = strat.new_tree(&mut runner).unwrap();
+            let mut value = ensure_some(
+                strat.new_tree(&mut runner).ok(),
+                "recursive strategy generates a value tree",
+            )?;
             while value.simplify() {}
 
-            assert_eq!(Tree::Leaf, value.current());
+            ensure(
+                Tree::Leaf == value.current(),
+                "shrinking converges to the non-recursive case",
+            )?;
         }
+        Ok(())
     }
 }

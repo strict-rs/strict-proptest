@@ -248,74 +248,114 @@ pub fn maybe_err_weighted<T: Strategy, E: Strategy>(
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TestFailure, ensure, ensure_some};
+
     use super::*;
 
-    fn count_ok_of_1000(s: impl Strategy<Value = Result<(), ()>>) -> u32 {
+    fn count_ok_of_1000(
+        s: impl Strategy<Value = Result<(), ()>>,
+    ) -> Result<u32, TestFailure> {
         let mut runner = TestRunner::deterministic();
         let mut count = 0;
         for _ in 0..1000 {
-            count += s.new_tree(&mut runner).unwrap().current().is_ok() as u32;
+            count += ensure_some(
+                s.new_tree(&mut runner).ok(),
+                "result strategy generates a value tree",
+            )?
+            .current()
+            .is_ok() as u32;
         }
 
-        count
+        Ok(count)
     }
 
     #[test]
-    fn probability_defaults_to_0p5() {
-        let count = count_ok_of_1000(maybe_err(Just(()), Just(())));
-        assert!(count > 400 && count < 600);
-        let count = count_ok_of_1000(maybe_ok(Just(()), Just(())));
-        assert!(count > 400 && count < 600);
+    fn probability_defaults_to_0p5() -> Result<(), TestFailure> {
+        let count = count_ok_of_1000(maybe_err(Just(()), Just(())))?;
+        ensure(
+            count > 400 && count < 600,
+            "maybe_err defaults to a balanced split",
+        )?;
+        let count = count_ok_of_1000(maybe_ok(Just(()), Just(())))?;
+        ensure(
+            count > 400 && count < 600,
+            "maybe_ok defaults to a balanced split",
+        )
     }
 
     #[test]
-    fn probability_handled_correctly() {
+    fn probability_handled_correctly() -> Result<(), TestFailure> {
         let count =
-            count_ok_of_1000(maybe_err_weighted(0.1, Just(()), Just(())));
-        assert!(count > 800 && count < 950);
+            count_ok_of_1000(maybe_err_weighted(0.1, Just(()), Just(())))?;
+        ensure(
+            count > 800 && count < 950,
+            "a 0.1 err weight yields mostly Ok",
+        )?;
 
         let count =
-            count_ok_of_1000(maybe_err_weighted(0.9, Just(()), Just(())));
-        assert!(count > 50 && count < 150);
+            count_ok_of_1000(maybe_err_weighted(0.9, Just(()), Just(())))?;
+        ensure(
+            count > 50 && count < 150,
+            "a 0.9 err weight yields mostly Err",
+        )?;
 
         let count =
-            count_ok_of_1000(maybe_ok_weighted(0.9, Just(()), Just(())));
-        assert!(count > 800 && count < 950);
+            count_ok_of_1000(maybe_ok_weighted(0.9, Just(()), Just(())))?;
+        ensure(
+            count > 800 && count < 950,
+            "a 0.9 ok weight yields mostly Ok",
+        )?;
 
         let count =
-            count_ok_of_1000(maybe_ok_weighted(0.1, Just(()), Just(())));
-        assert!(count > 50 && count < 150);
+            count_ok_of_1000(maybe_ok_weighted(0.1, Just(()), Just(())))?;
+        ensure(
+            count > 50 && count < 150,
+            "a 0.1 ok weight yields mostly Err",
+        )
     }
 
     #[test]
-    fn shrink_to_correct_case() {
+    fn shrink_to_correct_case() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
         {
             let input = maybe_err(Just(()), Just(()));
             for _ in 0..64 {
-                let mut val = input.new_tree(&mut runner).unwrap();
+                let mut val = ensure_some(
+                    input.new_tree(&mut runner).ok(),
+                    "maybe_err strategy generates a value tree",
+                )?;
                 if val.current().is_ok() {
-                    assert!(!val.simplify());
-                    assert!(val.current().is_ok());
+                    ensure(!val.simplify(), "an Ok case cannot simplify")?;
+                    ensure(val.current().is_ok(), "the case stays Ok")?;
                 } else {
-                    assert!(val.simplify());
-                    assert!(val.current().is_ok());
+                    ensure(val.simplify(), "an Err case simplifies")?;
+                    ensure(
+                        val.current().is_ok(),
+                        "maybe_err shrinks toward Ok",
+                    )?;
                 }
             }
         }
         {
             let input = maybe_ok(Just(()), Just(()));
             for _ in 0..64 {
-                let mut val = input.new_tree(&mut runner).unwrap();
+                let mut val = ensure_some(
+                    input.new_tree(&mut runner).ok(),
+                    "maybe_ok strategy generates a value tree",
+                )?;
                 if val.current().is_err() {
-                    assert!(!val.simplify());
-                    assert!(val.current().is_err());
+                    ensure(!val.simplify(), "an Err case cannot simplify")?;
+                    ensure(val.current().is_err(), "the case stays Err")?;
                 } else {
-                    assert!(val.simplify());
-                    assert!(val.current().is_err());
+                    ensure(val.simplify(), "an Ok case simplifies")?;
+                    ensure(
+                        val.current().is_err(),
+                        "maybe_ok shrinks toward Err",
+                    )?;
                 }
             }
         }
+        Ok(())
     }
 
     #[test]

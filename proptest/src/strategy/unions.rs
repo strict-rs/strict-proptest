@@ -464,6 +464,8 @@ pub fn float_to_weight(f: f64) -> (u32, u32) {
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TestFailure, ensure, ensure_some};
+
     use super::*;
     use crate::strategy::just::Just;
 
@@ -473,7 +475,7 @@ mod test {
     // for the seed, which is unlikely.
     #[cfg(feature = "std")]
     #[test]
-    fn test_union() {
+    fn test_union() -> Result<(), TestFailure> {
         let input = (10u32..20u32).prop_union(30u32..40u32);
         // Expect that 25% of cases pass (left input happens to be < 15, and
         // left is chosen as initial value). Of the 75% that fail, 50% should
@@ -484,35 +486,44 @@ mod test {
         let mut converged_high = 0;
         let mut runner = TestRunner::deterministic();
         for _ in 0..256 {
-            let case = input.new_tree(&mut runner).unwrap();
+            let case = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "union strategy generates a value tree",
+            )?;
             let result = runner.run_one(case, |v| {
-                prop_assert!(v < 15);
-                Ok(())
+                if v < 15 {
+                    Ok(())
+                } else {
+                    Err(TestCaseError::fail("at least 15"))
+                }
             });
 
             match result {
                 Ok(true) => passed += 1,
                 Err(TestError::Fail(_, 15)) => converged_low += 1,
                 Err(TestError::Fail(_, 30)) => converged_high += 1,
-                e => panic!("Unexpected result: {:?}", e),
+                _ => {
+                    ensure(false, "run_one converges to one of the two minima")?
+                }
             }
         }
 
-        assert!((32..=96).contains(&passed), "Bad passed count: {}", passed);
-        assert!(
+        ensure(
+            (32..=96).contains(&passed),
+            "a plausible share of cases passed",
+        )?;
+        ensure(
             (32..=160).contains(&converged_low),
-            "Bad converged_low count: {}",
-            converged_low
-        );
-        assert!(
+            "a plausible share converged to the low minimum",
+        )?;
+        ensure(
             (32..=160).contains(&converged_high),
-            "Bad converged_high count: {}",
-            converged_high
-        );
+            "a plausible share converged to the high minimum",
+        )
     }
 
     #[test]
-    fn test_union_weighted() {
+    fn test_union_weighted() -> Result<(), TestFailure> {
         let input = Union::new_weighted(vec![
             (1, Just(0usize)),
             (2, Just(1usize)),
@@ -522,14 +533,23 @@ mod test {
         let mut counts = [0, 0, 0];
         let mut runner = TestRunner::deterministic();
         for _ in 0..65536 {
-            counts[input.new_tree(&mut runner).unwrap().current()] += 1;
+            counts[ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "weighted union generates a value tree",
+            )?
+            .current()] += 1;
         }
 
-        println!("{:?}", counts);
-        assert!(counts[0] > 0);
-        assert!(counts[2] > 0);
-        assert!(counts[1] > counts[0] * 3 / 2);
-        assert!(counts[1] > counts[2] * 3 / 2);
+        ensure(counts[0] > 0, "the first option is chosen")?;
+        ensure(counts[2] > 0, "the third option is chosen")?;
+        ensure(
+            counts[1] > counts[0] * 3 / 2,
+            "the double-weighted option dominates the first",
+        )?;
+        ensure(
+            counts[1] > counts[2] * 3 / 2,
+            "the double-weighted option dominates the third",
+        )
     }
 
     #[test]
@@ -547,7 +567,7 @@ mod test {
     // FIXME(2018-06-01): See note on `test_union`.
     #[cfg(feature = "std")]
     #[test]
-    fn test_tuple_union() {
+    fn test_tuple_union() -> Result<(), TestFailure> {
         let input = TupleUnion::new((
             (1, Arc::new(10u32..20u32)),
             (1, Arc::new(30u32..40u32)),
@@ -561,35 +581,44 @@ mod test {
         let mut converged_high = 0;
         let mut runner = TestRunner::deterministic();
         for _ in 0..256 {
-            let case = input.new_tree(&mut runner).unwrap();
+            let case = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "tuple union generates a value tree",
+            )?;
             let result = runner.run_one(case, |v| {
-                prop_assert!(v < 15);
-                Ok(())
+                if v < 15 {
+                    Ok(())
+                } else {
+                    Err(TestCaseError::fail("at least 15"))
+                }
             });
 
             match result {
                 Ok(true) => passed += 1,
                 Err(TestError::Fail(_, 15)) => converged_low += 1,
                 Err(TestError::Fail(_, 30)) => converged_high += 1,
-                e => panic!("Unexpected result: {:?}", e),
+                _ => {
+                    ensure(false, "run_one converges to one of the two minima")?
+                }
             }
         }
 
-        assert!((32..=96).contains(&passed), "Bad passed count: {}", passed);
-        assert!(
+        ensure(
+            (32..=96).contains(&passed),
+            "a plausible share of cases passed",
+        )?;
+        ensure(
             (32..=160).contains(&converged_low),
-            "Bad converged_low count: {}",
-            converged_low
-        );
-        assert!(
+            "a plausible share converged to the low minimum",
+        )?;
+        ensure(
             (32..=160).contains(&converged_high),
-            "Bad converged_high count: {}",
-            converged_high
-        );
+            "a plausible share converged to the high minimum",
+        )
     }
 
     #[test]
-    fn test_tuple_union_weighting() {
+    fn test_tuple_union_weighting() -> Result<(), TestFailure> {
         let input = TupleUnion::new((
             (1, Arc::new(Just(0usize))),
             (2, Arc::new(Just(1usize))),
@@ -599,18 +628,27 @@ mod test {
         let mut counts = [0, 0, 0];
         let mut runner = TestRunner::deterministic();
         for _ in 0..65536 {
-            counts[input.new_tree(&mut runner).unwrap().current()] += 1;
+            counts[ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "weighted tuple union generates a value tree",
+            )?
+            .current()] += 1;
         }
 
-        println!("{:?}", counts);
-        assert!(counts[0] > 0);
-        assert!(counts[2] > 0);
-        assert!(counts[1] > counts[0] * 3 / 2);
-        assert!(counts[1] > counts[2] * 3 / 2);
+        ensure(counts[0] > 0, "the first option is chosen")?;
+        ensure(counts[2] > 0, "the third option is chosen")?;
+        ensure(
+            counts[1] > counts[0] * 3 / 2,
+            "the double-weighted option dominates the first",
+        )?;
+        ensure(
+            counts[1] > counts[2] * 3 / 2,
+            "the double-weighted option dominates the third",
+        )
     }
 
     #[test]
-    fn test_tuple_union_all_sizes() {
+    fn test_tuple_union_all_sizes() -> Result<(), TestFailure> {
         let mut runner = TestRunner::deterministic();
         let r = Arc::new(1i32..10);
 
@@ -623,13 +661,18 @@ mod test {
 
                 let mut pass = false;
                 for _ in 0..1024 {
-                    if 0 == input.new_tree(&mut runner).unwrap().current() {
+                    if 0 == ensure_some(
+                        input.new_tree(&mut runner).ok(),
+                        "tuple union generates a value tree",
+                    )?
+                    .current()
+                    {
                         pass = true;
                         break;
                     }
                 }
 
-                assert!(pass);
+                ensure(pass, "the final option is eventually chosen")?;
             }}
         }
 
@@ -642,6 +685,7 @@ mod test {
         test!(r, r, r, r, r, r, r); // 8
         test!(r, r, r, r, r, r, r, r); // 9
         test!(r, r, r, r, r, r, r, r, r); // 10
+        Ok(())
     }
 
     #[test]

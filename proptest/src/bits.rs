@@ -534,35 +534,53 @@ pub use self::varsize::VarBitSet;
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
+
     use super::*;
 
     #[test]
-    fn generates_values_in_range() {
+    fn generates_values_in_range() -> Result<(), TestFailure> {
         let input = u32::between(4, 8);
 
         let mut runner = TestRunner::default();
         for _ in 0..256 {
-            let value = input.new_tree(&mut runner).unwrap().current();
-            assert!(0 == value & !0xF0u32, "Generate value {}", value);
+            let value = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "bit strategy generates a value tree",
+            )?
+            .current();
+            ensure(
+                0 == value & !0xF0u32,
+                "generated bits stay within the requested range",
+            )?;
         }
+        Ok(())
     }
 
     #[test]
-    fn generates_values_in_mask() {
+    fn generates_values_in_mask() -> Result<(), TestFailure> {
         let mut accum = 0;
 
         let mut runner = TestRunner::deterministic();
         let input = u32::masked(0xdeadbeef);
         for _ in 0..1024 {
-            accum |= input.new_tree(&mut runner).unwrap().current();
+            accum |= ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "masked bit strategy generates a value tree",
+            )?
+            .current();
         }
 
-        assert_eq!(0xdeadbeef, accum);
+        ensure_eq(
+            &0xdeadbeefu32,
+            &accum,
+            "every masked bit is eventually generated",
+        )
     }
 
     #[cfg(feature = "bit-set")]
     #[test]
-    fn mask_bounds_for_bitset_correct() {
+    fn mask_bounds_for_bitset_correct() -> Result<(), TestFailure> {
         let mut seen_0 = false;
         let mut seen_2 = false;
 
@@ -573,17 +591,21 @@ mod test {
         let mut runner = TestRunner::deterministic();
         let input = bitset::masked(mask);
         for _ in 0..32 {
-            let v = input.new_tree(&mut runner).unwrap().current();
+            let v = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "bitset strategy generates a value tree",
+            )?
+            .current();
             seen_0 |= v.contains(0);
             seen_2 |= v.contains(2);
         }
 
-        assert!(seen_0);
-        assert!(seen_2);
+        ensure(seen_0, "bit 0 of the mask is generated")?;
+        ensure(seen_2, "bit 2 of the mask is generated")
     }
 
     #[test]
-    fn mask_bounds_for_vecbool_correct() {
+    fn mask_bounds_for_vecbool_correct() -> Result<(), TestFailure> {
         let mut seen_0 = false;
         let mut seen_2 = false;
 
@@ -592,97 +614,143 @@ mod test {
         let mut runner = TestRunner::deterministic();
         let input = bool_vec::masked(mask);
         for _ in 0..32 {
-            let v = input.new_tree(&mut runner).unwrap().current();
-            assert_eq!(4, v.len());
+            let v = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "bool-vec strategy generates a value tree",
+            )?
+            .current();
+            ensure_eq(&4, &v.len(), "the bool vec keeps the mask length")?;
             seen_0 |= v[0];
             seen_2 |= v[2];
         }
 
-        assert!(seen_0);
-        assert!(seen_2);
+        ensure(seen_0, "bit 0 of the mask is generated")?;
+        ensure(seen_2, "bit 2 of the mask is generated")
     }
 
     #[test]
-    fn shrinks_to_zero() {
+    fn shrinks_to_zero() -> Result<(), TestFailure> {
         let input = u32::between(4, 24);
 
         let mut runner = TestRunner::default();
         for _ in 0..256 {
-            let mut value = input.new_tree(&mut runner).unwrap();
+            let mut value = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "bit strategy generates a value tree",
+            )?;
             let mut prev = value.current();
             while value.simplify() {
                 let v = value.current();
-                assert!(
+                ensure(
                     1 == (prev & !v).count_ones(),
-                    "Shrank from {} to {}",
-                    prev,
-                    v
-                );
+                    "each simplify step clears exactly one bit",
+                )?;
                 prev = v;
             }
 
-            assert_eq!(0, value.current());
+            ensure_eq(&0, &value.current(), "shrinking converges to zero")?;
         }
+        Ok(())
     }
 
     #[test]
-    fn complicates_to_previous() {
+    fn complicates_to_previous() -> Result<(), TestFailure> {
         let input = u32::between(4, 24);
 
         let mut runner = TestRunner::default();
         for _ in 0..256 {
-            let mut value = input.new_tree(&mut runner).unwrap();
+            let mut value = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "bit strategy generates a value tree",
+            )?;
             let orig = value.current();
             if value.simplify() {
-                assert!(value.complicate());
-                assert_eq!(orig, value.current());
+                ensure(
+                    value.complicate(),
+                    "a simplified tree complicates back",
+                )?;
+                ensure_eq(
+                    &orig,
+                    &value.current(),
+                    "complicate restores the previous value",
+                )?;
             }
         }
+        Ok(())
     }
 
     #[test]
-    fn sampled_selects_correct_sizes_and_bits() {
+    fn sampled_selects_correct_sizes_and_bits() -> Result<(), TestFailure> {
         let input = u32::sampled(4..8, 10..20);
         let mut seen_counts = [0; 32];
         let mut seen_bits = [0; 32];
 
         let mut runner = TestRunner::deterministic();
         for _ in 0..2048 {
-            let value = input.new_tree(&mut runner).unwrap().current();
+            let value = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "sampled bit strategy generates a value tree",
+            )?
+            .current();
             let count = value.count_ones() as usize;
-            assert!((4..8).contains(&count));
+            ensure(
+                (4..8).contains(&count),
+                "the sampled bit count stays in range",
+            )?;
             seen_counts[count] += 1;
 
             for (bit, seen_bit) in seen_bits.iter_mut().enumerate() {
                 if 0 != value & (1 << bit) {
-                    assert!((10..20).contains(&bit));
+                    ensure(
+                        (10..20).contains(&bit),
+                        "only bits within the sampled range are set",
+                    )?;
                     *seen_bit += value;
                 }
             }
         }
 
         for count in seen_counts.iter().take(8).skip(4) {
-            assert!((256..1024).contains(count));
+            ensure(
+                (256..1024).contains(count),
+                "each bit count is chosen a plausible number of times",
+            )?;
         }
 
-        let least_seen_bit_count =
-            seen_bits[10..20].iter().cloned().min().unwrap();
-        let most_seen_bit_count =
-            seen_bits[10..20].iter().cloned().max().unwrap();
-        assert_eq!(1, most_seen_bit_count / least_seen_bit_count);
+        let least_seen_bit_count = ensure_some(
+            seen_bits[10..20].iter().cloned().min(),
+            "the sampled range has a least-seen bit",
+        )?;
+        let most_seen_bit_count = ensure_some(
+            seen_bits[10..20].iter().cloned().max(),
+            "the sampled range has a most-seen bit",
+        )?;
+        ensure_eq(
+            &1,
+            &(most_seen_bit_count / least_seen_bit_count),
+            "bit selection is roughly uniform",
+        )
     }
 
     #[test]
-    fn sampled_doesnt_shrink_below_min_size() {
+    fn sampled_doesnt_shrink_below_min_size() -> Result<(), TestFailure> {
         let input = u32::sampled(4..8, 10..20);
 
         let mut runner = TestRunner::default();
         for _ in 0..256 {
-            let mut value = input.new_tree(&mut runner).unwrap();
+            let mut value = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "sampled bit strategy generates a value tree",
+            )?;
             while value.simplify() {}
 
-            assert_eq!(4, value.current().count_ones());
+            ensure_eq(
+                &4,
+                &value.current().count_ones(),
+                "shrinking stops at the minimum bit count",
+            )?;
         }
+        Ok(())
     }
 
     #[test]
@@ -691,45 +759,57 @@ mod test {
     }
 
     #[test]
-    fn u128_generates_values_in_range() {
+    fn u128_generates_values_in_range() -> Result<(), TestFailure> {
         let input = u128::between(64, 128);
 
         let mut runner = TestRunner::default();
         for _ in 0..256 {
-            let value = input.new_tree(&mut runner).unwrap().current();
+            let value = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "u128 bit strategy generates a value tree",
+            )?
+            .current();
             // Only bits 64..128 should be set
-            assert!(
+            ensure(
                 0 == value & ((1u128 << 64) - 1),
-                "Generated value has low bits set: {}",
-                value
-            );
+                "the generated value has no low bits set",
+            )?;
         }
+        Ok(())
     }
 
     #[test]
-    fn u128_shrinks_to_zero() {
+    fn u128_shrinks_to_zero() -> Result<(), TestFailure> {
         let input = u128::between(64, 128);
 
         let mut runner = TestRunner::default();
         for _ in 0..256 {
-            let mut value = input.new_tree(&mut runner).unwrap();
+            let mut value = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "u128 bit strategy generates a value tree",
+            )?;
             while value.simplify() {}
-            assert_eq!(0, value.current());
+            ensure_eq(&0, &value.current(), "shrinking converges to zero")?;
         }
+        Ok(())
     }
 
     #[test]
-    fn i128_generates_values_in_mask() {
+    fn i128_generates_values_in_mask() -> Result<(), TestFailure> {
         let mut accum: i128 = 0;
         let mask: i128 = 0x0123_4567_89ab_cdef_0123_4567_89ab_cdef;
 
         let mut runner = TestRunner::deterministic();
         let input = i128::masked(mask);
         for _ in 0..1024 {
-            accum |= input.new_tree(&mut runner).unwrap().current();
+            accum |= ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "i128 masked strategy generates a value tree",
+            )?
+            .current();
         }
 
-        assert_eq!(mask, accum);
+        ensure_eq(&mask, &accum, "every masked bit is eventually generated")
     }
 
     #[test]

@@ -214,32 +214,46 @@ pub fn weighted<T: Strategy>(
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TestFailure, ensure, ensure_some};
+
     use super::*;
 
-    fn count_some_of_1000(s: OptionStrategy<Just<i32>>) -> u32 {
+    fn count_some_of_1000(
+        s: OptionStrategy<Just<i32>>,
+    ) -> Result<u32, TestFailure> {
         let mut runner = TestRunner::deterministic();
         let mut count = 0;
         for _ in 0..1000 {
-            count +=
-                s.new_tree(&mut runner).unwrap().current().is_some() as u32;
+            count += ensure_some(
+                s.new_tree(&mut runner).ok(),
+                "option strategy generates a value tree",
+            )?
+            .current()
+            .is_some() as u32;
         }
 
-        count
+        Ok(count)
     }
 
     #[test]
-    fn probability_defaults_to_0p5() {
-        let count = count_some_of_1000(of(Just(42i32)));
-        assert!(count > 450 && count < 550);
+    fn probability_defaults_to_0p5() -> Result<(), TestFailure> {
+        let count = count_some_of_1000(of(Just(42i32)))?;
+        ensure(
+            count > 450 && count < 550,
+            "roughly half of the samples are Some",
+        )
     }
 
     #[test]
-    fn probability_handled_correctly() {
-        let count = count_some_of_1000(weighted(0.9, Just(42i32)));
-        assert!(count > 800 && count < 950);
+    fn probability_handled_correctly() -> Result<(), TestFailure> {
+        let count = count_some_of_1000(weighted(0.9, Just(42i32)))?;
+        ensure(
+            count > 800 && count < 950,
+            "a 0.9 weight yields mostly Some",
+        )?;
 
-        let count = count_some_of_1000(weighted(0.1, Just(42i32)));
-        assert!(count > 50 && count < 150);
+        let count = count_some_of_1000(weighted(0.1, Just(42i32)))?;
+        ensure(count > 50 && count < 150, "a 0.1 weight yields mostly None")
     }
 
     #[test]

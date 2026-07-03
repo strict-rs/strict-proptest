@@ -13,7 +13,7 @@ Everything else lives under `src/property_test/` (its own `AGENTS.md`): a parse 
 ## Deps & testing
 
 - Built on `syn` (feature `full`), `quote`, `proc-macro2`, and `convert_case`.
-- Tested with **`insta` snapshot tests** (dev-deps `insta` + `prettyplease`, the latter pretty-printing the generated code into readable Rust for the snapshot):
+- Tested with **`insta` snapshot tests** (dev-deps `insta` + `prettyplease`, the latter pretty-printing the generated code into readable Rust for the snapshot, plus `strict-test-support` for the `ensure*` vocabulary the unit tests return through):
 
   ```sh
   cargo test -p proptest-macro

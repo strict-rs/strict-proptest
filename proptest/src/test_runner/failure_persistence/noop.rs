@@ -55,27 +55,41 @@ impl FailurePersistence for NoopFailurePersistence {
 mod tests {
     use super::*;
     use crate::test_runner::failure_persistence::tests::*;
+    use strict_test_support::{TestFailure, ensure, ensure_all};
 
     #[test]
-    fn default_load_is_empty() {
-        assert!(
+    fn default_load_is_empty() -> Result<(), TestFailure> {
+        ensure(
             NoopFailurePersistence
                 .load_persisted_failures2(None)
-                .is_empty()
-        );
-        assert!(
+                .is_empty(),
+            "the noop backend loads nothing without a source",
+        )?;
+        ensure(
             NoopFailurePersistence
                 .load_persisted_failures2(HI_PATH)
-                .is_empty()
-        );
+                .is_empty(),
+            "the noop backend loads nothing for a source",
+        )
     }
 
     #[test]
-    fn seeds_not_recoverable() {
+    fn seeds_not_recoverable() -> Result<(), TestFailure> {
         let mut p = NoopFailurePersistence;
         p.save_persisted_failure2(HI_PATH, INC_SEED, &"");
-        assert!(p.load_persisted_failures2(HI_PATH).is_empty());
-        assert!(p.load_persisted_failures2(None).is_empty());
-        assert!(p.load_persisted_failures2(UNREL_PATH).is_empty());
+        ensure_all(&[
+            (
+                p.load_persisted_failures2(HI_PATH).is_empty(),
+                "a saved seed is not recoverable for its source",
+            ),
+            (
+                p.load_persisted_failures2(None).is_empty(),
+                "nothing is recoverable without a source",
+            ),
+            (
+                p.load_persisted_failures2(UNREL_PATH).is_empty(),
+                "nothing is recoverable for an unrelated source",
+            ),
+        ])
     }
 }

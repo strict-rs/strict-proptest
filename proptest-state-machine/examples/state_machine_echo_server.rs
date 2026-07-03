@@ -233,8 +233,10 @@ impl StateMachineTest for EchoServerTest {
         match transition {
             Transition::StartServer => {
                 // Assign port dynamically
-                let (dialer, listener) =
-                    init_server(ref_state.transport, "127.0.0.1:0");
+                let (dialer, listener) = ensure_ok(
+                    init_server(ref_state.transport, "127.0.0.1:0"),
+                    "the server socket binds and listens",
+                )?;
 
                 // Run the listener in a new thread
                 let listener_handle =
@@ -288,8 +290,10 @@ impl StateMachineTest for EchoServerTest {
                 .dialer
                 .address;
 
-                let (listener, dialer) =
-                    init_client(ref_state.transport, server_addr);
+                let (listener, dialer) = ensure_ok(
+                    init_client(ref_state.transport, server_addr),
+                    "the client connects to the server address",
+                )?;
 
                 // Open a channel for receiving message from the listener, so
                 // that we can check the response the server.
@@ -409,20 +413,20 @@ mod system_under_test {
     pub fn init_server(
         transport: Transport,
         addr: impl ToSocketAddrs,
-    ) -> (ServerDialer, ServerListener) {
+    ) -> std::io::Result<(ServerDialer, ServerListener)> {
         let (handler, listener) = node::split::<()>();
 
         let (_resource_id, address) =
-            handler.network().listen(transport, addr).unwrap();
+            handler.network().listen(transport, addr)?;
         println!("Server is running at {address} with {transport}.");
 
-        (
+        Ok((
             ServerDialer {
                 address,
                 handler: handler.clone(),
             },
             ServerListener { listener, handler },
-        )
+        ))
     }
 
     pub fn run_server(listener: ServerListener) {
@@ -450,13 +454,13 @@ mod system_under_test {
     pub fn init_client(
         transport: Transport,
         remote_addr: impl ToRemoteAddr,
-    ) -> (ClientListener, ClientDialer) {
+    ) -> std::io::Result<(ClientListener, ClientDialer)> {
         let (handler, listener) = node::split();
         let (server, address) =
-            handler.network().connect(transport, remote_addr).unwrap();
+            handler.network().connect(transport, remote_addr)?;
 
         let is_connected = Arc::new(AtomicBool::new(false));
-        (
+        Ok((
             ClientListener {
                 address,
                 server,
@@ -469,7 +473,7 @@ mod system_under_test {
                 handler,
                 is_connected,
             },
-        )
+        ))
     }
 
     pub fn run_client(listener: ClientListener, mut on_msg: impl FnMut(Msg)) {

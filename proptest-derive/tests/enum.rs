@@ -6,8 +6,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use proptest::prelude::{Arbitrary, prop_assert, proptest};
+use proptest::prelude::{Arbitrary, any};
+use proptest::strict::{TestResult, ensure_property};
 use proptest_derive::Arbitrary;
+use strict_test_support::ensure;
 
 #[derive(Debug, Arbitrary)]
 enum T1 {
@@ -531,21 +533,37 @@ impl Nested {
     }
 }
 
-proptest! {
-    #[test]
-    fn generated_payload_fixtures_are_consumed(
-        alan: Alan,
-        same_type: SameType,
-        one_two: OneTwo,
-        zero_one_two: ZeroOneTwo,
-        nested: Nested,
-    ) {
-        prop_assert!(alan.payload_score() <= 6);
-        prop_assert!(same_type.payload_score() <= 2);
-        prop_assert!((1..=2).contains(&one_two.width()));
-        prop_assert!(zero_one_two.width() <= 2);
-        prop_assert!(nested.payload_score() <= 4);
-    }
+#[test]
+fn generated_payload_fixtures_are_consumed() -> TestResult {
+    ensure_property(
+        &(
+            any::<Alan>(),
+            any::<SameType>(),
+            any::<OneTwo>(),
+            any::<ZeroOneTwo>(),
+            any::<Nested>(),
+        ),
+        "derived enum payloads stay within their scoring bounds",
+        |(alan, same_type, one_two, zero_one_two, nested)| {
+            ensure(alan.payload_score() <= 6, "Alan's payloads stay bounded")?;
+            ensure(
+                same_type.payload_score() <= 2,
+                "SameType's payloads stay bounded",
+            )?;
+            ensure(
+                (1..=2).contains(&one_two.width()),
+                "OneTwo generates both variant widths",
+            )?;
+            ensure(
+                zero_one_two.width() <= 2,
+                "ZeroOneTwo's widths stay bounded",
+            )?;
+            ensure(
+                nested.payload_score() <= 4,
+                "Nested composes the inner scores",
+            )
+        },
+    )
 }
 
 #[test]

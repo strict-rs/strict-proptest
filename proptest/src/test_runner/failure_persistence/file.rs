@@ -409,6 +409,7 @@ static PERSISTENCE_LOCK: RwLock<()> = RwLock::new(());
 #[cfg(test)]
 mod tests {
     use super::*;
+    use strict_test_support::{TestFailure, ensure, ensure_some};
 
     struct TestPaths {
         crate_root: &'static Path,
@@ -434,66 +435,84 @@ mod tests {
         });
 
     #[test]
-    fn persistence_file_location_resolved_correctly() {
+    fn persistence_file_location_resolved_correctly() -> Result<(), TestFailure>
+    {
         // If off, there is never a file
-        assert_eq!(None, Off.resolve(None));
-        assert_eq!(None, Off.resolve(Some(&TEST_PATHS.subdir_file)));
+        ensure(Off.resolve(None).is_none(), "Off resolves no path")?;
+        ensure(
+            Off.resolve(Some(&TEST_PATHS.subdir_file)).is_none(),
+            "Off resolves no path even with a source file",
+        )?;
 
         // For direct, we don't care about the source file, and instead always
         // use whatever is in the config.
-        assert_eq!(
-            Some(Path::new("bar.txt").to_owned()),
+        ensure(
             Direct("bar.txt").resolve(None)
-        );
-        assert_eq!(
-            Some(Path::new("bar.txt").to_owned()),
+                == Some(Path::new("bar.txt").to_owned()),
+            "Direct uses the configured path without a source",
+        )?;
+        ensure(
             Direct("bar.txt").resolve(Some(&TEST_PATHS.subdir_file))
-        );
+                == Some(Path::new("bar.txt").to_owned()),
+            "Direct ignores the source file",
+        )?;
 
         // For WithSource, only the extension changes, but we get nothing if no
         // source file was configured.
         // Accounting for the way absolute paths work on Windows would be more
         // complex, so for now don't test that case.
         #[cfg(unix)]
-        fn absolute_path_case() {
-            assert_eq!(
-                Some(Path::new("/foo/bar.ext").to_owned()),
+        fn absolute_path_case() -> Result<(), TestFailure> {
+            ensure(
                 WithSource("ext").resolve(Some(Path::new("/foo/bar.rs")))
-            );
+                    == Some(Path::new("/foo/bar.ext").to_owned()),
+                "WithSource swaps only the extension",
+            )
         }
         #[cfg(not(unix))]
-        fn absolute_path_case() {}
-        absolute_path_case();
-        assert_eq!(None, WithSource("ext").resolve(None));
+        fn absolute_path_case() -> Result<(), TestFailure> {
+            Ok(())
+        }
+        absolute_path_case()?;
+        ensure(
+            WithSource("ext").resolve(None).is_none(),
+            "WithSource resolves no path without a source",
+        )?;
 
         // For SourceParallel, we make a sibling directory tree and change the
         // extensions to .txt ...
-        assert_eq!(
-            Some(TEST_PATHS.crate_root.join("sib").join("foo.txt")),
+        ensure(
             SourceParallel("sib").resolve(Some(&TEST_PATHS.src_file))
-        );
-        assert_eq!(
-            Some(
-                TEST_PATHS
-                    .crate_root
-                    .join("sib")
-                    .join("strategy")
-                    .join("foo.txt")
-            ),
+                == Some(TEST_PATHS.crate_root.join("sib").join("foo.txt")),
+            "SourceParallel mirrors a src file into the sibling tree",
+        )?;
+        ensure(
             SourceParallel("sib").resolve(Some(&TEST_PATHS.subdir_file))
-        );
+                == Some(
+                    TEST_PATHS
+                        .crate_root
+                        .join("sib")
+                        .join("strategy")
+                        .join("foo.txt"),
+                ),
+            "SourceParallel preserves the source-relative subtree",
+        )?;
         // ... but if we can't find lib.rs / main.rs, give up and set the
         // extension instead ...
-        assert_eq!(
-            Some(TEST_PATHS.crate_root.join("foo.sib")),
+        ensure(
             SourceParallel("sib").resolve(Some(&TEST_PATHS.misplaced_file))
-        );
+                == Some(TEST_PATHS.crate_root.join("foo.sib")),
+            "SourceParallel falls back to WithSource without a crate root",
+        )?;
         // ... and if no source is configured, we do nothing
-        assert_eq!(None, SourceParallel("ext").resolve(None));
+        ensure(
+            SourceParallel("ext").resolve(None).is_none(),
+            "SourceParallel resolves no path without a source",
+        )
     }
 
     #[test]
-    fn relative_source_files_absolutified() {
+    fn relative_source_files_absolutified() -> Result<(), TestFailure> {
         const TEST_RUNNER_PATH: &[&str] = &["src", "test_runner", "mod.rs"];
         static TEST_RUNNER_RELATIVE: std::sync::LazyLock<PathBuf> =
             std::sync::LazyLock::new(|| TEST_RUNNER_PATH.iter().collect());
@@ -504,23 +523,29 @@ mod tests {
             .collect::<PathBuf>();
 
         // Running from crate root
-        assert_eq!(
-            expected.as_path(),
+        let from_root = ensure_some(
             absolutize_source_file_with_cwd(
                 || Ok(Path::new(CARGO_DIR).to_owned()),
-                TEST_RUNNER_RELATIVE.as_path()
-            )
-            .unwrap()
-        );
+                TEST_RUNNER_RELATIVE.as_path(),
+            ),
+            "absolutizing from the crate root succeeds",
+        )?;
+        ensure(
+            expected.as_path() == from_root.as_ref(),
+            "the crate-root cwd absolutizes to the manifest path",
+        )?;
 
         // Running from test subdirectory
-        assert_eq!(
-            expected.as_path(),
+        let from_subdir = ensure_some(
             absolutize_source_file_with_cwd(
                 || Ok(Path::new(CARGO_DIR).join("target")),
-                TEST_RUNNER_RELATIVE.as_path()
-            )
-            .unwrap()
-        );
+                TEST_RUNNER_RELATIVE.as_path(),
+            ),
+            "absolutizing from a subdirectory succeeds",
+        )?;
+        ensure(
+            expected.as_path() == from_subdir.as_ref(),
+            "a subdirectory cwd pops up to the manifest path",
+        )
     }
 }

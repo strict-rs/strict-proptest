@@ -75,39 +75,60 @@ impl Parse for Options {
 
 #[cfg(test)]
 mod tests {
+    use strict_test_support::{
+        TestFailure, ensure, ensure_eq, ensure_ok, ensure_some,
+    };
     use syn::parse_str;
 
     use super::*;
 
     #[test]
-    fn simple_parse_example() {
+    fn simple_parse_example() -> Result<(), TestFailure> {
         let Options {
             errors,
             config,
             proptest_path,
-        } = parse_str("config = (), random = 123, proptest_path = ::foo::bar")
-            .unwrap();
+        } = ensure_ok(
+            parse_str("config = (), random = 123, proptest_path = ::foo::bar"),
+            "the attribute contents parse recoverably",
+        )?;
 
-        let proptest_path = proptest_path.unwrap();
+        let proptest_path =
+            ensure_some(proptest_path, "the proptest_path value is captured")?;
 
-        assert!(config.is_some());
-        assert_eq!(errors.len(), 1);
-        assert!(proptest_path.leading_colon.is_some());
-        assert_eq!(
-            proptest_path
-                .segments
-                .iter()
-                .map(|seg| seg.ident.to_string())
-                .collect::<Vec<_>>(),
-            vec!["foo", "bar"]
-        );
+        ensure(config.is_some(), "the config expression is captured")?;
+        ensure_eq(
+            &errors.len(),
+            &1_usize,
+            "the unknown key records one deferred error",
+        )?;
+        ensure(
+            proptest_path.leading_colon.is_some(),
+            "the path keeps its leading colons",
+        )?;
+        let segments = proptest_path
+            .segments
+            .iter()
+            .map(|seg| seg.ident.to_string())
+            .collect::<Vec<_>>()
+            .join("::");
+        ensure_eq(
+            &segments,
+            &"foo::bar".to_owned(),
+            "the path segments parse in order",
+        )
     }
+
     #[test]
-    fn invalid_proptest_path() {
-        let res =
-            parse_str::<Options>("proptest_path = actually::a::function()");
-        if res.is_err() {
-            panic!();
-        }
+    fn invalid_proptest_path() -> Result<(), TestFailure> {
+        let options = ensure_ok(
+            parse_str::<Options>("proptest_path = actually::a::function()"),
+            "an invalid proptest_path value stays a recoverable parse",
+        )?;
+        ensure_eq(
+            &options.errors.len(),
+            &1_usize,
+            "the invalid value records one deferred compile_error",
+        )
     }
 }

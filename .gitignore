@@ -5,7 +5,7 @@ Cargo.lock
 
 # VSCode:
 .vscode/
-persistence-test.txt
+persistence-test-*.txt
 
 # IntelliJ
 .idea

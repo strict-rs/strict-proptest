@@ -146,8 +146,13 @@ impl<T: ValueTree> ValueTree for Fuse<T> {
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TestFailure, ensure_all};
+
     use super::*;
 
+    // NOTE: the `assert!`s inside this fixture's `ValueTree` impl are the
+    // detection mechanism itself — `Fuse` exists to prevent the calls that
+    // would trip them, so tripping one means the guard under test failed.
     struct StrictValueTree {
         min: u32,
         curr: u32,
@@ -205,24 +210,28 @@ mod test {
     }
 
     #[test]
-    fn guards_bad_transitions() {
+    fn guards_bad_transitions() -> Result<(), TestFailure> {
         let mut vt = Fuse::new(StrictValueTree::new(5));
-        assert!(!vt.complicate());
-        assert_eq!(5, vt.current());
-
-        assert!(vt.simplify()); // 0, 4, 5
-        assert!(vt.simplify()); // 0, 3, 4
-        assert!(vt.simplify()); // 0, 2, 3
-        assert!(vt.simplify()); // 0, 1, 2
-        assert!(vt.simplify()); // 0, 0, 1
-        assert_eq!(0, vt.current());
-        assert!(!vt.simplify()); // 1, 0, 1
-        assert!(!vt.simplify()); // 1, 0, 1
-        assert_eq!(0, vt.current());
-        assert!(vt.complicate()); // 1, 1, 1
-        assert_eq!(1, vt.current());
-        assert!(!vt.complicate()); // 1, 1, 0
-        assert!(!vt.complicate()); // 1, 1, 0
-        assert_eq!(1, vt.current());
+        ensure_all(&[
+            (!vt.complicate(), "complicate before simplify is guarded"),
+            (5 == vt.current(), "the initial value is untouched"),
+            (vt.simplify(), "simplify steps down"), // 0, 4, 5
+            (vt.simplify(), "simplify steps down"), // 0, 3, 4
+            (vt.simplify(), "simplify steps down"), // 0, 2, 3
+            (vt.simplify(), "simplify steps down"), // 0, 1, 2
+            (vt.simplify(), "simplify steps down"), // 0, 0, 1
+            (0 == vt.current(), "simplification reached zero"),
+            (!vt.simplify(), "an exhausted tree cannot simplify"), // 1, 0, 1
+            (!vt.simplify(), "repeated simplify after false is guarded"), // 1, 0, 1
+            (0 == vt.current(), "the value is unchanged after guards"),
+            (vt.complicate(), "the tree complicates once"), // 1, 1, 1
+            (1 == vt.current(), "complicate stepped back up"),
+            (!vt.complicate(), "an exhausted tree cannot complicate"), // 1, 1, 0
+            (
+                !vt.complicate(),
+                "repeated complicate after false is guarded",
+            ), // 1, 1, 0
+            (1 == vt.current(), "the value is unchanged after guards"),
+        ])
     }
 }

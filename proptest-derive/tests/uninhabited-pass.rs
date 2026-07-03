@@ -8,8 +8,10 @@
 
 #![feature(never_type)]
 
-use proptest::prelude::{Arbitrary, prop_assert_eq, proptest};
+use proptest::prelude::{Arbitrary, any};
+use proptest::strict::{TestResult, ensure_property};
 use proptest_derive::Arbitrary;
+use strict_test_support::ensure;
 
 // Various arithmetic and basic things.
 #[allow(unreachable_code)]
@@ -31,11 +33,13 @@ enum Ty1 {
     V1,
 }
 
-proptest! {
-    #[test]
-    fn ty1_always_v1(v1: Ty1) {
-        prop_assert_eq!(v1, Ty1::V1);
-    }
+#[test]
+fn ty1_always_v1() -> TestResult {
+    ensure_property(
+        &any::<Ty1>(),
+        "every uninhabited-array variant is dropped from generation",
+        |v1| ensure(v1 == Ty1::V1, "only the inhabited variant appears"),
+    )
 }
 
 // Can't inspect type macros called as  mac!(uninhabited_type).
@@ -95,15 +99,17 @@ impl UsePrj1 {
     }
 }
 
-proptest! {
-    #[test]
-    fn associated_projection_fields_are_generated(
-        prj0: UsePrj0,
-        prj1: UsePrj1,
-    ) {
-        let _: u8 = prj0.projection();
-        let _: u8 = prj1.projection();
-    }
+#[test]
+fn associated_projection_fields_are_generated() -> TestResult {
+    ensure_property(
+        &(any::<UsePrj0>(), any::<UsePrj1>()),
+        "projection-hidden fields the derive cannot inspect still generate",
+        |(prj0, prj1)| {
+            let _: u8 = prj0.projection();
+            let _: u8 = prj1.projection();
+            Ok(())
+        },
+    )
 }
 
 #[test]

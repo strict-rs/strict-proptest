@@ -188,10 +188,12 @@ where
 mod test {
     use crate::std_facade::BTreeSet;
 
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
+
     use super::*;
 
     #[test]
-    fn sample_range() {
+    fn sample_range() -> Result<(), TestFailure> {
         static INDICES: Range<usize> = 0..8;
         let mut size_counts: [usize; 8] = [0; 8];
         let mut value_counts: [usize; 8] = [0; 8];
@@ -200,15 +202,22 @@ mod test {
         let input = range_subset(INDICES.clone(), 3..7);
 
         for _ in 0..2048 {
-            let value = input.new_tree(&mut runner).unwrap().current();
+            let value = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "range_subset generates a value tree",
+            )?
+            .current();
             // Generated the correct number of items
-            assert!((3..7).contains(&value.len()));
+            ensure(
+                (3..7).contains(&value.len()),
+                "the subset length stays within the requested size range",
+            )?;
             // Chose distinct items
-            assert_eq!(
-                value.len(),
-                value.iter().cloned().collect::<BTreeSet<_>>().len(),
-                "output contains non-distinct items ({value:?})"
-            );
+            ensure_eq(
+                &value.len(),
+                &value.iter().cloned().collect::<BTreeSet<_>>().len(),
+                "the subset contains only distinct items",
+            )?;
 
             size_counts[value.len()] += 1;
 
@@ -217,23 +226,21 @@ mod test {
             }
         }
 
-        for (i, count) in size_counts.iter().enumerate().take(7).skip(3) {
-            assert!(
+        for count in size_counts.iter().take(7).skip(3) {
+            ensure(
                 (256..1024).contains(count),
-                "size {} was chosen {} times",
-                i,
-                count
-            );
+                "each size in the requested range is chosen a plausible \
+                 number of times",
+            )?;
         }
 
-        for (ix, &v) in value_counts.iter().enumerate() {
-            assert!(
+        for &v in value_counts.iter() {
+            ensure(
                 (1024..1500).contains(&v),
-                "Value {} was chosen {} times",
-                ix,
-                v
-            );
+                "each index is chosen a plausible number of times",
+            )?;
         }
+        Ok(())
     }
 
     #[test]
@@ -242,22 +249,34 @@ mod test {
     }
 
     #[test]
-    fn subset_empty_range_works() {
+    fn subset_empty_range_works() -> Result<(), TestFailure> {
         let mut runner = TestRunner::deterministic();
         let input = range_subset(0..0, 0..1);
-        assert_eq!(
-            Vec::<usize>::new(),
-            input.new_tree(&mut runner).unwrap().current()
-        );
+        ensure(
+            Vec::<usize>::new()
+                == ensure_some(
+                    input.new_tree(&mut runner).ok(),
+                    "range_subset generates a value tree",
+                )?
+                .current(),
+            "an empty index range yields the empty subset",
+        )
     }
 
     #[test]
-    fn subset_full_range_works() {
+    fn subset_full_range_works() -> Result<(), TestFailure> {
         let range = 1..4;
         let mut runner = TestRunner::deterministic();
         let input = range_subset(range.clone(), 3);
-        let mut values = input.new_tree(&mut runner).unwrap().current();
+        let mut values = ensure_some(
+            input.new_tree(&mut runner).ok(),
+            "range_subset generates a value tree",
+        )?
+        .current();
         values.sort();
-        assert_eq!(Vec::<usize>::from_iter(range), values);
+        ensure(
+            Vec::<usize>::from_iter(range) == values,
+            "a full-width subset covers the whole range",
+        )
     }
 }

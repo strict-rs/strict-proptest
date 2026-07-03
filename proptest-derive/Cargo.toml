@@ -20,6 +20,7 @@ proc-macro = true
 
 [dev-dependencies]
 proptest = { workspace = true }
+strict-test-support = { workspace = true }
 # We don't actually run the tests on stable since some of them use nightly
 # features. However, due to
 # https://github.com/laumann/compiletest-rs/issues/166, the default features of

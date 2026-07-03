@@ -320,46 +320,73 @@ mod test {
     use std::cmp::{max, min};
     use std::vec::Vec;
 
+    use strict_test_support::{TestFailure, ensure, ensure_some};
+
     use super::*;
     use crate::collection;
 
-    proptest! {
-        #[test]
-        fn stays_in_range(input_ranges in collection::vec(
-            (0..char::MAX as u32,
-             0..char::MAX as u32),
-            1..5))
-        {
-            let input = ranges(Cow::Owned(input_ranges.iter().map(
-                |&(lo, hi)| ::std::char::from_u32(lo).and_then(
-                    |lo| ::std::char::from_u32(hi).map(
-                        |hi| min(lo, hi) ..= max(lo, hi)))
-                    .ok_or_else(|| TestCaseError::reject("non-char")))
-                                          .collect::<Result<Vec<CharRange>,_>>()?));
+    #[test]
+    fn stays_in_range() -> Result<(), TestFailure> {
+        // The non-char pairs are filtered out in the strategy (the legacy
+        // test rejected them from inside the test body instead).
+        let valid_range_pairs = Strategy::prop_filter_map(
+            collection::vec((0..char::MAX as u32, 0..char::MAX as u32), 1..5),
+            "pair does not describe a char range",
+            |pairs| {
+                pairs
+                    .iter()
+                    .map(|&(lo, hi)| {
+                        ::std::char::from_u32(lo).and_then(|lo| {
+                            ::std::char::from_u32(hi)
+                                .map(|hi| min(lo, hi)..=max(lo, hi))
+                        })
+                    })
+                    .collect::<Option<Vec<CharRange>>>()
+                    .map(|char_ranges| (pairs, char_ranges))
+            },
+        );
+        crate::strict::ensure_property(
+            &valid_range_pairs,
+            "generated chars stay within the requested ranges",
+            |(input_ranges, char_ranges)| {
+                let input = ranges(Cow::Owned(char_ranges));
+                let mut runner = TestRunner::default();
+                for _ in 0..256 {
+                    let mut value = ensure_some(
+                        input.new_tree(&mut runner).ok(),
+                        "char strategy generates a value tree",
+                    )?;
+                    loop {
+                        let ch = value.current() as u32;
+                        ensure(
+                            input_ranges.iter().any(|&(lo, hi)| {
+                                ch >= min(lo, hi) && ch <= max(lo, hi)
+                            }),
+                            "generated char lies in one of the input ranges",
+                        )?;
 
-            let mut runner = TestRunner::default();
-            for _ in 0..256 {
-                let mut value = input.new_tree(&mut runner).unwrap();
-                loop {
-                    let ch = value.current() as u32;
-                    assert!(input_ranges.iter().any(
-                        |&(lo, hi)| ch >= min(lo, hi) &&
-                            ch <= max(lo, hi)));
-
-                    if !value.simplify() { break; }
+                        if !value.simplify() {
+                            break;
+                        }
+                    }
                 }
-            }
-        }
+                Ok(())
+            },
+        )
     }
 
     #[test]
-    fn applies_desired_bias() {
+    fn applies_desired_bias() -> Result<(), TestFailure> {
         let mut men_in_business_suits_levitating = 0;
         let mut ascii_printable = 0;
         let mut runner = TestRunner::deterministic();
 
         for _ in 0..1024 {
-            let ch = any().new_tree(&mut runner).unwrap().current();
+            let ch = ensure_some(
+                any().new_tree(&mut runner).ok(),
+                "char strategy generates a value tree",
+            )?
+            .current();
             if '🕴' == ch {
                 men_in_business_suits_levitating += 1;
             } else if (' '..='~').contains(&ch) {
@@ -367,17 +394,26 @@ mod test {
             }
         }
 
-        assert!(ascii_printable >= 256);
-        assert!(men_in_business_suits_levitating >= 1);
+        ensure(
+            ascii_printable >= 256,
+            "the bias favors ASCII printable chars",
+        )?;
+        ensure(
+            men_in_business_suits_levitating >= 1,
+            "the special-char bias emits the levitating man",
+        )
     }
 
     #[test]
-    fn doesnt_shrink_to_ascii_control() {
+    fn doesnt_shrink_to_ascii_control() -> Result<(), TestFailure> {
         let mut accepted = 0;
         let mut runner = TestRunner::deterministic();
 
         for _ in 0..256 {
-            let mut value = any().new_tree(&mut runner).unwrap();
+            let mut value = ensure_some(
+                any().new_tree(&mut runner).ok(),
+                "char strategy generates a value tree",
+            )?;
 
             if value.current() <= ' ' {
                 continue;
@@ -385,11 +421,14 @@ mod test {
 
             while value.simplify() {}
 
-            assert!(value.current() >= ' ');
+            ensure(
+                value.current() >= ' ',
+                "shrinking never lands on an ASCII control char",
+            )?;
             accepted += 1;
         }
 
-        assert!(accepted >= 200);
+        ensure(accepted >= 200, "enough shrink runs were accepted")
     }
 
     #[test]

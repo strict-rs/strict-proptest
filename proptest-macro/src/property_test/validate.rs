@@ -121,12 +121,15 @@ fn err(span: impl Spanned, s: &str) -> Result<(), TokenStream> {
 
 #[cfg(test)]
 mod tests {
+    use strict_test_support::{
+        TestFailure, ensure, ensure_contains, ensure_some,
+    };
     use syn::parse_quote;
 
     use super::*;
 
     #[test]
-    fn validate_fails_with_self_arg() {
+    fn validate_fails_with_self_arg() -> Result<(), TestFailure> {
         let invalids = [
             parse_quote! {fn foo(self) {}},
             parse_quote! {fn foo(&self) {}},
@@ -140,51 +143,88 @@ mod tests {
         ];
 
         for mut invalid in invalids {
-            assert!(validate(&mut invalid).is_err());
+            ensure(
+                validate(&mut invalid).is_err(),
+                "every self-receiver form is rejected",
+            )?;
         }
+        Ok(())
     }
 
     #[test]
-    fn validate_fails_with_duplicate() {
+    fn validate_fails_with_duplicate() -> Result<(), TestFailure> {
         let mut function = parse_quote! {
             fn foo(#[strategy = 1] #[strategy = 2] x: i32) {}
         };
 
-        let error = validate(&mut function).unwrap_err();
-        assert!(error.to_string().contains("compile_error"));
+        let error = ensure_some(
+            validate(&mut function).err(),
+            "duplicate strategy attributes are rejected",
+        )?;
+        ensure_contains(
+            &error.to_string(),
+            "compile_error",
+            "the duplicate rejection emits a compile_error",
+        )
     }
 
     #[test]
-    fn validate_accepts_result_returning_fn() {
+    fn validate_accepts_result_returning_fn() -> Result<(), TestFailure> {
         let mut valid: syn::ItemFn = parse_quote! {
             fn foo(x: i32) -> proptest::strict::TestResult {
                 Ok(())
             }
         };
-        assert!(validate(&mut valid).is_ok());
+        ensure(
+            validate(&mut valid).is_ok(),
+            "a TestResult-returning fn is accepted",
+        )?;
 
         let mut spelled_out: syn::ItemFn = parse_quote! {
             fn foo(x: i32) -> Result<(), TestFailure> {
                 Ok(())
             }
         };
-        assert!(validate(&mut spelled_out).is_ok());
+        ensure(
+            validate(&mut spelled_out).is_ok(),
+            "a spelled-out Result-returning fn is accepted",
+        )
+    }
+
+    /// Check one unit-returning fixture: validate must reject it with a
+    /// `compile_error` naming the strict return type.
+    fn ensure_unit_fixture_rejected(
+        mut fixture: syn::ItemFn,
+        rejection_context: &'static str,
+    ) -> Result<(), TestFailure> {
+        let error =
+            ensure_some(validate(&mut fixture).err(), rejection_context)?;
+        let rendered = error.to_string();
+        ensure_contains(
+            &rendered,
+            "compile_error",
+            "the unit rejection emits a compile_error",
+        )?;
+        ensure_contains(
+            &rendered,
+            "proptest::strict::TestResult",
+            "the unit rejection names the strict return type",
+        )
     }
 
     #[test]
-    fn validate_rejects_unit_returning_fn() {
-        let mut implicit_unit: syn::ItemFn = parse_quote! {
-            fn foo(x: i32) {}
-        };
-        let error = validate(&mut implicit_unit).unwrap_err();
-        assert!(error.to_string().contains("compile_error"));
-        assert!(error.to_string().contains("proptest::strict::TestResult"));
-
-        let mut explicit_unit: syn::ItemFn = parse_quote! {
-            fn foo(x: i32) -> () {}
-        };
-        let error = validate(&mut explicit_unit).unwrap_err();
-        assert!(error.to_string().contains("compile_error"));
-        assert!(error.to_string().contains("proptest::strict::TestResult"));
+    fn validate_rejects_unit_returning_fn() -> Result<(), TestFailure> {
+        ensure_unit_fixture_rejected(
+            parse_quote! {
+                fn foo(x: i32) {}
+            },
+            "an implicit unit return is rejected",
+        )?;
+        ensure_unit_fixture_rejected(
+            parse_quote! {
+                fn foo(x: i32) -> () {}
+            },
+            "an explicit unit return is rejected",
+        )
     }
 }

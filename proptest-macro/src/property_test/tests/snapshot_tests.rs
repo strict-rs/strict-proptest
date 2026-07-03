@@ -1,3 +1,4 @@
+use strict_test_support::{TestFailure, ensure_ok};
 use syn::parse_quote;
 
 use crate::property_test::{codegen, options::Options};
@@ -11,13 +12,17 @@ use crate::property_test::{codegen, options::Options};
 macro_rules! snapshot_test {
     ($name:ident {$($t:tt)*}) => {
         #[test]
-        fn $name() {
+        fn $name() -> Result<(), TestFailure> {
             let input = parse_quote! { $($t)* };
             let tokens = codegen::generate(input, Options::default());
-            let file = syn::parse_file(&tokens.to_string()).unwrap();
+            let file = ensure_ok(
+                syn::parse_file(&tokens.to_string()),
+                "generated code parses as a file",
+            )?;
             let formatted = prettyplease::unparse(&file);
 
             insta::assert_snapshot!(formatted);
+            Ok(())
         }
     };
 }

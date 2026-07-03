@@ -6,10 +6,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use proptest::prelude::{
-    Arbitrary, any_with, prop_assert, prop_assert_eq, proptest,
-};
+use proptest::prelude::{Arbitrary, any_with};
+use proptest::strict::{TestResult, ensure_property};
 use proptest_derive::Arbitrary;
+use strict_test_support::{ensure, ensure_eq, ensure_some};
 
 struct ComplexType {
     max: u64,
@@ -69,44 +69,97 @@ struct Parallel2 {
 
 const MAX: ComplexType = ComplexType { max: 5 };
 
-proptest! {
-    #[test]
-    fn top_has_params(v in any_with::<TopHasParams>(MAX)) {
-        prop_assert!(v.int < 5);
-    }
+#[test]
+fn top_has_params() -> TestResult {
+    ensure_property(
+        &any_with::<TopHasParams>(MAX),
+        "container params thread into the field strategy",
+        |v| ensure(v.int < 5, "int stays below the params max"),
+    )
+}
 
-    #[test]
-    fn top_no_params(_ in any_with::<TopNoParams>(())) {}
+#[test]
+fn top_no_params() -> TestResult {
+    ensure_property(
+        &any_with::<TopNoParams>(()),
+        "a no_params container generates under unit params",
+        |_| Ok(()),
+    )
+}
 
-    #[test]
-    fn inner_params(inner in any_with::<InnerNoParams>("\\s+".into())) {
-        prop_assert!(inner.has.int < 10);
-        prop_assert!(inner.string.trim().is_empty());
-    }
+#[test]
+fn inner_params() -> TestResult {
+    ensure_property(
+        &any_with::<InnerNoParams>("\\s+".into()),
+        "an inner no_params field keeps its own defaults",
+        |inner| {
+            ensure(
+                inner.has.int < 10,
+                "the no_params field keeps its default bound",
+            )?;
+            ensure(
+                inner.string.trim().is_empty(),
+                "the outer string obeys the whitespace regex param",
+            )
+        },
+    )
+}
 
-    #[test]
-    fn top_param_inner_strat(inner in any_with::<Tpis>(6)) {
-        prop_assert!(inner.int <= 6);
-        prop_assert!(inner.int >= 3);
-        prop_assert_eq!(
-            0,
-            inner.string.split("a").filter(|s| !s.is_empty()).count()
-        );
-    }
+#[test]
+fn top_param_inner_strat() -> TestResult {
+    ensure_property(
+        &any_with::<Tpis>(6),
+        "container params reach a range field strategy",
+        |inner| {
+            ensure(inner.int <= 6, "int stays at or below the param")?;
+            ensure(inner.int >= 3, "int stays at or above the range start")?;
+            ensure_eq(
+                &0,
+                &inner.string.split("a").filter(|s| !s.is_empty()).count(),
+                "the string field is made of a's only",
+            )
+        },
+    )
+}
 
-    #[test]
-    fn parallel_params(inner in any_with::<Parallel>(("[0-9]", 3))) {
-        prop_assert!(inner.int >= 0);
-        prop_assert!(inner.int < 3);
-        prop_assert!(inner.string.chars().next().unwrap().is_ascii_digit());
-    }
+#[test]
+fn parallel_params() -> TestResult {
+    ensure_property(
+        &any_with::<Parallel>(("[0-9]", 3)),
+        "parallel per-field params drive each field",
+        |inner| {
+            ensure(inner.int >= 0, "int stays at or above zero")?;
+            ensure(inner.int < 3, "int stays below the u8 param")?;
+            let first = ensure_some(
+                inner.string.chars().next(),
+                "the regex-driven string is non-empty",
+            )?;
+            ensure(
+                first.is_ascii_digit(),
+                "the regex-driven string starts with a digit",
+            )
+        },
+    )
+}
 
-    #[test]
-    fn parallel_params2(inner in any_with::<Parallel>(("[0-9]", 3))) {
-        prop_assert!(inner.int >= 0);
-        prop_assert!(inner.int < 3);
-        prop_assert!(inner.string.chars().next().unwrap().is_ascii_digit());
-    }
+#[test]
+fn parallel_params2() -> TestResult {
+    ensure_property(
+        &any_with::<Parallel>(("[0-9]", 3)),
+        "parallel per-field params drive each field in the string spelling",
+        |inner| {
+            ensure(inner.int >= 0, "int stays at or above zero")?;
+            ensure(inner.int < 3, "int stays below the u8 param")?;
+            let first = ensure_some(
+                inner.string.chars().next(),
+                "the regex-driven string is non-empty",
+            )?;
+            ensure(
+                first.is_ascii_digit(),
+                "the regex-driven string starts with a digit",
+            )
+        },
+    )
 }
 
 #[test]

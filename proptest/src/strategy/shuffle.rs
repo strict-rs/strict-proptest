@@ -211,6 +211,8 @@ mod test {
     use std::borrow::ToOwned;
     use std::collections::HashSet;
 
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
+
     use super::*;
     use crate::collection;
     use crate::strategy::just::Just;
@@ -220,33 +222,43 @@ mod test {
     ];
 
     #[test]
-    fn generates_different_permutations() {
+    fn generates_different_permutations() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
         let mut seen = HashSet::<Vec<i32>>::new();
 
         let input = Just(VALUES.to_owned()).prop_shuffle();
 
         for _ in 0..1024 {
-            let mut value = input.new_tree(&mut runner).unwrap().current();
+            let mut value = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "shuffle strategy generates a value tree",
+            )?
+            .current();
 
-            assert!(
+            ensure(
                 seen.insert(value.clone()),
-                "Value {:?} generated more than once",
-                value
-            );
+                "no permutation is generated twice",
+            )?;
 
             value.sort();
-            assert_eq!(VALUES, &value[..]);
+            ensure(
+                VALUES == &value[..],
+                "every permutation keeps the original elements",
+            )?;
         }
+        Ok(())
     }
 
     #[test]
-    fn simplify_reduces_shuffle_amount() {
+    fn simplify_reduces_shuffle_amount() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
 
         let input = Just(VALUES.to_owned()).prop_shuffle();
         for _ in 0..1024 {
-            let mut value = input.new_tree(&mut runner).unwrap();
+            let mut value = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "shuffle strategy generates a value tree",
+            )?;
 
             let mut prev_dist = i32::MAX;
             loop {
@@ -258,12 +270,10 @@ mod test {
                     dist += (nominal - ix as i32).abs();
                 }
 
-                assert!(
+                ensure(
                     dist <= prev_dist,
-                    "dist = {}, prev_dist = {}",
-                    dist,
-                    prev_dist
-                );
+                    "each simplify step reduces the shuffle distance",
+                )?;
 
                 prev_dist = dist;
                 if !value.simplify() {
@@ -272,8 +282,13 @@ mod test {
             }
 
             // When fully simplified, the result is in the original order.
-            assert_eq!(0, prev_dist);
+            ensure_eq(
+                &0,
+                &prev_dist,
+                "full simplification restores the original order",
+            )?;
         }
+        Ok(())
     }
 
     #[test]

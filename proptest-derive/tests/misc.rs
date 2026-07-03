@@ -6,11 +6,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use proptest::prelude::{
-    Arbitrary, any_with, prop_assert, prop_assert_eq, proptest,
-};
+use proptest::prelude::{Arbitrary, any, any_with};
 use proptest::strategy::Just;
+use proptest::strict::{TestResult, ensure_property};
 use proptest_derive::Arbitrary;
+use strict_test_support::{ensure, ensure_eq};
 
 // TODO: An idea.
 /*
@@ -113,48 +113,76 @@ impl Quux {
     }
 }
 
-proptest! {
-    #[test]
-    fn foo_value_constructor_sets_payload(value: Foo) {
-        prop_assert_eq!(value.payload(), (1, 1));
-    }
+#[test]
+fn foo_value_constructor_sets_payload() -> TestResult {
+    ensure_property(
+        &any::<Foo>(),
+        "a variant value constructor pins the payload",
+        |value| {
+            let (left, right) = value.payload();
+            ensure_eq(&left, &1, "the left payload is pinned")?;
+            ensure_eq(&right, &1, "the right payload is pinned")
+        },
+    )
+}
 
-    #[test]
-    fn a_custom_strategy_sets_c_payload(value in any_with::<A>(0usize)) {
-        if let Some(payload) = value.payload() {
-            prop_assert_eq!(payload, 1);
-        }
-    }
+#[test]
+fn a_custom_strategy_sets_c_payload() -> TestResult {
+    ensure_property(
+        &any_with::<A>(0usize),
+        "a variant strategy pins the C payload",
+        |value| {
+            if let Some(payload) = value.payload() {
+                ensure_eq(&payload, &1, "the strategy-built payload is one")?;
+            }
+            Ok(())
+        },
+    )
+}
 
-    #[test]
-    fn bobby_attributes_keep_payloads_reachable(value: Bobby) {
-        match &value {
+#[test]
+fn bobby_attributes_keep_payloads_reachable() -> TestResult {
+    ensure_property(
+        &any::<Bobby>(),
+        "per-variant params spellings keep payloads reachable",
+        |value| match &value {
             Bobby::B(_) => {
                 let _ = value.payload();
+                Ok(())
             }
             Bobby::C(_) | Bobby::D(_) | Bobby::E(_) | Bobby::F(_) => {
-                prop_assert_eq!(value.payload(), 1);
+                ensure_eq(&value.payload(), &1, "the pinned payload is one")
             }
-        }
-    }
+        },
+    )
+}
 
-    #[test]
-    fn quux_attributes_keep_payloads_reachable(value: Quux) {
-        match &value {
+#[test]
+fn quux_attributes_keep_payloads_reachable() -> TestResult {
+    ensure_property(
+        &any::<Quux>(),
+        "mixed variant attributes keep payload scores reachable",
+        |value| match &value {
             Quux::B(_) | Quux::C(_, _) => {
                 let _ = value.payload_score();
+                Ok(())
             }
-            Quux::D(_, _) => {
-                prop_assert_eq!(value.payload_score(), 3);
-            }
-            Quux::E(_) => {
-                prop_assert_eq!(value.payload_score(), 1337);
-            }
-            Quux::F { _foo } => {
-                prop_assert!((10..20).contains(_foo));
-            }
-        }
-    }
+            Quux::D(_, _) => ensure_eq(
+                &value.payload_score(),
+                &3,
+                "the value variant scores three",
+            ),
+            Quux::E(_) => ensure_eq(
+                &value.payload_score(),
+                &1337,
+                "the strategy variant scores 1337",
+            ),
+            Quux::F { _foo } => ensure(
+                (10..20).contains(_foo),
+                "the range strategy stays in bounds",
+            ),
+        },
+    )
 }
 
 #[test]

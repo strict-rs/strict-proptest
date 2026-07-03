@@ -9,6 +9,8 @@
 #[macro_use]
 extern crate proptest_derive;
 use proptest::prelude::*;
+use proptest::strict::{TestResult, ensure_property};
+use strict_test_support::{ensure, ensure_eq};
 
 #[derive(Debug, Arbitrary)]
 enum T0 {
@@ -60,44 +62,80 @@ fn asserting_arbitrary() {
     assert_arbitrary::<T5>();
 }
 
-proptest! {
-    #[test]
-    fn t0_test(v in any_with::<T0>(4)) {
-        let T0::V0(x) = v;
-        assert_eq!(x, 2);
-    }
+#[test]
+fn t0_test() -> TestResult {
+    ensure_property(
+        &any_with::<T0>(4),
+        "a tuple-variant value expression reads params",
+        |v| {
+            let T0::V0(x) = v;
+            ensure_eq(&x, &2, "the value expression halves the param")
+        },
+    )
+}
 
-    #[test]
-    fn t1_test(v in any_with::<T1>(4)) {
-        let T1::V0 { field: x } = v;
-        assert_eq!(x, 8);
-    }
+#[test]
+fn t1_test() -> TestResult {
+    ensure_property(
+        &any_with::<T1>(4),
+        "a struct-variant value expression reads params",
+        |v| {
+            let T1::V0 { field: x } = v;
+            ensure_eq(&x, &8, "the value expression doubles the param")
+        },
+    )
+}
 
-    #[test]
-    fn t2_test_true(v in any_with::<T2>(4)) {
-        let T2::V0(x) = v;
-        assert!(x);
-    }
+#[test]
+fn t2_test_true() -> TestResult {
+    ensure_property(
+        &any_with::<T2>(4),
+        "a field value expression sees a power-of-two param",
+        |v| {
+            let T2::V0(x) = v;
+            ensure(x, "the power-of-two check holds for four")
+        },
+    )
+}
 
-    #[test]
-    fn t2_test_false(v in any_with::<T2>(10)) {
-        let T2::V0(x) = v;
-        assert!(!x);
-    }
+#[test]
+fn t2_test_false() -> TestResult {
+    ensure_property(
+        &any_with::<T2>(10),
+        "a field value expression sees a non-power-of-two param",
+        |v| {
+            let T2::V0(x) = v;
+            ensure(!x, "the power-of-two check fails for ten")
+        },
+    )
+}
 
-    #[test]
-    fn t3_test(v in any_with::<T3>(4)) {
-        let T3::V0 { field: x } = v;
-        assert_eq!(x, 16);
-    }
+#[test]
+fn t3_test() -> TestResult {
+    ensure_property(
+        &any_with::<T3>(4),
+        "a struct-variant field value expression squares params",
+        |v| {
+            let T3::V0 { field: x } = v;
+            ensure_eq(&x, &16, "the value expression squares the param")
+        },
+    )
+}
 
-    #[test]
-    fn t4_test(v in any_with::<T4>(4)) {
-        assert_eq!(v.field, 1);
-    }
+#[test]
+fn t4_test() -> TestResult {
+    ensure_property(
+        &any_with::<T4>(4),
+        "a struct field value expression subtracts from params",
+        |v| ensure_eq(&v.field, &1, "the value expression subtracts three"),
+    )
+}
 
-    #[test]
-    fn t5_test(v in any_with::<T5>(4)) {
-        assert_eq!(v.0, 5);
-    }
+#[test]
+fn t5_test() -> TestResult {
+    ensure_property(
+        &any_with::<T5>(4),
+        "a fn-call value expression receives params",
+        |v| ensure_eq(&v.0, &5, "the fn-call value adds one"),
+    )
 }

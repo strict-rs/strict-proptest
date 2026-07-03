@@ -117,6 +117,8 @@ impl ValueTree for BoolValueTree {
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TestFailure, ensure_all};
+
     use super::*;
 
     #[test]
@@ -125,20 +127,27 @@ mod test {
     }
 
     #[test]
-    fn shrinks_properly() {
+    fn shrinks_properly() -> Result<(), TestFailure> {
         let mut tree = BoolValueTree::new(true);
-        assert!(tree.simplify());
-        assert!(!tree.current());
-        assert!(!tree.clone().simplify());
-        assert!(tree.complicate());
-        assert!(!tree.clone().complicate());
-        assert!(tree.current());
-        assert!(!tree.simplify());
-        assert!(tree.current());
+        ensure_all(&[
+            (tree.simplify(), "true simplifies once"),
+            (!tree.current(), "simplified tree reads false"),
+            (!tree.clone().simplify(), "simplified tree cannot simplify"),
+            (tree.complicate(), "simplified tree complicates back"),
+            (
+                !tree.clone().complicate(),
+                "complicated tree cannot complicate again",
+            ),
+            (tree.current(), "complicated tree reads true"),
+            (!tree.simplify(), "complicated tree cannot simplify"),
+            (tree.current(), "tree still reads true"),
+        ])?;
 
         tree = BoolValueTree::new(false);
-        assert!(!tree.clone().simplify());
-        assert!(!tree.clone().complicate());
-        assert!(!tree.current());
+        ensure_all(&[
+            (!tree.clone().simplify(), "false cannot simplify"),
+            (!tree.clone().complicate(), "false cannot complicate"),
+            (!tree.current(), "false tree reads false"),
+        ])
     }
 }

@@ -68,34 +68,44 @@ impl FailurePersistence for MapFailurePersistence {
 mod tests {
     use super::*;
     use crate::test_runner::failure_persistence::tests::*;
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
 
     #[test]
-    fn initial_map_is_empty() {
-        assert!(
+    fn initial_map_is_empty() -> Result<(), TestFailure> {
+        ensure(
             MapFailurePersistence::default()
                 .load_persisted_failures2(HI_PATH)
-                .is_empty()
+                .is_empty(),
+            "a fresh map has no persisted failures",
         )
     }
 
     #[test]
-    fn seeds_recoverable() {
+    fn seeds_recoverable() -> Result<(), TestFailure> {
         let mut p = MapFailurePersistence::default();
         p.save_persisted_failure2(HI_PATH, INC_SEED, &"");
         let restored = p.load_persisted_failures2(HI_PATH);
-        assert_eq!(1, restored.len());
-        assert_eq!(INC_SEED, *restored.first().unwrap());
+        ensure_eq(&1, &restored.len(), "one saved seed is restored")?;
+        let first =
+            ensure_some(restored.first(), "the restored list has a head")?;
+        ensure(INC_SEED == *first, "the restored seed equals the saved one")?;
 
-        assert!(p.load_persisted_failures2(None).is_empty());
-        assert!(p.load_persisted_failures2(UNREL_PATH).is_empty());
+        ensure(
+            p.load_persisted_failures2(None).is_empty(),
+            "a missing source restores nothing",
+        )?;
+        ensure(
+            p.load_persisted_failures2(UNREL_PATH).is_empty(),
+            "an unrelated source restores nothing",
+        )
     }
 
     #[test]
-    fn seeds_deduplicated() {
+    fn seeds_deduplicated() -> Result<(), TestFailure> {
         let mut p = MapFailurePersistence::default();
         p.save_persisted_failure2(HI_PATH, INC_SEED, &"");
         p.save_persisted_failure2(HI_PATH, INC_SEED, &"");
         let restored = p.load_persisted_failures2(HI_PATH);
-        assert_eq!(1, restored.len());
+        ensure_eq(&1, &restored.len(), "identical seeds are deduplicated")
     }
 }

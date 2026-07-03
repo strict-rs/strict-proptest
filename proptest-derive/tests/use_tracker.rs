@@ -10,6 +10,7 @@ use std::marker::PhantomData;
 
 use proptest::prelude::Arbitrary;
 use proptest_derive::Arbitrary;
+use strict_test_support::{TestFailure, ensure};
 
 #[derive(Debug)]
 struct NotArbitrary;
@@ -29,14 +30,18 @@ impl<V, T, U> Foo<V, T, U> {
 }
 
 #[test]
-fn foo_fields_are_available_without_u_arbitrary_bound() {
+fn foo_fields_are_available_without_u_arbitrary_bound()
+-> Result<(), TestFailure> {
     let foo = Foo {
         v: 1,
         t: 2,
         u: PhantomData::<NotArbitrary>,
     };
 
-    assert_eq!(foo.into_parts(), (1, 2));
+    ensure(
+        foo.into_parts() == (1, 2),
+        "the non-phantom fields round-trip without a bound on U",
+    )
 }
 
 #[test]

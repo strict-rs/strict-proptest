@@ -261,13 +261,15 @@ impl<S: Strategy, R: Strategy, F: Fn(S::Value) -> R> Strategy
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TestFailure, ensure, ensure_some};
+
     use super::*;
 
     use crate::strategy::just::Just;
     use crate::test_runner::Config;
 
     #[test]
-    fn test_flat_map() {
+    fn test_flat_map() -> Result<(), TestFailure> {
         // Pick random integer A, then random integer B which is ±5 of A and
         // assert that B <= A if A > 10000. Shrinking should always converge to
         // A=10001, B=10002.
@@ -282,7 +284,10 @@ mod test {
             TestRng::deterministic_rng(RngAlgorithm::default()),
         );
         for _ in 0..1000 {
-            let case = input.new_tree(&mut runner).unwrap();
+            let case = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "flat_map strategy generates a value tree",
+            )?;
             let result = runner.run_one(case, |(a, b)| {
                 if a <= 10000 || b <= a {
                     Ok(())
@@ -295,13 +300,19 @@ mod test {
                 Ok(_) => {}
                 Err(TestError::Fail(_, v)) => {
                     failures += 1;
-                    assert_eq!((10001, 10002), v);
+                    ensure(
+                        (10001, 10002) == v,
+                        "shrinking converges to the minimal dependent pair",
+                    )?;
                 }
-                result => panic!("Unexpected result: {:?}", result),
+                _ => ensure(
+                    false,
+                    "run_one yields either a success or a failed case",
+                )?,
             }
         }
 
-        assert!(failures > 250);
+        ensure(failures > 250, "enough cases falsified")
     }
 
     #[test]
@@ -313,7 +324,7 @@ mod test {
     }
 
     #[test]
-    fn flat_map_respects_regen_limit() {
+    fn flat_map_respects_regen_limit() -> Result<(), TestFailure> {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let input = (0..65536)
@@ -333,12 +344,19 @@ mod test {
             max_flat_map_regens: 1000,
             ..Config::default()
         });
-        let case = input.new_tree(&mut runner).unwrap();
+        let case = ensure_some(
+            input.new_tree(&mut runner).ok(),
+            "nested flat_map strategy generates a value tree",
+        )?;
         let _ = runner.run_one(case, |_| {
             // Only the first run fails, all others succeed
-            prop_assert!(pass.fetch_or(true, Ordering::SeqCst));
-            Ok(())
+            if pass.fetch_or(true, Ordering::SeqCst) {
+                Ok(())
+            } else {
+                Err(TestCaseError::fail("first case fails by design"))
+            }
         });
+        Ok(())
     }
 
     #[test]

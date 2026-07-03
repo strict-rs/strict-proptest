@@ -660,43 +660,60 @@ mod test {
     use super::{RngAlgorithm, Seed, TestRng};
     use crate::arbitrary::any;
     use crate::strategy::*;
+    use strict_test_support::{
+        TestFailure, ensure, ensure_all, ensure_eq, ensure_some,
+    };
 
-    proptest! {
-        #[test]
-        fn gen_parse_seeds(
-            seed in prop_oneof![
-                any::<[u8;16]>().prop_map(Seed::XorShift),
-                any::<[u8;32]>().prop_map(Seed::ChaCha),
-                any::<Vec<u8>>().prop_map(|data| Seed::PassThrough(None, data.into())),
-                any::<[u8;32]>().prop_map(Seed::Recorder),
-            ])
-        {
-            assert_eq!(seed, Seed::from_persistence(&seed.to_persistence()).unwrap());
-        }
+    #[test]
+    fn gen_parse_seeds() -> Result<(), TestFailure> {
+        let seeds = prop_oneof![
+            any::<[u8; 16]>().prop_map(Seed::XorShift),
+            any::<[u8; 32]>().prop_map(Seed::ChaCha),
+            any::<Vec<u8>>()
+                .prop_map(|data| Seed::PassThrough(None, data.into())),
+            any::<[u8; 32]>().prop_map(Seed::Recorder),
+        ];
+        crate::strict::ensure_property(
+            &seeds,
+            "every seed round-trips through the persistence codec",
+            |seed| {
+                let parsed = ensure_some(
+                    Seed::from_persistence(&seed.to_persistence()),
+                    "a persisted seed parses back",
+                )?;
+                ensure(seed == parsed, "the parsed seed equals the original")
+            },
+        )
+    }
 
-        #[test]
-        fn rngs_dont_clone_self_on_genrng(
-            seed in prop_oneof![
-                any::<[u8;16]>().prop_map(Seed::XorShift),
-                any::<[u8;32]>().prop_map(Seed::ChaCha),
-                Just(()).prop_perturb(|_, mut rng| {
-                    let mut buf = vec![0u8; 2048];
-                    rng.fill_bytes(&mut buf);
-                    Seed::PassThrough(None, buf.into())
-                }),
-                any::<[u8;32]>().prop_map(Seed::Recorder),
-            ])
-        {
-            type Value = [u8;32];
-            let orig = TestRng::from_seed_internal(seed);
+    #[test]
+    fn rngs_dont_clone_self_on_genrng() -> Result<(), TestFailure> {
+        let seeds = prop_oneof![
+            any::<[u8; 16]>().prop_map(Seed::XorShift),
+            any::<[u8; 32]>().prop_map(Seed::ChaCha),
+            Just(()).prop_perturb(|_, mut rng| {
+                let mut buf = vec![0u8; 2048];
+                rng.fill_bytes(&mut buf);
+                Seed::PassThrough(None, buf.into())
+            }),
+            any::<[u8; 32]>().prop_map(Seed::Recorder),
+        ];
+        crate::strict::ensure_property(
+            &seeds,
+            "derived rngs never repeat their parent's stream",
+            |seed| {
+                type Value = [u8; 32];
+                let orig = TestRng::from_seed_internal(seed);
 
-            {
-                let mut rng1 = orig.clone();
-                let mut rng2 = rng1.gen_rng();
-                assert_ne!(rng1.random::<Value>(), rng2.random::<Value>());
-            }
+                {
+                    let mut rng1 = orig.clone();
+                    let mut rng2 = rng1.gen_rng();
+                    ensure(
+                        rng1.random::<Value>() != rng2.random::<Value>(),
+                        "a child rng differs from its parent",
+                    )?;
+                }
 
-            {
                 let mut rng1 = orig.clone();
                 let mut rng2 = rng1.gen_rng();
                 let mut rng3 = rng1.gen_rng();
@@ -705,18 +722,20 @@ mod test {
                 let b = rng2.random::<Value>();
                 let c = rng3.random::<Value>();
                 let d = rng4.random::<Value>();
-                assert_ne!(a, b);
-                assert_ne!(a, c);
-                assert_ne!(a, d);
-                assert_ne!(b, c);
-                assert_ne!(b, d);
-                assert_ne!(c, d);
-            }
-        }
+                ensure_all(&[
+                    (a != b, "first child differs from the parent"),
+                    (a != c, "second child differs from the parent"),
+                    (a != d, "grandchild differs from the parent"),
+                    (b != c, "siblings differ from each other"),
+                    (b != d, "grandchild differs from its parent's sibling"),
+                    (c != d, "second sibling differs from the grandchild"),
+                ])
+            },
+        )
     }
 
     #[test]
-    fn passthrough_rng_behaves_properly() {
+    fn passthrough_rng_behaves_properly() -> Result<(), TestFailure> {
         let mut rng = TestRng::from_seed(
             RngAlgorithm::PassThrough,
             &[
@@ -725,18 +744,29 @@ mod test {
             ],
         );
 
-        assert_eq!(0x3412C0DE, rng.next_u32());
-        assert_eq!(0xDEADBEEFCAFE7856, rng.next_u64());
+        ensure_eq(
+            &0x3412C0DE_u32,
+            &rng.next_u32(),
+            "the first dword replays the buffer little-endian",
+        )?;
+        ensure_eq(
+            &0xDEADBEEFCAFE7856_u64,
+            &rng.next_u64(),
+            "the next qword continues the buffer",
+        )?;
 
         let mut buf = [0u8; 4];
         rng.fill_bytes(&mut buf[0..4]);
-        assert_eq!([1, 2, 3, 0], buf);
+        ensure(
+            [1, 2, 3, 0] == buf,
+            "fill_bytes drains the tail and zero-pads",
+        )?;
         rng.fill_bytes(&mut buf[0..4]);
-        assert_eq!([0, 0, 0, 0], buf);
+        ensure([0, 0, 0, 0] == buf, "a depleted buffer yields zeros")
     }
 
     #[test]
-    fn seeded_xorshift_output_is_stable() {
+    fn seeded_xorshift_output_is_stable() -> Result<(), TestFailure> {
         let seed = [
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
             0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
@@ -745,42 +775,43 @@ mod test {
         let mut rng_u64 = TestRng::from_seed(RngAlgorithm::XorShift, &seed);
         let mut rng_fill = TestRng::from_seed(RngAlgorithm::XorShift, &seed);
 
-        assert_eq!(
-            [471271404, 722341711, 1880555887, 252576780,],
-            [
-                rng_u32.next_u32(),
-                rng_u32.next_u32(),
-                rng_u32.next_u32(),
-                rng_u32.next_u32(),
-            ]
-        );
-        assert_eq!(
+        ensure(
+            [471271404, 722341711, 1880555887, 252576780]
+                == [
+                    rng_u32.next_u32(),
+                    rng_u32.next_u32(),
+                    rng_u32.next_u32(),
+                    rng_u32.next_u32(),
+                ],
+            "the seeded xorshift u32 stream is stable",
+        )?;
+        ensure(
             [
                 3102434025752954860,
                 1084809011709542767,
                 17342619095589341798,
                 5127465042768897837,
+            ] == [
+                rng_u64.next_u64(),
+                rng_u64.next_u64(),
+                rng_u64.next_u64(),
+                rng_u64.next_u64(),
             ],
-            [
-                rng_u64.next_u64(),
-                rng_u64.next_u64(),
-                rng_u64.next_u64(),
-                rng_u64.next_u64(),
-            ]
-        );
+            "the seeded xorshift u64 stream is stable",
+        )?;
 
         let mut fill = [0u8; 16];
         rng_fill.fill_bytes(&mut fill);
-        assert_eq!(
+        ensure(
             [
-                236, 7, 23, 28, 79, 15, 14, 43, 111, 1, 23, 112, 12, 4, 14, 15
-            ],
-            fill
-        );
+                236, 7, 23, 28, 79, 15, 14, 43, 111, 1, 23, 112, 12, 4, 14, 15,
+            ] == fill,
+            "the seeded xorshift fill_bytes output is stable",
+        )
     }
 
     #[test]
-    fn seeded_chacha_output_is_stable() {
+    fn seeded_chacha_output_is_stable() -> Result<(), TestFailure> {
         let seed = [
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
             0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
@@ -790,43 +821,44 @@ mod test {
         let mut rng_u64 = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
         let mut rng_fill = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
 
-        assert_eq!(
-            [2100034873, 1780073945, 1996733837, 1229642936,],
-            [
-                rng_u32.next_u32(),
-                rng_u32.next_u32(),
-                rng_u32.next_u32(),
-                rng_u32.next_u32(),
-            ]
-        );
-        assert_eq!(
+        ensure(
+            [2100034873, 1780073945, 1996733837, 1229642936]
+                == [
+                    rng_u32.next_u32(),
+                    rng_u32.next_u32(),
+                    rng_u32.next_u32(),
+                    rng_u32.next_u32(),
+                ],
+            "the seeded chacha u32 stream is stable",
+        )?;
+        ensure(
             [
                 7645359380336737593,
                 5281276197874154893,
                 14729830432180286858,
                 10530800043416210610,
+            ] == [
+                rng_u64.next_u64(),
+                rng_u64.next_u64(),
+                rng_u64.next_u64(),
+                rng_u64.next_u64(),
             ],
-            [
-                rng_u64.next_u64(),
-                rng_u64.next_u64(),
-                rng_u64.next_u64(),
-                rng_u64.next_u64(),
-            ]
-        );
+            "the seeded chacha u64 stream is stable",
+        )?;
 
         let mut fill = [0u8; 16];
         rng_fill.fill_bytes(&mut fill);
-        assert_eq!(
+        ensure(
             [
                 57, 253, 43, 125, 217, 197, 25, 106, 141, 189, 3, 119, 184,
-                220, 74, 73
-            ],
-            fill
-        );
+                220, 74, 73,
+            ] == fill,
+            "the seeded chacha fill_bytes output is stable",
+        )
     }
 
     #[test]
-    fn derived_child_rng_output_is_stable() {
+    fn derived_child_rng_output_is_stable() -> Result<(), TestFailure> {
         let seed = [
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
             0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
@@ -835,19 +867,20 @@ mod test {
         let mut parent = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
         let mut child = parent.gen_rng();
 
-        assert_eq!(
-            [357635273, 1295757006, 1334659017, 3423482104,],
-            [
-                child.next_u32(),
-                child.next_u32(),
-                child.next_u32(),
-                child.next_u32(),
-            ],
-        );
+        ensure(
+            [357635273, 1295757006, 1334659017, 3423482104]
+                == [
+                    child.next_u32(),
+                    child.next_u32(),
+                    child.next_u32(),
+                    child.next_u32(),
+                ],
+            "the derived child rng stream is stable",
+        )
     }
 
     #[test]
-    fn recorder_bytes_used_matches_emitted_bytes() {
+    fn recorder_bytes_used_matches_emitted_bytes() -> Result<(), TestFailure> {
         let seed = [
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
             0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
@@ -864,6 +897,9 @@ mod test {
         expected.extend_from_slice(&second.to_le_bytes());
         expected.extend_from_slice(&fill);
 
-        assert_eq!(expected, rng.bytes_used());
+        ensure(
+            expected == rng.bytes_used(),
+            "the recorder replays exactly the bytes it emitted",
+        )
     }
 }

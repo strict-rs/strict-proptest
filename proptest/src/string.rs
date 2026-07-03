@@ -417,36 +417,25 @@ mod test {
     use regex::Regex;
     use regex::bytes::Regex as BytesRegex;
 
-    use super::*;
+    use strict_test_support::{TestFailure, ensure, ensure_ok, ensure_some};
 
-    fn printable_ascii(v: &[u8]) -> String {
-        v.iter()
-            .flat_map(|c| std::ascii::escape_default(*c))
-            .map(|c| char::from_u32(c.into()).unwrap())
-            .collect()
-    }
+    use super::*;
 
     fn do_test(
         pattern: &str,
         min_distinct: usize,
         max_distinct: usize,
         iterations: usize,
-    ) {
-        let generated = generate_values_matching_regex(pattern, iterations);
-        assert!(
+    ) -> Result<(), TestFailure> {
+        let generated = generate_values_matching_regex(pattern, iterations)?;
+        ensure(
             generated.len() >= min_distinct,
-            "Expected to generate at least {} strings, but only \
-             generated {}",
-            min_distinct,
-            generated.len()
-        );
-        assert!(
+            "generated at least the expected number of distinct strings",
+        )?;
+        ensure(
             generated.len() <= max_distinct,
-            "Expected to generate at most {} strings, but \
-             generated {}",
-            max_distinct,
-            generated.len()
-        );
+            "generated at most the expected number of distinct strings",
+        )
     }
 
     fn do_test_bytes(
@@ -454,36 +443,35 @@ mod test {
         min_distinct: usize,
         max_distinct: usize,
         iterations: usize,
-    ) {
+    ) -> Result<(), TestFailure> {
         let generated =
-            generate_byte_values_matching_regex(pattern, iterations);
-        assert!(
+            generate_byte_values_matching_regex(pattern, iterations)?;
+        ensure(
             generated.len() >= min_distinct,
-            "Expected to generate at least {} strings, but only \
-             generated {}",
-            min_distinct,
-            generated.len()
-        );
-        assert!(
+            "generated at least the expected number of distinct byte \
+             strings",
+        )?;
+        ensure(
             generated.len() <= max_distinct,
-            "Expected to generate at most {} strings, but \
-             generated {}",
-            max_distinct,
-            generated.len()
-        );
+            "generated at most the expected number of distinct byte strings",
+        )
     }
 
     fn generate_values_matching_regex(
         pattern: &str,
         iterations: usize,
-    ) -> HashSet<String> {
-        let rx = Regex::new(pattern).unwrap();
+    ) -> Result<HashSet<String>, TestFailure> {
+        let rx = ensure_ok(Regex::new(pattern), "the pattern is valid regex")?;
         let mut generated = HashSet::new();
 
-        let strategy = string_regex(pattern).unwrap();
+        let strategy =
+            ensure_ok(string_regex(pattern), "the pattern is supported")?;
         let mut runner = TestRunner::deterministic();
         for _ in 0..iterations {
-            let mut value = strategy.new_tree(&mut runner).unwrap();
+            let mut value = ensure_some(
+                strategy.new_tree(&mut runner).ok(),
+                "string strategy generates a value tree",
+            )?;
 
             loop {
                 let s = value.current();
@@ -492,12 +480,7 @@ mod test {
                 } else {
                     false
                 };
-                if !ok {
-                    panic!(
-                        "Generated string {:?} which does not match {:?}",
-                        s, pattern
-                    );
-                }
+                ensure(ok, "every generated string matches the pattern")?;
 
                 generated.insert(s);
 
@@ -506,20 +489,27 @@ mod test {
                 }
             }
         }
-        generated
+        Ok(generated)
     }
 
     fn generate_byte_values_matching_regex(
         pattern: &str,
         iterations: usize,
-    ) -> HashSet<Vec<u8>> {
-        let rx = BytesRegex::new(pattern).unwrap();
+    ) -> Result<HashSet<Vec<u8>>, TestFailure> {
+        let rx = ensure_ok(
+            BytesRegex::new(pattern),
+            "the pattern is valid byte regex",
+        )?;
         let mut generated = HashSet::new();
 
-        let strategy = bytes_regex(pattern).unwrap();
+        let strategy =
+            ensure_ok(bytes_regex(pattern), "the pattern is supported")?;
         let mut runner = TestRunner::deterministic();
         for _ in 0..iterations {
-            let mut value = strategy.new_tree(&mut runner).unwrap();
+            let mut value = ensure_some(
+                strategy.new_tree(&mut runner).ok(),
+                "byte-string strategy generates a value tree",
+            )?;
 
             loop {
                 let s = value.current();
@@ -528,13 +518,7 @@ mod test {
                 } else {
                     false
                 };
-                if !ok {
-                    panic!(
-                        "Generated string {:?} which does not match {:?}",
-                        printable_ascii(&s),
-                        pattern
-                    );
-                }
+                ensure(ok, "every generated byte string matches the pattern")?;
 
                 generated.insert(s);
 
@@ -543,102 +527,106 @@ mod test {
                 }
             }
         }
-        generated
+        Ok(generated)
     }
 
     #[test]
-    fn test_case_insensitive_produces_all_available_values() {
+    fn test_case_insensitive_produces_all_available_values()
+    -> Result<(), TestFailure> {
         let mut expected: HashSet<String> = HashSet::new();
         expected.insert("a".into());
         expected.insert("b".into());
         expected.insert("A".into());
         expected.insert("B".into());
-        assert_eq!(generate_values_matching_regex("(?i:a|B)", 64), expected);
+        ensure(
+            generate_values_matching_regex("(?i:a|B)", 64)? == expected,
+            "a case-insensitive alternation generates every casing",
+        )
     }
 
     #[test]
-    fn test_literal() {
-        do_test("foo", 1, 1, 8);
-        do_test_bytes("foo", 1, 1, 8);
+    fn test_literal() -> Result<(), TestFailure> {
+        do_test("foo", 1, 1, 8)?;
+        do_test_bytes("foo", 1, 1, 8)
     }
 
     #[test]
-    fn test_casei_literal() {
-        do_test("(?i:fOo)", 8, 8, 64);
+    fn test_casei_literal() -> Result<(), TestFailure> {
+        do_test("(?i:fOo)", 8, 8, 64)
     }
 
     #[test]
-    fn test_alternation() {
-        do_test("foo|bar|baz", 3, 3, 16);
-        do_test_bytes("foo|bar|baz", 3, 3, 16);
+    fn test_alternation() -> Result<(), TestFailure> {
+        do_test("foo|bar|baz", 3, 3, 16)?;
+        do_test_bytes("foo|bar|baz", 3, 3, 16)
     }
 
     #[test]
-    fn test_repetition() {
-        do_test("a{0,8}", 9, 9, 64);
-        do_test_bytes("a{0,8}", 9, 9, 64);
+    fn test_repetition() -> Result<(), TestFailure> {
+        do_test("a{0,8}", 9, 9, 64)?;
+        do_test_bytes("a{0,8}", 9, 9, 64)
     }
 
     #[test]
-    fn test_question() {
-        do_test("a?", 2, 2, 16);
-        do_test_bytes("a?", 2, 2, 16);
+    fn test_question() -> Result<(), TestFailure> {
+        do_test("a?", 2, 2, 16)?;
+        do_test_bytes("a?", 2, 2, 16)
     }
 
     #[test]
-    fn test_star() {
-        do_test("a*", 33, 33, 256);
-        do_test_bytes("a*", 33, 33, 256);
+    fn test_star() -> Result<(), TestFailure> {
+        do_test("a*", 33, 33, 256)?;
+        do_test_bytes("a*", 33, 33, 256)
     }
 
     #[test]
-    fn test_plus() {
-        do_test("a+", 32, 32, 256);
-        do_test_bytes("a+", 32, 32, 256);
+    fn test_plus() -> Result<(), TestFailure> {
+        do_test("a+", 32, 32, 256)?;
+        do_test_bytes("a+", 32, 32, 256)
     }
 
     #[test]
-    fn test_n_to_range() {
-        do_test("a{4,}", 4, 4, 64);
-        do_test_bytes("a{4,}", 4, 4, 64);
+    fn test_n_to_range() -> Result<(), TestFailure> {
+        do_test("a{4,}", 4, 4, 64)?;
+        do_test_bytes("a{4,}", 4, 4, 64)
     }
 
     #[test]
-    fn test_concatenation() {
-        do_test("(foo|bar)(xyzzy|plugh)", 4, 4, 32);
-        do_test_bytes("(foo|bar)(xyzzy|plugh)", 4, 4, 32);
+    fn test_concatenation() -> Result<(), TestFailure> {
+        do_test("(foo|bar)(xyzzy|plugh)", 4, 4, 32)?;
+        do_test_bytes("(foo|bar)(xyzzy|plugh)", 4, 4, 32)
     }
 
     #[test]
-    fn test_ascii_class() {
-        do_test("[[:digit:]]", 10, 10, 256);
+    fn test_ascii_class() -> Result<(), TestFailure> {
+        do_test("[[:digit:]]", 10, 10, 256)
     }
 
     #[test]
-    fn test_unicode_class() {
-        do_test("\\p{Greek}", 24, 512, 256);
+    fn test_unicode_class() -> Result<(), TestFailure> {
+        do_test("\\p{Greek}", 24, 512, 256)
     }
 
     #[test]
-    fn test_dot() {
-        do_test(".", 200, 65536, 256);
+    fn test_dot() -> Result<(), TestFailure> {
+        do_test(".", 200, 65536, 256)
     }
 
     #[test]
-    fn test_dot_s() {
-        do_test("(?s).", 200, 65536, 256);
-        do_test_bytes("(?s-u).", 256, 256, 2048);
+    fn test_dot_s() -> Result<(), TestFailure> {
+        do_test("(?s).", 200, 65536, 256)?;
+        do_test_bytes("(?s-u).", 256, 256, 2048)
     }
 
     #[test]
-    fn test_backslash_d_plus() {
-        do_test("\\d+", 1, 65536, 256);
+    fn test_backslash_d_plus() -> Result<(), TestFailure> {
+        do_test("\\d+", 1, 65536, 256)
     }
 
     #[test]
-    fn test_non_utf8_byte_strings() {
-        do_test_bytes(r"(?-u)[\xC0-\xFF]\x20", 64, 64, 512);
-        do_test_bytes(r"(?-u)\x20[\x80-\xBF]", 64, 64, 512);
+    fn test_non_utf8_byte_strings() -> Result<(), TestFailure> {
+        do_test_bytes(r"(?-u)[\xC0-\xFF]\x20", 64, 64, 512)?;
+        do_test_bytes(r"(?-u)\x20[\x80-\xBF]", 64, 64, 512)?;
         do_test_bytes(
             r#"(?x-u)
   \xed (( ( \xa0\x80 | \xad\xbf | \xae\x80 | \xaf\xbf )
@@ -647,26 +635,32 @@ mod test {
             15,
             15,
             120,
-        );
+        )
     }
 
-    fn assert_send_and_sync<T: Send + Sync>(_: T) {}
+    fn ensure_send_and_sync<T: Send + Sync>(_: T) {}
 
     #[test]
-    fn regex_strategy_is_send_and_sync() {
-        assert_send_and_sync(string_regex(".").unwrap());
+    fn regex_strategy_is_send_and_sync() -> Result<(), TestFailure> {
+        ensure_send_and_sync(ensure_ok(
+            string_regex("."),
+            "the dot pattern is supported",
+        )?);
+        Ok(())
     }
 
     macro_rules! consistent {
         ($name:ident, $value:expr) => {
             #[test]
-            fn $name() {
-                test_generates_matching_strings($value);
+            fn $name() -> Result<(), TestFailure> {
+                test_generates_matching_strings($value)
             }
         };
     }
 
-    fn test_generates_matching_strings(pattern: &str) {
+    fn test_generates_matching_strings(
+        pattern: &str,
+    ) -> Result<(), TestFailure> {
         use std::time;
 
         let mut runner = TestRunner::default();
@@ -674,19 +668,23 @@ mod test {
 
         // If we don't support this regex, just move on quietly
         if let Ok(strategy) = string_regex(pattern) {
-            let rx = Regex::new(pattern).unwrap();
+            let rx = ensure_ok(
+                Regex::new(pattern),
+                "a supported pattern is valid regex",
+            )?;
 
             for _ in 0..1000 {
-                let mut val = strategy.new_tree(&mut runner).unwrap();
+                let mut val = ensure_some(
+                    strategy.new_tree(&mut runner).ok(),
+                    "string strategy generates a value tree",
+                )?;
                 // No more than 1000 simplify steps to keep test time down
                 for _ in 0..1000 {
                     let s = val.current();
-                    assert!(
+                    ensure(
                         rx.is_match(&s),
-                        "Produced string {:?}, which does not match {:?}",
-                        s,
-                        pattern
-                    );
+                        "every produced string matches the source pattern",
+                    )?;
 
                     if !val.simplify() {
                         break;
@@ -699,6 +697,7 @@ mod test {
                 }
             }
         }
+        Ok(())
     }
 
     include!("regex-contrib/crates_regex.rs");

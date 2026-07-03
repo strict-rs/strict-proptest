@@ -6,8 +6,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use proptest::prelude::{Arbitrary, Strategy, proptest};
+use proptest::prelude::{Arbitrary, Strategy, any};
+use proptest::strict::{TestResult, ensure_property};
 use proptest_derive::Arbitrary;
+use strict_test_support::ensure;
 
 fn make_strategy(start: usize) -> impl Strategy<Value = usize> {
     (start..100).prop_map(|x| x * 2)
@@ -53,36 +55,53 @@ enum T2 {
     },
 }
 
-fn assert_consistency(start: usize, val: usize) {
-    assert!(val.is_multiple_of(2) && val < 200 && val >= (start * 2));
+fn ensure_consistency(start: usize, val: usize) -> TestResult {
+    ensure(
+        val.is_multiple_of(2) && val < 200 && val >= (start * 2),
+        "the custom strategy doubles a value from its start range",
+    )
 }
 
-proptest! {
-    #[test]
-    fn t0_test(v: T0) {
-        assert_consistency(0, v.foo);
-        assert_consistency(11, v.bar);
-        assert_consistency(88, v.baz);
-    }
+#[test]
+fn t0_test() -> TestResult {
+    ensure_property(
+        &any::<T0>(),
+        "every strategy spelling drives its named struct field",
+        |v| {
+            ensure_consistency(0, v.foo)?;
+            ensure_consistency(11, v.bar)?;
+            ensure_consistency(88, v.baz)
+        },
+    )
+}
 
-    #[test]
-    fn t1_test(v: T1) {
-        assert_consistency(22, v.0);
-        assert_consistency(33, v.1);
-        assert_consistency(88, v.2);
-    }
+#[test]
+fn t1_test() -> TestResult {
+    ensure_property(
+        &any::<T1>(),
+        "every strategy spelling drives its tuple field",
+        |v| {
+            ensure_consistency(22, v.0)?;
+            ensure_consistency(33, v.1)?;
+            ensure_consistency(88, v.2)
+        },
+    )
+}
 
-    #[test]
-    fn t2_test(v: T2) {
-        match v {
-            T2::V0(v) => assert_consistency(44, v),
-            T2::V1 { field } => assert_consistency(55, field),
-            T2::V2(v) => assert_consistency(66, v),
-            T2::V3 { field } => assert_consistency(77, field),
-            T2::V4(v) => assert_consistency(88, v),
-            T2::V5 { field } => assert_consistency(88, field),
-        }
-    }
+#[test]
+fn t2_test() -> TestResult {
+    ensure_property(
+        &any::<T2>(),
+        "every strategy spelling drives its enum variant field",
+        |v| match v {
+            T2::V0(v) => ensure_consistency(44, v),
+            T2::V1 { field } => ensure_consistency(55, field),
+            T2::V2(v) => ensure_consistency(66, v),
+            T2::V3 { field } => ensure_consistency(77, field),
+            T2::V4(v) => ensure_consistency(88, v),
+            T2::V5 { field } => ensure_consistency(88, field),
+        },
+    )
 }
 
 #[test]

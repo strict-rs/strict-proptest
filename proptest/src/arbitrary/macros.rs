@@ -105,9 +105,13 @@ macro_rules! no_panic_test {
             mod $module {
                 #[allow(unused_imports)]
                 use super::super::*;
-                proptest! {
-                    #[test]
-                    fn no_panic(_ in $crate::arbitrary::any::<$self>()) {}
+                #[test]
+                fn no_panic() -> $crate::strict::TestResult {
+                    $crate::strict::ensure_property(
+                        &$crate::arbitrary::any::<$self>(),
+                        concat!(module_path!(), "::no_panic"),
+                        |_| Ok(()),
+                    )
                 }
             }
         )+

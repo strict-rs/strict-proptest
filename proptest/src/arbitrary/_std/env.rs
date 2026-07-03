@@ -124,18 +124,23 @@ mod test {
         var_error => VarError
     );
 
-    proptest! {
-        #![proptest_config(Config {
+    #[test]
+    fn make_utf16_invalid_doesnt_panic() -> crate::strict::TestResult {
+        // Keep the legacy 65536-case sweep over (buffer, position); the
+        // strict defaults supply deterministic seeding and disable failure
+        // persistence.
+        let config = Config {
             cases: 65536,
-            .. Config::default()
-        })]
-
-        #[test]
-        fn make_utf16_invalid_doesnt_panic(
-            mut buf in [num::u16::ANY; 3],
-            p in 0usize..3
-        ) {
-            make_utf16_invalid(&mut buf, p);
-        }
+            ..crate::strict::strict_default_config()
+        };
+        crate::strict::ensure_property_with_config(
+            &([num::u16::ANY; 3], 0usize..3),
+            "make_utf16_invalid handles every position in a 3-element buffer",
+            config,
+            |(mut buf, p)| {
+                make_utf16_invalid(&mut buf, p);
+                Ok(())
+            },
+        )
     }
 }
