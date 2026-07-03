@@ -15,7 +15,7 @@ Scope: `proptest/` — the core property-testing library crate (`proptest` v1.11
 
 ## Features (`Cargo.toml`)
 
-Default set: `["std", "fork", "timeout", "bit-set"]`. The complete set, with what each pulls in and how they chain:
+Default set: `["std", "fork", "timeout", "bit-set", "strict-test"]`. The complete set, with what each pulls in and how they chain:
 
 - `std` — standard-library support; pulls `rand/std`, `rand/sys_rng`, the `regex-syntax` dep, and `num-traits/std`. Gates the `path`/`string`/`range_subset` modules and the `_std` arbitrary tier.
 - `no_std` — `core`-only configuration (used with `--no-default-features`); pulls `num-traits/libm`, needed for `mul_add`.
@@ -29,11 +29,12 @@ Default set: `["std", "fork", "timeout", "bit-set"]`. The complete set, with wha
 - `hardware-rng` — use an x86 hardware RNG instead of a static seed on x86 `no_std` targets; pulls the `x86` dep.
 - `atomic64bit` — gates `Arbitrary` for the 64-bit atomics (`AtomicI64`/`AtomicU64`, only alongside `unstable`); per its comment, excludable on no_std targets that lack 64-bit atomics.
 - `handle-panics` — hide intermediate panic spew flowing to stderr during the shrink phase; **requires `std`**.
-- `default-code-coverage` — a coverage-friendly mirror of `default` (currently identical: `std`, `fork`, `timeout`, `bit-set`).
+- `strict-test` — pulls the optional `strict-test-support` dep (Result-returning test vocabulary: `TestFailure` and the `ensure*` helpers) and **requires `std`** (enables it explicitly). On by default.
+- `default-code-coverage` — a coverage-friendly mirror of `default` (`std`, `fork`, `timeout`, `bit-set` — without `strict-test`).
 
 ## Dependencies (`Cargo.toml`)
 
-Always on: `bitflags`, `unarray`, `num-traits`, `rand` (with its `alloc` feature), `rand_chacha`, `rand_xorshift`. Optional / feature-gated: `regex-syntax` (`std`), `bit-set` + `bit-vec` (`bit-set`), `rusty-fork` + `tempfile` (`fork`), `x86` (`hardware-rng`), `proptest-macro` (`attr-macro`). Dev-only: `regex`, `trybuild`. Versions are pinned centrally in the workspace `[workspace.dependencies]`.
+Always on: `bitflags`, `unarray`, `num-traits`, `rand` (with its `alloc` feature), `rand_chacha`, `rand_xorshift`. Optional / feature-gated: `regex-syntax` (`std`), `bit-set` + `bit-vec` (`bit-set`), `rusty-fork` + `tempfile` (`fork`), `x86` (`hardware-rng`), `proptest-macro` (`attr-macro`), `strict-test-support` (`strict-test`). Dev-only: `regex`, `trybuild`. Versions are pinned centrally in the workspace `[workspace.dependencies]`.
 
 ## Generated docs
 

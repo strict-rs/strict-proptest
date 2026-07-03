@@ -50,7 +50,7 @@ proptest-state-machine:
 cargo test -p proptest-state-machine
 ```
 
-Feature-matrix / no_std builds (compile-only checks — the test suite is **not** no_std-clean, so only the build is verified). The default feature set is `["std", "fork", "timeout", "bit-set"]`:
+Feature-matrix / no_std builds (compile-only checks — the test suite is **not** no_std-clean, so only the build is verified). The default feature set is `["std", "fork", "timeout", "bit-set", "strict-test"]`:
 
 ```sh
 cargo build -p proptest --no-default-features --features std

@@ -19,7 +19,7 @@ Hypothesis-like property-based testing and shrinking.
 
 [features]
 
-default = ["std", "fork", "timeout", "bit-set"]
+default = ["std", "fork", "timeout", "bit-set", "strict-test"]
 # Everything in `default` that doesn't break code coverage builds
 default-code-coverage = ["std", "fork", "timeout", "bit-set"]
 
@@ -65,6 +65,12 @@ bit-set = ["dep:bit-set", "dep:bit-vec"]
 # In particular, hides all intermediate panics flowing into stderr during shrink phase
 handle-panics = ["std"]
 
+# Enables the native strict property-testing surface, which reports property
+# outcomes as `strict_test_support::TestFailure` values instead of panicking.
+#
+# Requires std.
+strict-test = ["std", "dep:strict-test-support"]
+
 [dependencies]
 bitflags = { workspace = true }
 unarray = { workspace = true }
@@ -79,6 +85,7 @@ rand_chacha = { workspace = true }
 rusty-fork = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
 x86 = { workspace = true, optional = true }
+strict-test-support = { workspace = true, optional = true }
 
 [package.metadata.docs.rs]
 all-features = true
