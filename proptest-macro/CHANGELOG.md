@@ -3,10 +3,17 @@
 ### Breaking Changes
 
 - The minimum supported Rust version has been increased to 1.96.0.
+- `#[property_test]` now rewrites the annotated fn into a strict test: the generated wrapper returns `proptest::strict::TestResult` and drives the property through `proptest::strict::ensure_property` (deterministic `STRICT_TEST_SEED` seeding, no `proptest-regressions/` persistence) instead of constructing a `TestRunner` and panicking on failure. Property bodies must return `Result<(), TestFailure>`; a `()` (or literal `-> ()`) body is now a compile error pointing at `proptest::strict::TestResult` and an `Ok(())` body ending.
+- `config = <expr>` now routes through `proptest::strict::ensure_property_with_config` with `test_name` and `source_file` forced over the given expression; without `config`, the strict defaults apply.
+
+### Bug Fixes
+
+- An invalid `proptest_path = ...` value now surfaces as its intended compile error instead of a proc-macro panic: recoverable option errors are emitted as statement-form `compile_error!` tokens at item position, so the diagnostics also survive builds that cfg-strip the generated `#[test]` fn (rustdoc, trybuild).
+- An internal code-generation parse failure now falls back to a `compile_error!` diagnostic instead of panicking the proc macro.
 
 ### New Features
 
-- Added support for `proptest_path = ::path::to::proptest` on `#[property_test]`, allowing the macro to target a re-exported `proptest` crate.
+- Added support for `proptest_path = ::path::to::proptest` on `#[property_test]`, allowing the macro to target a re-exported `proptest` crate; the strict module is resolved through that path (`<proptest_path>::strict::...`), never hard-coded.
 
 ## 0.5.0
 

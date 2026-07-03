@@ -705,10 +705,12 @@ error!(
 #[cfg(test)]
 mod tests {
     #[test]
-    fn test_mk_err_msg_format() {
-        assert_eq!(
-            mk_err_msg!(E0001, "This is a sample error message."),
-            "[proptest_derive, E0001] during #[derive(Arbitrary)]:\nThis is a sample error message. Please see: https://proptest-rs.github.io/proptest/proptest-derive/errors.html#e0001 for more information."
-        );
+    fn test_mk_err_msg_format() -> Result<(), ::strict_test_support::TestFailure>
+    {
+        ::strict_test_support::ensure_eq(
+            &mk_err_msg!(E0001, "This is a sample error message."),
+            &"[proptest_derive, E0001] during #[derive(Arbitrary)]:\nThis is a sample error message. Please see: https://proptest-rs.github.io/proptest/proptest-derive/errors.html#e0001 for more information.".to_string(),
+            "the composed error message carries the code, banner, and doc link",
+        )
     }
 }

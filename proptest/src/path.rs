@@ -1,11 +1,14 @@
-//! Strategies for generating [`PathBuf`] and related path types.
+//! Strategies for generating [`PathBuf`](std::path::PathBuf) and related
+//! path types.
 //!
 //! [`PathParams`] in this module is used as the argument to the
-//! [`Arbitrary`](crate::arbitrary::Arbitrary) implementation for [`PathBuf`].
+//! [`Arbitrary`](crate::arbitrary::Arbitrary) implementation for
+//! [`PathBuf`](std::path::PathBuf).
 
 use crate::{collection::SizeRange, string::StringParam};
 
-/// Parameters for the [`Arbitrary`] implementation for [`PathBuf`].
+/// Parameters for the [`Arbitrary`](crate::arbitrary::Arbitrary)
+/// implementation for [`PathBuf`](std::path::PathBuf).
 ///
 /// By default, this generates paths with 0 to 8 components uniformly at random, each of which is a
 /// default [`StringParam`].

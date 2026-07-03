@@ -375,3 +375,7 @@ The `proptest!` macro has some additional syntax, including for setting
 configuration for things like the number of test cases to generate. See its
 [documentation](https://docs.rs/proptest/latest/proptest/macro.proptest.html)
 for more details.
+
+## Panic-free properties with `proptest::strict`
+
+This fork also ships a panic-free alternative to the macro surface: the [`proptest::strict`](https://docs.rs/proptest/latest/proptest/strict/index.html) module (feature `strict-test`, on by default) runs a strategy against a closure returning `Result<(), TestFailure>`, so a test's verdict is a value instead of a panic. Strict runs are seeded deterministically (`STRICT_TEST_SEED` selects the seed), write no `proptest-regressions/` files, and report a falsified property as `TestFailure::PropertyFalsified` carrying the shrunk minimal failing input. The book's *Strict property tests* chapter covers the full contract, the `strict_test_support` `ensure*` helper vocabulary for property bodies, and the strict `#[property_test]` attribute.

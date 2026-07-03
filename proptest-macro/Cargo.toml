@@ -11,6 +11,9 @@ homepage = "https://proptest-rs.github.io/proptest/proptest/index.html"
 keywords = ["property", "testing", "quickcheck", "fuzz", "hypothesis"]
 categories.workspace = true
 
+[lints]
+workspace = true
+
 [lib]
 proc-macro = true
 

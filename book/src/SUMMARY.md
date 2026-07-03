@@ -4,6 +4,7 @@
 
 - [`proptest`](proptest/index.md)
   - [Getting started](proptest/getting-started.md)
+  - [Strict property tests](proptest/strict.md)
   - [Understanding Proptest from the Bottom Up](proptest/tutorial/index.md)
     - [Strategy Basics](proptest/tutorial/strategy-basics.md)
     - [Shrinking Basics](proptest/tutorial/shrinking-basics.md)

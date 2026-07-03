@@ -76,3 +76,294 @@ proptest-macro = { version = "0.5", path = "proptest-macro" }
 [patch."https://github.com/estrict-rs/strict-proptest.git"]
 proptest = { version = "1", path = "proptest" }
 proptest-macro = { version = "0.5", path = "proptest-macro" }
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Lint policy — rustc
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared workspace lint levels; members adopt them via `lints.workspace = true`.
+# Levels are calibrated against this workspace: a lint is `deny` only where the
+# whole opted tree actually holds under
+# `cargo +nightly clippy --workspace --all-targets --all-features`, `warn`
+# where documented legacy surfaces (the panicking macro facade, the runner's
+# stderr diagnostics seam, upstream-derived internals) still carry the pattern.
+# `priority = -1` = applied before individual lints, so specific overrides win.
+# ═════════════════════════════════════════════════════════════════════════════
+
+[workspace.lints.rust]
+unsafe_code                             = "warn"
+
+future_incompatible                     = { level = "deny", priority = -1 }
+rust_2018_idioms                        = { level = "warn", priority = -1 }
+rust_2021_compatibility                 = { level = "deny", priority = -1 }
+rust_2024_compatibility                 = { level = "deny", priority = -1 }
+nonstandard_style                       = { level = "deny", priority = -1 }
+let_underscore                          = { level = "warn", priority = -1 }
+unused                                  = { level = "warn", priority = -1 }
+deprecated_safe                         = { level = "deny", priority = -1 }
+keyword_idents                          = { level = "deny", priority = -1 }
+
+missing_docs                            = "warn"
+missing_debug_implementations           = "warn"
+unreachable_pub                         = "warn"
+trivial_casts                           = "warn"
+trivial_numeric_casts                   = "warn"
+unused_lifetimes                        = "deny"
+unused_qualifications                   = "warn"
+unused_import_braces                    = "deny"
+unused_extern_crates                    = "warn"
+unused_results                          = "warn"
+unused_macro_rules                      = "warn"
+single_use_lifetimes                    = "warn"
+elided_lifetimes_in_paths               = "warn"
+meta_variable_misuse                    = "warn"
+non_ascii_idents                        = "deny"
+noop_method_call                        = "deny"
+macro_use_extern_crate                  = "warn"
+absolute_paths_not_starting_with_crate  = "deny"
+variant_size_differences                = "deny"
+redundant_lifetimes                     = "deny"
+refining_impl_trait_internal            = "deny"
+refining_impl_trait_reachable           = "deny"
+ambiguous_negative_literals             = "deny"
+async_fn_in_trait                       = "allow"
+missing_copy_implementations            = "warn"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links                  = "deny"
+private_intra_doc_links                 = "deny"
+missing_crate_level_docs                = "deny"
+bare_urls                               = "deny"
+unescaped_backticks                     = "deny"
+invalid_rust_codeblocks                 = "deny"
+
+[workspace.lints.clippy]
+correctness = { level = "warn",  priority = -1 }
+suspicious  = { level = "warn",  priority = -1 }
+complexity  = { level = "warn",  priority = -1 }
+perf        = { level = "warn",  priority = -1 }
+style       = { level = "warn",  priority = -1 }
+pedantic    = { level = "warn",  priority = -1 }
+nursery     = { level = "warn",  priority = -1 }
+cargo       = { level = "warn",  priority = -1 }
+restriction = { level = "allow", priority = -1 }
+
+as_conversions                           = "warn"
+as_underscore                            = "deny"
+as_ptr_cast_mut                          = "deny"
+cast_lossless                            = "warn"
+cast_possible_truncation                 = "warn"
+cast_possible_wrap                       = "warn"
+cast_precision_loss                      = "warn"
+cast_sign_loss                           = "warn"
+cast_ptr_alignment                       = "deny"
+char_lit_as_u8                           = "deny"
+fn_to_numeric_cast_any                   = "deny"
+ptr_as_ptr                               = "deny"
+borrow_as_ptr                            = "warn"
+float_arithmetic                         = "warn"
+float_cmp                                = "warn"
+float_cmp_const                          = "warn"
+lossy_float_literal                      = "deny"
+integer_division                         = "warn"
+integer_division_remainder_used          = "warn"
+modulo_arithmetic                        = "warn"
+arithmetic_side_effects                  = "warn"
+invalid_upcast_comparisons               = "deny"
+suspicious_xor_used_as_pow               = "deny"
+unchecked_time_subtraction               = "deny"
+
+mem_forget                               = "deny"
+clone_on_ref_ptr                         = "warn"
+undocumented_unsafe_blocks               = "warn"
+multiple_unsafe_ops_per_block            = "warn"
+unnecessary_safety_comment               = "deny"
+unnecessary_safety_doc                   = "deny"
+transmute_ptr_to_ref                     = "deny"
+transmute_ptr_to_ptr                     = "warn"
+transmute_undefined_repr                 = "deny"
+ref_as_ptr                               = "warn"
+ptr_eq                                   = "deny"
+rc_buffer                                = "deny"
+rc_mutex                                 = "deny"
+mutex_atomic                             = "deny"
+mutex_integer                            = "deny"
+non_send_fields_in_send_ty               = "deny"
+
+mod_module_files                         = "warn"
+absolute_paths                           = "warn"
+semicolon_if_nothing_returned            = "warn"
+semicolon_outside_block                  = "warn"
+explicit_iter_loop                       = "warn"
+explicit_into_iter_loop                  = "warn"
+manual_let_else                          = "warn"
+redundant_else                           = "warn"
+map_unwrap_or                            = "warn"
+needless_collect                         = "deny"
+redundant_pub_crate                      = "warn"
+borrowed_box                             = "deny"
+box_collection                           = "deny"
+redundant_allocation                     = "deny"
+vec_box                                  = "deny"
+unnecessary_box_returns                  = "deny"
+manual_async_fn                          = "deny"
+large_futures                            = "deny"
+
+missing_safety_doc                       = "deny"
+missing_panics_doc                       = "warn"
+missing_errors_doc                       = "warn"
+missing_assert_message                   = "warn"
+missing_asserts_for_indexing             = "deny"
+must_use_candidate                       = "warn"
+return_self_not_must_use                 = "warn"
+unused_self                              = "warn"
+unused_async                             = "deny"
+unused_trait_names                       = "warn"
+needless_pass_by_value                   = "warn"
+needless_pass_by_ref_mut                 = "warn"
+inefficient_to_string                    = "deny"
+string_add_assign                        = "deny"
+same_name_method                         = "deny"
+same_functions_in_if_condition           = "warn"
+trait_duplication_in_bounds              = "deny"
+type_repetition_in_bounds                = "warn"
+iter_over_hash_type                      = "deny"
+iter_without_into_iter                   = "deny"
+into_iter_without_iter                   = "deny"
+pattern_type_mismatch                    = "warn"
+rest_pat_in_fully_bound_structs          = "deny"
+wildcard_enum_match_arm                  = "warn"
+match_wild_err_arm                       = "deny"
+match_wildcard_for_single_variants       = "warn"
+match_same_arms                          = "warn"
+match_bool                               = "deny"
+
+todo                                     = "deny"
+unimplemented                            = "deny"
+unreachable                              = "warn"
+panic                                    = "warn"
+panic_in_result_fn                       = "warn"
+empty_loop                               = "deny"
+empty_drop                               = "deny"
+empty_enums                              = "deny"
+empty_structs_with_brackets              = "warn"
+empty_enum_variants_with_brackets        = "warn"
+
+unwrap_used                              = "warn"
+expect_used                              = "warn"
+unwrap_in_result                         = "warn"
+get_unwrap                               = "deny"
+indexing_slicing                         = "warn"
+string_slice                             = "warn"
+map_err_ignore                           = "warn"
+ok_expect                                = "deny"
+error_impl_error                         = "warn"
+result_large_err                         = "deny"
+
+dbg_macro                                = "deny"
+print_stdout                             = "warn"
+print_stderr                             = "warn"
+use_debug                                = "warn"
+verbose_file_reads                       = "deny"
+non_ascii_literal                        = "warn"
+
+missing_const_for_fn                     = "warn"
+if_then_some_else_none                   = "warn"
+option_option                            = "warn"
+result_unit_err                          = "deny"
+linkedlist                               = "deny"
+needless_continue                        = "deny"
+needless_return                          = "deny"
+needless_for_each                        = "deny"
+needless_raw_strings                     = "warn"
+needless_raw_string_hashes               = "warn"
+needless_bitwise_bool                    = "deny"
+should_panic_without_expect              = "warn"
+string_lit_as_bytes                      = "deny"
+string_lit_chars_any                     = "deny"
+unseparated_literal_suffix               = "warn"
+unnecessary_wraps                        = "warn"
+unnecessary_self_imports                 = "deny"
+unnested_or_patterns                     = "deny"
+unreadable_literal                       = "warn"
+useless_let_if_seq                       = "deny"
+redundant_clone                          = "warn"
+redundant_type_annotations               = "deny"
+redundant_closure_for_method_calls       = "warn"
+implicit_clone                           = "deny"
+implicit_hasher                          = "warn"
+items_after_statements                   = "warn"
+mixed_read_write_in_expression           = "deny"
+str_to_string                            = "warn"
+string_add                               = "deny"
+format_push_string                       = "warn"
+or_fun_call                              = "warn"
+suboptimal_flops                         = "deny"
+suspicious_operation_groupings           = "deny"
+
+shadow_unrelated                         = "warn"
+shadow_reuse                             = "warn"
+shadow_same                              = "warn"
+similar_names                            = "warn"
+min_ident_chars                          = "warn"
+self_named_constructors                  = "deny"
+
+wildcard_imports                         = "warn"
+enum_glob_use                            = "warn"
+exit                                     = "warn"
+create_dir                               = "deny"
+partial_pub_fields                       = "deny"
+multiple_inherent_impl                   = "warn"
+tests_outside_test_module                = "warn"
+
+wildcard_dependencies                    = "deny"
+multiple_crate_versions                  = "deny"
+negative_feature_names                   = "warn"
+redundant_feature_names                  = "deny"
+cargo_common_metadata                    = "warn"
+
+let_underscore_must_use                  = "warn"
+let_underscore_untyped                   = "warn"
+let_underscore_future                    = "deny"
+
+fn_params_excessive_bools                = "deny"
+struct_excessive_bools                   = "deny"
+
+large_enum_variant                       = "warn"
+large_stack_arrays                       = "deny"
+large_stack_frames                       = "deny"
+large_types_passed_by_value              = "deny"
+large_include_file                       = "deny"
+large_digit_groups                       = "deny"
+
+uninlined_format_args                    = "warn"
+nonstandard_macro_braces                 = "deny"
+
+range_minus_one                          = "deny"
+range_plus_one                           = "deny"
+path_buf_push_overwrite                  = "deny"
+iter_on_empty_collections                = "deny"
+iter_on_single_items                     = "deny"
+naive_bytecount                          = "deny"
+no_effect_underscore_binding             = "warn"
+
+disallowed_script_idents                 = "deny"
+unicode_not_nfc                          = "deny"
+
+infinite_loop                            = "deny"
+
+missing_docs_in_private_items            = "warn"
+
+allow_attributes                         = "allow"
+allow_attributes_without_reason          = "warn"
+
+else_if_without_else                     = "warn"
+single_call_fn                           = "warn"
+
+implicit_return                          = "allow"
+self_named_module_files                  = "allow"
+semicolon_inside_block                   = "allow"
+separated_literal_suffix                 = "allow"
+question_mark_used                       = "allow"
+pub_use                                  = "allow"
+ref_binding_to_reference                 = "allow"
+blanket_clippy_restriction_lints         = "allow"

@@ -17,6 +17,9 @@ description = """
 Hypothesis-like property-based testing and shrinking.
 """
 
+[lints]
+workspace = true
+
 [features]
 
 default = ["std", "fork", "timeout", "bit-set", "strict-test"]

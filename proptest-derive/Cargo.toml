@@ -15,6 +15,9 @@ Custom-derive for the Arbitrary trait of proptest.
 """
 homepage = "https://proptest-rs.github.io/proptest/proptest-derive/index.html"
 
+[lints]
+workspace = true
+
 [lib]
 proc-macro = true
 

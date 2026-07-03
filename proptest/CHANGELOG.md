@@ -3,14 +3,27 @@
 ### Breaking Changes
 
 - The minimum supported Rust version has been increased to 1.96.0.
+- Removed the `Arbitrary` implementations for `std::sync::Mutex`, `std::sync::RwLock`, `std::sync::Condvar`, and `std::sync::WaitTimeoutResult` (and the `ArbitraryF1` lifts for the two locks). The poisoning-prone std locks conflict with the strict lint policy, and `WaitTimeoutResult` cannot be produced without them; compile-fail coverage pins the removals.
+- `#[property_test]` (re-exported under the `attr-macro` feature) now generates strict tests: the wrapper returns `proptest::strict::TestResult`, runs through `proptest::strict::ensure_property`, and rejects `()` property bodies at compile time. See the `proptest-macro` changelog for the full codegen contract.
 
 ### Bug Fixes
 
 - Fixed a panic when sampling from a single-point inclusive float range like `0.0..=0.0`. ([\#479](https://github.com/proptest-rs/proptest/issues/479))
+- A weighted union whose weights are all zero and a `SampledBitSetStrategy` whose concrete bitset cannot represent the requested bit range now abort generation with an error instead of panicking.
+- Selecting a char from an empty `ranges` list now degrades to the canonical `'a'` shrink target instead of panicking.
+- The uniform float samplers (`FloatUniform::new` / `new_inclusive`) now validate their bounds and return rand's `uniform::Error` values instead of panicking on non-finite or empty ranges.
+- A failure to create or initialize the fork temp file now aborts the run as `TestError::Abort` instead of panicking, and `BarrierWaitResult` generation degrades to a leader result instead of panicking when OS thread spawning fails.
+- A closed stderr no longer aborts a run: runner warnings and hints are written best-effort through a typed diagnostics catalog with unchanged message text.
+
+### New Additions
+
+- Added the `proptest::strict` module behind the new default-on `strict-test` feature (requires `std`): `ensure_property` and `ensure_property_with_config` run a strategy against a closure returning `Result<(), TestFailure>` (`proptest::strict::TestResult`) and map runner outcomes onto `TestFailure::PropertyFalsified` / `TestFailure::PropertyAborted` instead of panicking, with `TestFailure` re-exported from `strict-test-support`. `strict_default_config()` starts from `Config::default()` (ordinary `PROPTEST_*` environment behavior preserved), disables failure persistence, and seeds deterministically from `STRICT_TEST_SEED`: unset or unparseable pins the fixed seed `0x5EED`, `random` opts into OS entropy, and an integer pins that exact seed.
+- Added typed fallible constructors alongside the panicking legacy forms: `Union::try_new_uniform` / `Union::try_new_weighted` / `try_float_to_weight` (with `UnionBuildError`), the `collection::try_vec` family (with `EmptySizeRange` via `SizeRange::ensure_nonempty`), `sample::try_subsequence` / `sample::try_select` / `Index::try_index`, `SampledBitSetStrategy::try_new` (with `SampledBitsError`), `try_range_subset` (with `RangeSubsetError`), and the crate-internal `Seed::try_from_bytes` (with `SeedLengthError`).
 
 ### Other Notes
 
 - Updated the rand dependency family to 0.10 and migrated `TestRng` and internal RNG integration to rand 0.10's trait and seeding APIs, preserving seeded behavior.
+- Failure-persistence files are now written with an OS-atomic header claim (`OpenOptions::create_new`) and whole-record appends instead of a process-global lock; concurrent writers interleave whole records, and torn lines are tolerated (and warned about) on read.
 
 ## 1.11.0
 

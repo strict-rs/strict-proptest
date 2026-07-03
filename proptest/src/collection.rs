@@ -238,7 +238,7 @@ pub fn vec<T: Strategy>(
     VecStrategy { element, size }
 }
 
-/// Fallible form of [`vec`]: returns a typed [`EmptySizeRange`] error instead
+/// Fallible form of [`vec()`]: returns a typed [`EmptySizeRange`] error instead
 /// of panicking when `size` is an empty range.
 pub fn try_vec<T: Strategy>(
     element: T,
@@ -589,7 +589,7 @@ where
     ))
 }
 
-/// Fallible form of [`hash_map`]: returns a typed [`EmptySizeRange`] error
+/// Fallible form of [`hash_map()`]: returns a typed [`EmptySizeRange`] error
 /// instead of panicking when `size` is an empty range.
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]

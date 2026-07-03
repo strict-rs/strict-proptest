@@ -103,23 +103,23 @@ There are also three associated functions to be implemented here (some types are
     mut state: Self::SystemUnderTest,
     ref_state: &Self::Reference::State,
     transition: Transition
-  ) -> Self::SystemUnderTest
+  ) -> Result<Self::SystemUnderTest, TestFailure>
   ```
   
-  This is also where you'll want to check any post-conditions that apply to a given transition, so after you apply the transition to the state, you can `assert!` some properties. Alternatively or additionally, you can use the `ref_state` for comparison, which will have the same transition that is given to this function already applied to it.
+  This is also where you'll want to check any post-conditions that apply to a given transition, so after you apply the transition to the state, you check properties with the `strict_test_support` `ensure*` helpers (`ensure`, `ensure_eq`, `ensure_some`, ...) and propagate failures with `?` — a violated post-condition returns a `TestFailure` instead of panicking. Alternatively or additionally, you can use the `ref_state` for comparison, which will have the same transition that is given to this function already applied to it.
 
 - Check properties that apply in any state:
 
   ```rust,ignore
-  fn check_invariants(state: &Self::SystemUnderTest, ref_state: &Self::Reference::State)
+  fn check_invariants(state: &Self::SystemUnderTest, ref_state: &Self::Reference::State) -> proptest::strict::TestResult
   ```
 
-  These must always hold and will be checked after every transition. Just like with `apply`, you have the option to use the `ref_state` for comparison.
+  These must always hold and will be checked after every transition (the default implementation returns `Ok(())`). Just like with `apply`, you have the option to use the `ref_state` for comparison.
 
-To add some teardown logic to run at the end of each test case, you can override the `teardown` function, which by default simply drops the state:
+To add some teardown logic to run at the end of each test case, you can override the `teardown` function, which by default simply drops the state and returns `Ok(())`:
 
 ```rust,ignore
-fn teardown(state: Self::SystemUnderTest, ref_state: Self::Reference::State)
+fn teardown(state: Self::SystemUnderTest, ref_state: Self::Reference::State) -> proptest::strict::TestResult
 ```
 
 ### Make the state machine test runnable
@@ -134,6 +134,8 @@ prop_state_machine! {
 ```
 
 You pick a `name_of_the_test` and a single numerical value or a range after the `sequential` keyword for a number of transitions to be generated for the state machine execution. The `MyStateMachineTest` is whatever you've implemented the `StateMachineTest` for.
+
+The macro expands to an ordinary `#[test]` function returning `proptest::strict::TestResult` that runs the generated transition sequences through `proptest::strict::ensure_property` (see the [Strict property tests](strict.md) chapter): runs are seeded deterministically by default (`STRICT_TEST_SEED` selects the seed), no `proptest-regressions/` files are written, and a falsified property comes back as `TestFailure::PropertyFalsified` carrying the shrunk minimal failing transition sequence.
 
 And that's it. You can run the test, perhaps with `cargo watch` as you develop it further, and see if it can find some interesting counter-examples to your properties.
 

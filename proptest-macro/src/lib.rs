@@ -1,3 +1,11 @@
+//! Procedural macros for the `proptest` crate.
+//!
+//! The crate currently provides one macro: [`macro@property_test`], an
+//! attribute that rewrites an annotated test function into a strict property
+//! test — the generated `#[test]` wrapper returns
+//! `proptest::strict::TestResult` and drives the body through
+//! `proptest::strict::ensure_property`.
+
 use proc_macro::TokenStream;
 
 mod property_test;

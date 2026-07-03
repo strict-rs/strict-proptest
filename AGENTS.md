@@ -17,6 +17,8 @@ This is a Cargo workspace (`resolver = "3"`, edition 2024) of four published cra
 
 Toolchain: the workspace `Cargo.toml` pins `edition = "2024"` / `rust-version = "1.96"` (the MSRV), inherited by every member crate via `.workspace = true`; the `README.md` MSRV note and the `pinned` CI job (`.github/workflows/rust.yml`) are kept in sync with it. Formatting is enforced by `rustfmt` with `max_width = 80` (`rustfmt.toml`); edition-2024 formatting requires the nightly formatter, so run `cargo +nightly fmt --all`.
 
+Lint policy: the workspace `Cargo.toml` carries a `[workspace.lints]` table (rust, rustdoc, and clippy levels) that every member crate adopts via `lints.workspace = true`; `clippy.toml` holds the thresholds and the disallowed macro/method/type lists with their reason strings (panicking assertions and the legacy property-macro front doors are banned in favor of the `strict_test_support` `ensure*` helpers and `proptest::strict::ensure_property`; preconditions belong in `Strategy::prop_filter`). Every deny-level entry holds across `cargo +nightly clippy --workspace --all-targets --all-features`; warn-level entries are the visible residual ledger. Fix code rather than weakening the table, the thresholds, or adding `#[allow]`/`#[expect]`.
+
 Core crate:
 
 ```sh

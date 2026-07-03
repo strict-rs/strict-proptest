@@ -15,6 +15,8 @@ It is recommended to check these files in to your source control so that
 other test runners (e.g., collaborators or a CI system) also replay these
 cases.
 
+Persistence applies to the `proptest!` macro surface and to explicitly configured runners. Strict property tests (`proptest::strict::ensure_property` and the tests `#[property_test]` / `prop_state_machine!` generate) deliberately disable it: they are seeded deterministically instead, the shrunk minimal counterexample travels in the returned `TestFailure`, and the intended workflow is to pin that counterexample as a named unit test — see the Strict property tests chapter.
+
 Note that, by default, all tests in the same crate will share that one
 persistence file. If you have a very large number of tests, it may be
 desirable to separate them into smaller groups so the number of extra test

@@ -13,6 +13,7 @@
   Post-condition and invariant failures propagate
   `strict_test_support::TestFailure` values instead of panicking, so
   implementations report failures with the `ensure*` helpers and `?`.
+- Because the generated tests run through the strict runner, they seed deterministically by default (`STRICT_TEST_SEED` selects the seed: unset or unparseable pins `0x5EED`, `random` opts into OS entropy, an integer pins that seed) and no longer write `proptest-regressions/` files; the shrunk minimal failing transition sequence is carried in the returned `TestFailure::PropertyFalsified` report instead.
 
 ## 0.8.0
 

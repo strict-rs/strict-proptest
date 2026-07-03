@@ -169,14 +169,30 @@ pub fn eval_expr(expr: &E) -> Option<u128> {
 mod test {
     use super::*;
 
-    fn eval(expr: &str) -> Option<u128> {
+    fn eval(
+        expr: &str,
+    ) -> Result<Option<u128>, ::strict_test_support::TestFailure> {
         use syn::parse_str;
-        eval_expr(&parse_str(expr).expect("not a valid expression"))
+        let parsed = ::strict_test_support::ensure_ok(
+            parse_str(expr),
+            "the test case parses as a valid expression",
+        )?;
+        Ok(eval_expr(&parsed))
     }
 
+    // `Option<u128>` has no `Display`, so the comparison flows through
+    // `ensure` rather than `ensure_eq`.
     macro_rules! test {
         ($($name: ident, $case: expr => $result:expr;)*) => {$(
-            #[test] fn $name() { assert_eq!(eval($case), $result); }
+            #[test]
+            fn $name(
+            ) -> ::core::result::Result<(), ::strict_test_support::TestFailure>
+            {
+                ::strict_test_support::ensure(
+                    eval($case)? == $result,
+                    "the interpreted value matches the expected evaluation",
+                )
+            }
         )*};
     }
 

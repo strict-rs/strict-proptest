@@ -4,7 +4,7 @@ Scope: `book/` — the Proptest Book, the mdBook (`book.toml`, sources under `sr
 
 ## Structure
 
-`src/SUMMARY.md` defines the navigation: `intro.md`, then a `proptest/` part (getting-started, the 13-chapter `tutorial/`, failure-persistence, forking, no-std, wasm, limitations, vs-quickcheck, reference-docs, state-machine, tips-and-best-practices) and a `proptest-derive/` part (getting-started, modifiers, errors). A chapter added on disk is invisible until it is also added to `SUMMARY.md`.
+`src/SUMMARY.md` defines the navigation: `intro.md`, then a `proptest/` part (getting-started, strict — the panic-free `proptest::strict` runner chapter, the 13-chapter `tutorial/`, failure-persistence, forking, no-std, wasm, limitations, vs-quickcheck, reference-docs, state-machine, tips-and-best-practices) and a `proptest-derive/` part (getting-started, modifiers, errors). A chapter added on disk is invisible until it is also added to `SUMMARY.md`.
 
 ## Couplings — why editing a chapter is rarely a one-file change
 
