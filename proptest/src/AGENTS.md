@@ -1,0 +1,65 @@
+# AGENTS.md
+
+This file provides guidance to coding agents when working with code in this repository.
+
+Scope: `proptest/src/` — the core library source: the crate root (`lib.rs`), the per-type strategy modules, the macro/no_std plumbing, and the three subsystem subdirectories (`strategy/`, `test_runner/`, `arbitrary/`, each with its own `AGENTS.md`). For the workspace-wide build/test/lint matrix, the `#![no_std]` rules, copyright headers, changelog and commit conventions, see the workspace-root `AGENTS.md`.
+
+## Crate root (`lib.rs`)
+
+`lib.rs` is tiny — it only sets crate attributes, wires `extern crate`s, and declares modules — but the ordering is load-bearing.
+
+- Lints: `#![no_std]`, `#![forbid(future_incompatible)]`, `#![deny(missing_docs, bare_trait_objects)]`, and `#![allow(clippy::doc_markdown, clippy::type_complexity)]` (the latter because the associated-type-heavy combinators trip `type_complexity` constantly).
+- Nightly feature gates via `cfg_attr`: `unstable` → `feature(allocator_api, coroutine_trait, never_type)`; `f16` → `feature(f16)`; `std` + `unstable` together → `feature(ip)`; `docsrs` → `feature(doc_cfg)` (for the `#[doc(cfg(...))]` badges on `std`/`bit-set`-gated items).
+- `extern crate` wiring, each `#[cfg]`-gated: `std` (when `std` *or* `test`, `#[macro_use]`), `alloc` (only when `alloc && !std`, `#[macro_use]`), `bitflags` (`#[macro_use]`, used by `num`'s `FloatTypes`), `bit_set` (feature `bit-set`), `rusty_fork` (feature `fork`, `#[macro_use]`).
+- `#[macro_use]` declaration order matters because `macro_rules!` is textually scoped — each must precede its users: `std_facade` (a `#[doc(hidden)] pub mod`, since its `multiplex_*` macros are used elsewhere) → `product_tuple` → `macros` → `sugar` (`#[doc(hidden)] pub`). Moving any of these down breaks the build.
+- `pub mod` list: `arbitrary`, `array`, `bits`, `bool`, `char`, `collection`, `num`, `strategy`, `test_runner`, `tuple`, `option`, `result`, `sample`, `prelude` are always present; `range_subset`, `path`, and `string` are `#[cfg(feature = "std")]`-gated (they pull in `std`-only types / `regex_syntax`).
+- Under `attr-macro`: re-exports `proptest_macro::property_test`, and defines the `compile_tests()` `#[test]` that runs `trybuild` over `tests/pass/*.rs`.
+
+## Per-type strategy modules
+
+Each module exposes the strategies (and their `ValueTree`s) for one family of values. Numeric and binary-search shrinking lives in `num`; everything here builds on `strategy::` combinators.
+
+- `array.rs` — `[S; N]` (any `N`, via const generics) is itself a `Strategy`; `UniformArrayStrategy<S, T>` + `ArrayValueTree<T>` wrap a *single* inner strategy for a whole array, built by the const-generic `uniform::<S, N>()` or the named `uniform1`..`uniform32`. Shrinks element-by-element, left to right.
+- `bits.rs` — integers-treated-as-bitflags (where the natural simplification of `64` is `0`, clearing a bit, not `63`). `BitSetLike` trait (impl'd for `u8`..`u128`/`i8`..`i128`/`usize`/`isize`, `Vec<bool>`, `VarBitSet`, and `bit_set::BitSet` under feature `bit-set`); `BitSetStrategy` (all/`between`/`masked` bits), `SampledBitSetStrategy` (a chosen *count* of bits within a range), shared `BitSetValueTree` that shrinks by clearing set bits down to `min_count`. Typed submodules: `u8`..`u128`/`i8`..`i128` (via `int_api!`, with an `ANY` const), `usize`/`isize`/`bool_vec` (via `minimal_api!`, no `ANY`), and `bitset` (feature `bit-set`). `VarBitSet` is the crate's variable-size bitset (a `BitSet` with `bit-set`, else `Vec<bool>`), used widely by `collection`/`sample`.
+- `bool.rs` — `ANY` (type `Any`, uniform) and `weighted(probability)` → `Weighted`; `BoolValueTree` shrinks `true` → `false`.
+- `char.rs` — `CharStrategy<'a>` + `CharValueTree`; entry points `any()`, `range(start, end)`, `ranges(Cow<[RangeInclusive<char>]>)`, plus the standalone `select_char()`. Generation is deliberately *biased* toward known-tricky chars (`DEFAULT_SPECIAL_CHARS`) and `DEFAULT_PREFERRED_RANGES` (ASCII + Latin-1). Shrinks through a `num::u32::BinarySearch` toward convenient targets (`a`/`A`/`0`/space/`¡`) and never crosses ranges. `simplify()` may `complicate()` itself back to the start, so its sanity test disables `strict_complicate_after_simplify`.
+- `collection.rs` — `SizeRange` (the length-bound type used everywhere; `size_range()`, conversions from ranges/`usize`/tuples, `Default` = `0..max_default_size_range`, the latter driven by `PROPTEST_MAX_DEFAULT_SIZE_RANGE`, default 100). Strategies + ctor fns: `vec`/`VecStrategy`, `vec_deque`, `linked_list`, `binary_heap`, `btree_set`, `btree_map`, and (feature `std`) `hash_set`, `hash_map`. `VecValueTree` shrinks by deleting elements down to the min size, then shrinking each remaining element; the non-`Vec` collections are `statics::Map`s over it. Set/map strategies wrap that in a `statics::Filter` (`MinSize`) that locally rejects undersized results when keys collide. A bare `Vec<T: Strategy>` is *also* a `Strategy` (fixed length = the vec's length; only elements shrink) for heterogeneous "parallel" tuples-as-vecs.
+- `num.rs` — numeric strategies; **all shrink by binary-searching toward 0** (`BinarySearch` value-trees, with `new`/`new_above`/`new_clamped`). Per-type submodules: integers `i8`..`i128`/`isize` and `u8`..`u128`/`usize` (each with `Any`/`ANY` and `BinarySearch`), floats `f32`/`f64` (and `f16` under feature `f16`). Crucially, plain `Range`/`RangeInclusive`/`RangeFrom`/`RangeTo`/`RangeToInclusive` of every numeric type implement `Strategy` here, which is why `0..10` works directly as a strategy. Float `Any` is backed by the `pub(crate)` `FloatTypes` bitflags; the per-class consts `POSITIVE`/`NEGATIVE`/`NORMAL`/`SUBNORMAL`/`ZERO`/`INFINITE`/`QUIET_NAN`/`SIGNALING_NAN`/`ANY` combine with `|`. `sample_uniform_incl()` is the public uniform-in-`[lo,hi]` helper (`sample_uniform()` is `pub(crate)`). Float sampling delegates to `num/float_samplers.rs` (see below).
+- `option.rs` — `Probability` (a checked `[0.0,1.0]` `f64`, `prob()` ctor, `Default` 0.5, plus `with`/`lift` product-type helpers for `Arbitrary` params). `of(t)` (50% `Some`) and `weighted(p, t)` → `OptionStrategy`/`OptionValueTree`; `Some` shrinks to `None`. Built as a `TupleUnion` of a `NoneStrategy` and a mapped inner strategy.
+- `result.rs` — re-exports `Probability`/`prob`. Two mirror-image families: `maybe_ok`/`maybe_ok_weighted` → `MaybeOk` (shrinks toward `Err`) and `maybe_err`/`maybe_err_weighted` → `MaybeErr` (shrinks toward `Ok`); pick by which case you want minimized. Both are `TupleUnion`s over `Ok`/`Err`-wrapping mapped strategies.
+- `path.rs` (feature `std`) — only `PathParams`, the `Arbitrary` parameters for `PathBuf` (`components: SizeRange` default `0..8`, `component_regex: StringParam` default = the `any::<String>()` regex), with `with_components`/`with_component_regex` builders. The actual path strategies live in `arbitrary/_std/`.
+- `sample.rs` — selection from a *fixed* input (the input is not itself a strategy). `subsequence()` → `Subsequence` (order-preserving subset, backed by a `SampledBitSetStrategy<VarBitSet>`); `select()` → `Select` (uniform single pick, shrinks by binary search); `Index`/`IndexStrategy` (a deferred index whose bound isn't known until `.index(len)`/`.get(slice)` is called — get it via `any::<Index>()`); `Selector`/`SelectorStrategy` (pick from any `IntoIterator`, via `any::<Selector>()`). Re-exports `SizeRange`/`size_range`.
+- `string.rs` (feature `std`) — strings/byte-strings generated from regexes. `StringParam` (default regex `\PC*`, non-control chars), the `Error` enum (`RegexSyntax`/`UnsupportedRegex`), `string_regex`/`string_regex_parsed` → `String`, `bytes_regex`/`bytes_regex_parsed` → `Vec<u8>`, all wrapped in `RegexGeneratorStrategy`/`RegexGeneratorValueTree`. A bare `&str`/`str` is itself a `String` `Strategy` (`"[a-z]+"` works directly). The semver-exempt `StrategyFromRegex` trait (impl'd for `String` and `Vec<u8>`) backs `#[proptest(regex = "...")]`. Walks the `regex_syntax` HIR into `char`/`collection`/`Union` strategies; anchors/look-around are unsupported.
+- `tuple.rs` — no explicit tuple strategy: a tuple of strategies (arities 1..=12) is itself a `Strategy` via the `tuple!` macro, sharing one `TupleValueTree<T>` that shrinks each element left to right.
+- `range_subset.rs` (feature `std`) — `range_subset(range, size)` → `RangeSubset`/`RangeSubsetValueTree`: like `subsequence` but samples a without-replacement subset of an index *range* (Fisher–Yates), yielding a `Vec<T>` and shrinking by removing elements down to the min size.
+
+## Subsystem directories
+
+High-level pointers only — each has its own `AGENTS.md` with the internals:
+
+- `strategy/` — the `Strategy` + `ValueTree` traits and every combinator (`prop_map`, `prop_filter`, `prop_flat_map`, unions, `prop_recursive`, boxing, …). See `strategy/AGENTS.md`.
+- `test_runner/` — the runner/shrink loop, `Config`/`PROPTEST_*` env vars, the seedable `TestRng`, result cache, and failure persistence (incl. fork/timeout). See `test_runner/AGENTS.md`.
+- `arbitrary/` — the `Arbitrary` trait, `any()`/`any_with()`, and the per-type impls split across `_core`/`_alloc`/`_std` tiers. See `arbitrary/AGENTS.md`.
+
+## Macros & no_std plumbing
+
+- `std_facade.rs` — the no_std bridge. The `multiplex_alloc!`/`multiplex_core!` macros emit `#[cfg]`-ed `pub use` aliases so allocated/std types resolve to `std`, `alloc`, or `core` per feature: `Cow`, `ToOwned`, `Box`, `String`, `Arc`, `Rc`, `Vec`, `VecDeque`, `BinaryHeap`, `LinkedList`, `BTreeSet`/`BTreeMap`, `HashMap`/`HashSet` (std), `fmt`, `Cell`, and the matching modules. **Any new code that reaches for an allocating type must import it from `crate::std_facade`, never from `std`/`alloc` directly**, or it breaks the `no_std`/`alloc` builds.
+- `sugar.rs` — the user-facing macros (all `#[macro_export]`): `proptest!` (incl. `#![proptest_config(expr)]` overrides and closure-style invocation), `prop_assume!`, `prop_oneof!`, `prop_compose!`, `prop_assert!` / `prop_assert_eq!` / `prop_assert_ne!`. Internals: the big `proptest_helper!` dispatcher, `named_arguments_tuple!` + the `NamedArguments` struct, and `force_no_fork()` (two `#[cfg]` variants — strips forking for closure-style runs).
+- `macros.rs` — internal-only helpers: `mapfn!` (define a `statics::MapFn` struct), `opaque_strategy_wrapper!` (the Strategy+ValueTree newtype boilerplate used by `option`/`result`/`collection`/`sample`/`string`), `delegate_vt_0!`, `unwrap_or!`.
+- `product_tuple.rs` — `product_type!` / `product_pack!` / `product_unpack!`: tuple-based product types used to merge `Arbitrary` parameters (e.g. `SizeRange::with`/`lift`, `Probability::with`/`lift`) and by the tuple machinery. `#[macro_use]`d early in `lib.rs`.
+- `prelude.rs` — the wildcard-import surface (`use proptest::prelude::*;`). Re-exports `Arbitrary`/`any`/`any_with`, `Strategy`/`Just`/`BoxedStrategy`/`SBoxedStrategy`, `Config as ProptestConfig`, `ProptestResultExt`/`TestCaseError`, the user macros, a slice of `rand` (`Rng`, `RngExt`, `rand_core::RngCore` — a deliberate direct re-export, *not* insulation from rand API changes), and the whole crate again under `prop` (so `prop::num::i32::ANY` works without a separate `use`).
+- `file-preamble` — the copyright-header template prepended to every `.rs` file.
+
+## `num/float_samplers.rs`
+
+Custom uniform float samplers used instead of `rand`'s (whose float `Uniform` is prone to overflow and is lower-precision for test data). The `float_sampler!` macro generates a `pub mod f32`/`f64` (and `f16` under feature `f16`), each defining a `FloatUniform` (`impl UniformSampler`) and a `pub(crate)` wrapper newtype `F32U`/`F64U`/`F16U` (re-exported into `num` as the sample type). The sampler recursively splits the range into equal-width intervals, picks one at random, and recurses until a single ULP remains. Under `no_std` it pulls `Float` from `num_traits` for the float ops (`std`-less `f32`/`f64`).
+
+## `regex-contrib/`
+
+`crates_regex.rs` is a large (~126 KB) corpus of real-world regexes scraped from crates.io (header: "DO NOT EDIT. Automatically generated by 'scripts/scrape_crates_io.py'"; the `README.md` notes it's copied verbatim from rust-lang/regex and is *not* part of the proptest binary). It is `include!`d into `string.rs`'s `#[cfg(test)]` module, where the local `consistent!` macro turns each entry into a test that asserts the regex string-strategy only generates matching strings. Generated, not hand-maintained — regenerate it upstream rather than editing by hand.
+
+## Conventions & gotchas
+
+- `#![no_std]` discipline: never name `std::` outside test code or `std`-gated code; pull allocated/std types from `crate::std_facade`.
+- Every new `.rs` file starts with the `file-preamble` copyright header, filled in with the current year and "The proptest developers".
+- `range_subset`, `path`, and `string` are `std`-only modules; keep new `std`-dependent strategies behind the same gate (and add the `#[doc(cfg(...))]` badge under `docsrs`).

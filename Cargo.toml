@@ -33,7 +33,6 @@ insta = "1"
 message-io = { version = "0.19.0", default-features = false }
 num-traits = { version = "0.2.19", default-features = false }
 prettyplease = "0.2"
-proc-macro2 = "1.0"
 quote = "1.0"
 rand = { version = "0.10", default-features = false }
 rand_chacha = { version = "0.10", default-features = false }
@@ -41,9 +40,39 @@ rand_xorshift = "0.5"
 regex = "1.12"
 regex-syntax = "0.8"
 rusty-fork = { version = "0.3.1", default-features = false }
-serde_json = "1.0"
-syn = "2.0.118"
 tempfile = "3.27"
-trybuild = "=1.0.115"
 unarray = "0.1.4"
 x86 = "0.52.0"
+
+# strict-* ecosystem deps, keep even if unused
+agents-md = { version = "0.1.0", git = "ssh://git@github.com/earthlings-dev/agents-md-rs.git", branch = "main" }
+bpaf = { git = "ssh://git@github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10", default-features = false }
+strict-xtask-core = { version = "0.1.0", git = "ssh://git@github.com/earthlings-dev/strict-xtask-core-rs.git", branch = "main" }
+strict-xtask-cargo = { version = "0.1.0", git = "ssh://git@github.com/earthlings-dev/strict-xtask-cargo-rs.git", branch = "main" }
+strict-xtask-agents-md = { version = "0.1.0", git = "ssh://git@github.com/earthlings-dev/strict-xtask-agents-md-rs.git", branch = "main" }
+mutant_fleet = { version = "0.1.0", git = "ssh://git@github.com/earthlings-dev/rust-mutant-fleet.git", branch = "main" }
+strict-test-support = { version = "0.1.0", git = "ssh://git@github.com/earthlings-dev/strict-test-support-rs.git", branch = "main" }
+trybuild = { git = "ssh://git@github.com/strict-rs/strict-trybuild.git", branch = "strict", version = "1" }
+syn = { version = "2", features = ["full", "visit"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+serde_json = "1"
+cargo_metadata = "0.23"
+ignore = "0.4"
+globset = "0.4"
+toml = "1.1"
+toml_edit = "0.25"
+anstyle = "1"
+snapbox = { version = "1.2", default-features = false, features = ["diff"] }
+parking_lot = "0.12"
+
+# patches, keep even if unused
+[patch."ssh://git@github.com/strict-rs/strict-proptest.git"]
+proptest = { version = "1", path = "proptest" }
+proptest-macro = { version = "0.5", path = "proptest-macro" }
+
+# patches, keep even if unused
+[patch."https://github.com/estrict-rs/strict-proptest.git"]
+proptest = { version = "1", path = "proptest" }
+proptest-macro = { version = "0.5", path = "proptest-macro" }
