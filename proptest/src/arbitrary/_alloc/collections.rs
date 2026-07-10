@@ -41,13 +41,21 @@ type RangedParams1<A> = product_type![SizeRange, A];
 /// Parameters for configuring the generation of `StrategyFor<...<A, B>>`.
 type RangedParams2<A, B> = product_type![SizeRange, A, B];
 
+/// Implements `Arbitrary` (and the matching `lift1!`) for a single-element
+/// collection type.
+///
+/// Given the collection (`Vec`, `VecDeque`, `BTreeSet`, ...), its `*Strategy`
+/// type, any extra element bounds, and the `crate::collection` constructor, it
+/// wires up `Parameters = RangedParams1<A>` (a `SizeRange` plus the element's
+/// own params) and calls the constructor with an arbitrary element strategy
+/// and that size range.
 macro_rules! impl_1 {
     ($typ: ident, $strat: ident, $($bound : path),* => $fun: ident) => {
         arbitrary!([A: Arbitrary $(+ $bound)*] $typ<A>,
             $strat<A::Strategy>, RangedParams1<A::Parameters>;
             args => {
-                let product_unpack![range, a] = args;
-                $fun(any_with::<A>(a), range)
+                let product_unpack![range, elem_params] = args;
+                $fun(any_with::<A>(elem_params), range)
             });
 
         lift1!([$($bound+)*] $typ<A>, SizeRange;
@@ -63,12 +71,18 @@ arbitrary!(SizeRange, MapInto<StrategyFor<RangeInclusive<usize>>, Self>;
 // Vec, VecDeque, LinkedList, BTreeSet, BinaryHeap, HashSet, HashMap:
 //==============================================================================
 
+/// Implements `Arbitrary` for the boxed-slice wrappers `Box<[A]>`, `Rc<[A]>`,
+/// and `Arc<[A]>`.
+///
+/// Each reuses `Vec<A>`'s strategy and parameters, mapping the generated
+/// vector into the slice wrapper with `prop_map_into` (`Strategy =
+/// MapInto<StrategyFor<Vec<A>>, Self>`).
 macro_rules! dst_wrapped {
     ($($w: ident),*) => {
         $(arbitrary!([A: Arbitrary] $w<[A]>,
             MapInto<StrategyFor<Vec<A>>, Self>,
             <Vec<A> as Arbitrary>::Parameters;
-            a => any_with::<Vec<A>>(a).prop_map_into()
+            args => any_with::<Vec<A>>(args).prop_map_into()
         );)*
     };
 }
@@ -86,6 +100,12 @@ impl_1!(HashSet, HashSetStrategy, Hash, Eq => hash_set);
 // IntoIterator:
 //==============================================================================
 
+/// Implements `Arbitrary` (and the matching `lift1!`) for a collection's
+/// owning `IntoIter`.
+///
+/// Generates an arbitrary collection of the given type and maps it through
+/// `into_iter` (`Strategy = SMapped<$type<A>, Self>`), reusing the
+/// collection's own parameters.
 macro_rules! into_iter_1 {
     ($module: ident, $type: ident $(, $bound : path)*) => {
         arbitrary!([A: Arbitrary $(+ $bound)*]
@@ -117,8 +137,8 @@ arbitrary!([A: Arbitrary + Hash + Eq, B: Arbitrary] HashMap<A, B>,
 HashMapStrategy<A::Strategy, B::Strategy>,
 RangedParams2<A::Parameters, B::Parameters>;
 args => {
-    let product_unpack![range, a, b] = args;
-    hash_map(any_with::<A>(a), any_with::<B>(b), range)
+    let product_unpack![range, key_params, elem_params] = args;
+    hash_map(any_with::<A>(key_params), any_with::<B>(elem_params), range)
 });
 
 #[cfg(feature = "std")]
@@ -131,8 +151,8 @@ arbitrary!([A: Arbitrary + Hash + Eq, B: Arbitrary] hash_map::IntoIter<A, B>,
 lift1!([, K: Hash + Eq + Arbitrary + 'static] HashMap<K, A>,
     RangedParams1<K::Parameters>;
     base, args => {
-        let product_unpack![range, k] = args;
-        hash_map(any_with::<K>(k), base, range)
+        let product_unpack![range, key_params] = args;
+        hash_map(any_with::<K>(key_params), base, range)
     }
 );
 
@@ -140,8 +160,8 @@ lift1!([, K: Hash + Eq + Arbitrary + 'static] HashMap<K, A>,
 lift1!(['static, K: Hash + Eq + Arbitrary + 'static] hash_map::IntoIter<K, A>,
     RangedParams1<K::Parameters>;
     base, args => {
-        let product_unpack![range, k] = args;
-        static_map(hash_map(any_with::<K>(k), base, range), HashMap::into_iter)
+        let product_unpack![range, key_params] = args;
+        static_map(hash_map(any_with::<K>(key_params), base, range), HashMap::into_iter)
     }
 );
 
@@ -191,15 +211,15 @@ arbitrary!([A: Arbitrary + Ord, B: Arbitrary] BTreeMap<A, B>,
 BTreeMapStrategy<A::Strategy, B::Strategy>,
 RangedParams2<A::Parameters, B::Parameters>;
 args => {
-    let product_unpack![range, a, b] = args;
-    btree_map(any_with::<A>(a), any_with::<B>(b), range)
+    let product_unpack![range, key_params, elem_params] = args;
+    btree_map(any_with::<A>(key_params), any_with::<B>(elem_params), range)
 });
 
 lift1!([, K: Ord + Arbitrary + 'static] BTreeMap<K, A>,
     RangedParams1<K::Parameters>;
     base, args => {
-        let product_unpack![range, k] = args;
-        btree_map(any_with::<K>(k), base, range)
+        let product_unpack![range, key_params] = args;
+        btree_map(any_with::<K>(key_params), base, range)
     }
 );
 
@@ -275,6 +295,8 @@ lift1!(['static] Bound<A>; base => {
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         size_bounds => SizeRange,
         vec => Vec<u8>,

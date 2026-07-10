@@ -6,6 +6,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Coverage for the `#[proptest(params(...))]` and `#[proptest(no_params)]`
+//! modifiers that thread a custom parameter type into a derived strategy.
+//!
+//! The derived types exercise container-level and field-level params (in both
+//! the `params(T)` and `params = "T"` spellings), `no_params` overrides, field
+//! strategies that read `params`, and per-field "parallel" params; each test
+//! drives generation through `any_with` to supply the parameters.
+
 use proptest::prelude::{Arbitrary, any_with};
 use proptest::strict::{TestResult, ensure_property};
 use proptest_derive::Arbitrary;
@@ -74,7 +82,7 @@ fn top_has_params() -> TestResult {
     ensure_property(
         &any_with::<TopHasParams>(MAX),
         "container params thread into the field strategy",
-        |v| ensure(v.int < 5, "int stays below the params max"),
+        |sample| ensure(sample.int < 5, "int stays below the params max"),
     )
 }
 
@@ -115,7 +123,11 @@ fn top_param_inner_strat() -> TestResult {
             ensure(inner.int >= 3, "int stays at or above the range start")?;
             ensure_eq(
                 &0,
-                &inner.string.split("a").filter(|s| !s.is_empty()).count(),
+                &inner
+                    .string
+                    .split("a")
+                    .filter(|segment| !segment.is_empty())
+                    .count(),
                 "the string field is made of a's only",
             )
         },

@@ -75,19 +75,19 @@ mod tests {
 
     #[test]
     fn seeds_not_recoverable() -> Result<(), TestFailure> {
-        let mut p = NoopFailurePersistence;
-        p.save_persisted_failure2(HI_PATH, INC_SEED, &"");
+        let mut persistence = NoopFailurePersistence;
+        persistence.save_persisted_failure2(HI_PATH, INC_SEED, &"");
         ensure_all(&[
             (
-                p.load_persisted_failures2(HI_PATH).is_empty(),
+                persistence.load_persisted_failures2(HI_PATH).is_empty(),
                 "a saved seed is not recoverable for its source",
             ),
             (
-                p.load_persisted_failures2(None).is_empty(),
+                persistence.load_persisted_failures2(None).is_empty(),
                 "nothing is recoverable without a source",
             ),
             (
-                p.load_persisted_failures2(UNREL_PATH).is_empty(),
+                persistence.load_persisted_failures2(UNREL_PATH).is_empty(),
                 "nothing is recoverable for an unrelated source",
             ),
         ])

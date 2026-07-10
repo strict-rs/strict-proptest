@@ -6,13 +6,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Coverage for the container `#[proptest(no_bound)]` modifier that drops
+//! the generated `Arbitrary` bounds from the derived type's parameters.
+//!
+//! The derived `T5<A, B, C>` hides its type parameters behind an aliased
+//! `PhantomData`, so `no_bound` lets `T6` derive `Arbitrary` while wrapping
+//! `T5<NotArbitrary, ...>`; `asserting_arbitrary` checks the impl resolves.
+
 use proptest::prelude::Arbitrary;
 use proptest_derive::Arbitrary;
 
 #[derive(Debug)]
 struct NotArbitrary;
 
-/// Ensure that we can't determine that this is PhantomData syntactically.
+/// Ensure that we can't determine that this is `PhantomData` syntactically.
 type HidePH<T> = ::std::marker::PhantomData<T>;
 
 /*

@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{Arc, String, ToOwned, Vec};
+use crate::std_facade::{Arc, String, ToOwned, Vec, format, vec};
 use crate::test_runner::config;
 use core::convert::{Infallible, TryInto};
 use core::result::Result;
@@ -68,6 +68,8 @@ pub enum RngAlgorithm {
 }
 
 impl RngAlgorithm {
+    /// The short key identifying this algorithm in the persistence and
+    /// replay wire formats (`xs` / `cc` / `pt` / `rc`).
     pub(crate) fn persistence_key(self) -> &'static str {
         match self {
             RngAlgorithm::XorShift => "xs",
@@ -77,8 +79,10 @@ impl RngAlgorithm {
         }
     }
 
-    pub(crate) fn from_persistence_key(k: &str) -> Option<Self> {
-        match k {
+    /// The inverse of `persistence_key`: map a wire key back to its
+    /// algorithm, or `None` if the key is unrecognized.
+    pub(crate) fn from_persistence_key(key: &str) -> Option<Self> {
+        match key {
             "xs" => Some(RngAlgorithm::XorShift),
             "cc" => Some(RngAlgorithm::ChaCha),
             "pt" => Some(RngAlgorithm::PassThrough),
@@ -97,7 +101,7 @@ impl str::FromStr for RngAlgorithm {
     }
 }
 impl fmt::Display for RngAlgorithm {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.persistence_key())
     }
 }
@@ -105,25 +109,41 @@ impl fmt::Display for RngAlgorithm {
 /// Proptest's random number generator.
 #[derive(Clone, Debug)]
 pub struct TestRng {
+    /// The active algorithm-specific generator state.
     rng: TestRngImpl,
 }
 
+/// The algorithm-specific backing state behind a `TestRng`.
 #[derive(Clone, Debug)]
 enum TestRngImpl {
+    /// A `XorShift` generator.
     XorShift(XorShiftRng),
+    /// A `ChaCha` generator.
     ChaCha(ChaChaRng),
+    /// Raw bytes replayed as "randomness", reading zeros once spent.
     PassThrough {
+        /// Offset of the next unread byte in `data`.
         off: usize,
+        /// One past the last byte this generator may read.
         end: usize,
+        /// The shared byte buffer, split across derived generators.
         data: Arc<[u8]>,
     },
+    /// A `ChaCha` generator that also records the bytes it emits.
     Recorder {
+        /// The underlying `ChaCha` generator.
         rng: ChaChaRng,
+        /// Every byte emitted so far, retrievable via `bytes_used`.
         record: Vec<u8>,
     },
 }
 
+/// Seed a fresh RNG of type `R` from OS entropy (`SysRng`).
 #[cfg(feature = "std")]
+#[allow(
+    clippy::single_call_fn,
+    reason = "seed a fresh RNG type from OS entropy via the SysRng source"
+)]
 fn from_sys_rng<R: SeedableRng>() -> R {
     let mut rng = UnwrapErr(SysRng);
     R::from_rng(&mut rng)
@@ -139,7 +159,51 @@ fn seeded_or_sys_rng<R: SeedableRng>(seed: config::RngSeed) -> R {
     }
 }
 
+#[cfg(any(
+    test,
+    all(
+        not(feature = "std"),
+        any(target_arch = "x86", target_arch = "x86_64"),
+        feature = "hardware-rng"
+    )
+))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EntropySeedStatus {
+    Filled,
+    Fallback,
+}
+
+#[cfg(any(
+    test,
+    all(
+        not(feature = "std"),
+        any(target_arch = "x86", target_arch = "x86_64"),
+        feature = "hardware-rng"
+    )
+))]
+fn fill_entropy_seed<const N: usize, E>(
+    mut seed: [u8; N],
+    fill: impl FnOnce(&mut [u8]) -> Result<(), E>,
+) -> ([u8; N], EntropySeedStatus) {
+    match fill(&mut seed) {
+        Ok(()) => (seed, EntropySeedStatus::Filled),
+        Err(_) => (seed, EntropySeedStatus::Fallback),
+    }
+}
+
+#[cfg(all(
+    not(feature = "std"),
+    any(target_arch = "x86", target_arch = "x86_64"),
+    feature = "hardware-rng"
+))]
+fn hardware_seed<const N: usize>(fallback: [u8; N]) -> [u8; N] {
+    let (seed, _status) = fill_entropy_seed(fallback, getrandom::fill);
+    seed
+}
+
 impl TestRng {
+    /// Draw the next `u32`, dispatching to the active generator (and
+    /// recording it under `Recorder`).
     fn next_u32_inner(&mut self) -> u32 {
         match &mut self.rng {
             TestRngImpl::XorShift(rng) => rng.next_u32(),
@@ -157,6 +221,8 @@ impl TestRng {
         }
     }
 
+    /// Draw the next `u64`, dispatching to the active generator (and
+    /// recording it under `Recorder`).
     fn next_u64_inner(&mut self) -> u64 {
         match &mut self.rng {
             TestRngImpl::XorShift(rng) => rng.next_u64(),
@@ -174,6 +240,9 @@ impl TestRng {
         }
     }
 
+    /// Fill `dest` from the active generator: real randomness for the
+    /// algorithmic variants, the remaining window then zeros for
+    /// `PassThrough`, recording the bytes under `Recorder`.
     fn fill_bytes_inner(&mut self, dest: &mut [u8]) {
         match &mut self.rng {
             TestRngImpl::XorShift(rng) => rng.fill_bytes(dest),
@@ -223,11 +292,16 @@ impl TryRng for TestRng {
     }
 }
 
+/// The persisted, algorithm-tagged form of a `TestRng`'s seed.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Seed {
+    /// A 16-byte `XorShift` seed.
     XorShift([u8; 16]),
+    /// A 32-byte `ChaCha` seed.
     ChaCha([u8; 32]),
+    /// A `PassThrough` byte buffer with an optional consumed window.
     PassThrough(Option<(usize, usize)>, Arc<[u8]>),
+    /// A 32-byte `Recorder` (`ChaCha`) seed.
     Recorder([u8; 32]),
 }
 
@@ -235,7 +309,9 @@ pub(crate) enum Seed {
 /// bytes supplied to construct a [`Seed`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SeedLengthError {
+    /// The algorithm name for the message (e.g. `"XorShift"`).
     algorithm: &'static str,
+    /// The exact seed length that algorithm requires, in bytes.
     required: usize,
 }
 
@@ -252,6 +328,13 @@ impl fmt::Display for SeedLengthError {
 impl core::error::Error for SeedLengthError {}
 
 impl Seed {
+    /// Build a `Seed` for `algorithm` from `seed`, panicking on a
+    /// wrong-length seed to preserve `TestRng::from_seed`'s documented
+    /// contract; `try_from_bytes` is the non-panicking form.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "build a Seed from raw bytes, panicking to preserve TestRng::from_seed's documented contract"
+    )]
     pub(crate) fn from_bytes(algorithm: RngAlgorithm, seed: &[u8]) -> Self {
         match Self::try_from_bytes(algorithm, seed) {
             Ok(parsed) => parsed,
@@ -261,6 +344,13 @@ impl Seed {
         }
     }
 
+    /// Build a `Seed` for `algorithm` from `seed`, returning a
+    /// `SeedLengthError` when the fixed-length algorithms are handed the
+    /// wrong number of bytes (`PassThrough` accepts any length).
+    #[allow(
+        clippy::single_call_fn,
+        reason = "parse raw bytes into a Seed, returning a typed length error instead of panicking"
+    )]
     pub(crate) fn try_from_bytes(
         algorithm: RngAlgorithm,
         seed: &[u8],
@@ -297,6 +387,8 @@ impl Seed {
         }
     }
 
+    /// Decode a `Seed` from one persistence/replay line, or `None` if
+    /// the algorithm key is unknown or its payload is malformed.
     pub(crate) fn from_persistence(string: &str) -> Option<Seed> {
         fn from_base16(dst: &mut [u8], src: &str) -> Option<()> {
             if dst.len() * 2 != src.len() {
@@ -315,15 +407,15 @@ impl Seed {
 
         let parts =
             string.trim().split(char::is_whitespace).collect::<Vec<_>>();
-        let (key, data) = parts.split_first()?;
+        let (key, fields) = parts.split_first()?;
         RngAlgorithm::from_persistence_key(key).and_then(|alg| match alg {
             RngAlgorithm::XorShift => {
-                if 4 != data.len() {
+                if 4 != fields.len() {
                     return None;
                 }
 
                 let mut dwords = [0u32; 4];
-                for (dword, part) in dwords.iter_mut().zip(data) {
+                for (dword, part) in dwords.iter_mut().zip(fields) {
                     *dword = part.parse().ok()?;
                 }
 
@@ -336,13 +428,13 @@ impl Seed {
             }
 
             RngAlgorithm::ChaCha => {
-                let [payload] = data else { return None };
+                let [payload] = fields else { return None };
                 let mut seed = [0u8; 32];
                 from_base16(&mut seed, payload)?;
                 Some(Seed::ChaCha(seed))
             }
 
-            RngAlgorithm::PassThrough => match data {
+            RngAlgorithm::PassThrough => match fields {
                 [] => Some(Seed::PassThrough(None, vec![].into())),
                 [payload] => {
                     let mut seed = vec![0u8; payload.len() / 2];
@@ -353,7 +445,7 @@ impl Seed {
             },
 
             RngAlgorithm::Recorder => {
-                let [payload] = data else { return None };
+                let [payload] = fields else { return None };
                 let mut seed = [0u8; 32];
                 from_base16(&mut seed, payload)?;
                 Some(Seed::Recorder(seed))
@@ -361,6 +453,8 @@ impl Seed {
         })
     }
 
+    /// Encode this `Seed` as its single-line persistence/replay form
+    /// (the inverse of `from_persistence`).
     pub(crate) fn to_persistence(&self) -> String {
         fn to_base16(dst: &mut String, src: &[u8]) {
             for byte in src {
@@ -446,6 +540,10 @@ impl TestRng {
     }
 
     /// Construct a default TestRng from entropy.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "the default TestRng resolved from a configured seed and RNG algorithm"
+    )]
     pub(crate) fn default_rng(
         seed: config::RngSeed,
         algorithm: RngAlgorithm,
@@ -492,70 +590,48 @@ impl TestRng {
         }
     }
 
+    /// The fixed 16-byte seed behind the deterministic `XorShift` RNG.
     const SEED_FOR_XOR_SHIFT: [u8; 16] = [
         0xf4, 0x16, 0x16, 0x48, 0xc3, 0xac, 0x77, 0xac, 0x72, 0x20, 0x0b, 0xea,
         0x99, 0x67, 0x2d, 0x6d,
     ];
 
+    /// The fixed 32-byte seed behind the deterministic `ChaCha` (and
+    /// `Recorder`) RNG.
     const SEED_FOR_CHA_CHA: [u8; 32] = [
         0xf4, 0x16, 0x16, 0x48, 0xc3, 0xac, 0x77, 0xac, 0x72, 0x20, 0x0b, 0xea,
         0x99, 0x67, 0x2d, 0x6d, 0xca, 0x9f, 0x76, 0xaf, 0x1b, 0x09, 0x73, 0xa0,
         0x59, 0x22, 0x6d, 0xc5, 0x46, 0x39, 0x1c, 0x4a,
     ];
 
-    /// Returns a `TestRng` with a seed generated with the
-    /// RdRand instruction on x86 machines.
+    /// Returns a `TestRng` with a seed generated from `getrandom::fill`.
     ///
-    /// This is useful in `no_std` scenarios on x86 where we don't
-    /// have a random number infrastructure but the `rdrand` instruction is
-    /// available.
+    /// This is useful in `no_std` scenarios on x86/x86_64 where consumers can
+    /// select an entropy backend. OS-less targets that require RDRAND should
+    /// build with `--cfg getrandom_backend="rdrand"`.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if `algorithm` is `RngAlgorithm::PassThrough`, which has no
+    /// deterministic seed.
     #[cfg(all(
         not(feature = "std"),
         any(target_arch = "x86", target_arch = "x86_64"),
         feature = "hardware-rng"
     ))]
     pub fn hardware_rng(algorithm: RngAlgorithm) -> Self {
-        use x86::random::rdrand_slice;
-
         Self::from_seed_internal(match algorithm {
             RngAlgorithm::XorShift => {
-                // Initialize to a sane seed just in case
-                let mut seed: [u8; 16] = TestRng::SEED_FOR_XOR_SHIFT;
-                unsafe {
-                    let r = rdrand_slice(&mut seed);
-                    debug_assert!(
-                        r,
-                        "hardware_rng should only be called on machines with support for rdrand"
-                    );
-                }
-                Seed::XorShift(seed)
+                Seed::XorShift(hardware_seed(TestRng::SEED_FOR_XOR_SHIFT))
             }
             RngAlgorithm::ChaCha => {
-                // Initialize to a sane seed just in case
-                let mut seed: [u8; 32] = TestRng::SEED_FOR_CHA_CHA;
-                unsafe {
-                    let r = rdrand_slice(&mut seed);
-                    debug_assert!(
-                        r,
-                        "hardware_rng should only be called on machines with support for rdrand"
-                    );
-                }
-                Seed::ChaCha(seed)
+                Seed::ChaCha(hardware_seed(TestRng::SEED_FOR_CHA_CHA))
             }
             RngAlgorithm::PassThrough => {
                 panic!("deterministic RNG not available for PassThrough")
             }
             RngAlgorithm::Recorder => {
-                // Initialize to a sane seed just in case
-                let mut seed: [u8; 32] = TestRng::SEED_FOR_CHA_CHA;
-                unsafe {
-                    let r = rdrand_slice(&mut seed);
-                    debug_assert!(
-                        r,
-                        "hardware_rng should only be called on machines with support for rdrand"
-                    );
-                }
-                Seed::Recorder(seed)
+                Seed::Recorder(hardware_seed(TestRng::SEED_FOR_CHA_CHA))
             }
         })
     }
@@ -574,6 +650,15 @@ impl TestRng {
     /// spurious test failures when the RNG happens to produce a very skewed
     /// distribution. Using this or `TestRunner::deterministic()` avoids such
     /// issues.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if `algorithm` is `RngAlgorithm::PassThrough`, which has no
+    /// deterministic seed.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "a fixed-seed TestRng for reproducible strategy and distribution tests"
+    )]
     pub fn deterministic_rng(algorithm: RngAlgorithm) -> Self {
         Self::from_seed_internal(match algorithm {
             RngAlgorithm::XorShift => {
@@ -681,7 +766,7 @@ impl TestRng {
 
 #[cfg(test)]
 mod test {
-    use crate::std_facade::Vec;
+    use crate::std_facade::{Vec, vec};
     use std::borrow::ToOwned;
     use std::string::ToString;
 
@@ -717,6 +802,41 @@ mod test {
     }
 
     #[test]
+    fn entropy_seed_fill_replaces_fallback_on_success()
+    -> Result<(), TestFailure> {
+        let fallback = [1u8, 2, 3, 4];
+        let (seed, status) = super::fill_entropy_seed(fallback, |dest| {
+            dest.copy_from_slice(&[9, 8, 7, 6]);
+            Ok::<(), ()>(())
+        });
+
+        ensure(
+            status == super::EntropySeedStatus::Filled,
+            "successful entropy fill reports Filled",
+        )?;
+        ensure(
+            seed == [9, 8, 7, 6],
+            "successful entropy fill replaces the fallback seed",
+        )
+    }
+
+    #[test]
+    fn entropy_seed_fill_keeps_fallback_on_error() -> Result<(), TestFailure> {
+        let fallback = [1u8, 2, 3, 4];
+        let (seed, status) =
+            super::fill_entropy_seed(fallback, |_dest| Err::<(), ()>(()));
+
+        ensure(
+            status == super::EntropySeedStatus::Fallback,
+            "failed entropy fill reports Fallback",
+        )?;
+        ensure(
+            seed == [1, 2, 3, 4],
+            "failed entropy fill preserves the deterministic fallback seed",
+        )
+    }
+
+    #[test]
     fn rngs_dont_clone_self_on_genrng() -> Result<(), TestFailure> {
         let seeds = prop_oneof![
             any::<[u8; 16]>().prop_map(Seed::XorShift),
@@ -748,17 +868,26 @@ mod test {
                 let mut rng2 = rng1.gen_rng();
                 let mut rng3 = rng1.gen_rng();
                 let mut rng4 = rng2.gen_rng();
-                let a = rng1.random::<Value>();
-                let b = rng2.random::<Value>();
-                let c = rng3.random::<Value>();
-                let d = rng4.random::<Value>();
+                let parent = rng1.random::<Value>();
+                let child = rng2.random::<Value>();
+                let sibling = rng3.random::<Value>();
+                let grandchild = rng4.random::<Value>();
                 ensure_all(&[
-                    (a != b, "first child differs from the parent"),
-                    (a != c, "second child differs from the parent"),
-                    (a != d, "grandchild differs from the parent"),
-                    (b != c, "siblings differ from each other"),
-                    (b != d, "grandchild differs from its parent's sibling"),
-                    (c != d, "second sibling differs from the grandchild"),
+                    (parent != child, "first child differs from the parent"),
+                    (parent != sibling, "second child differs from the parent"),
+                    (
+                        parent != grandchild,
+                        "grandchild differs from the parent",
+                    ),
+                    (child != sibling, "siblings differ from each other"),
+                    (
+                        child != grandchild,
+                        "grandchild differs from its parent's sibling",
+                    ),
+                    (
+                        sibling != grandchild,
+                        "second sibling differs from the grandchild",
+                    ),
                 ])
             },
         )

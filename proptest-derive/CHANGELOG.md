@@ -4,6 +4,16 @@
 
 - The minimum supported Rust version has been increased to 1.96.0.
 
+### Bug Fixes
+
+- The derived code no longer stamps the field's span onto its qualified `_proptest::arbitrary::...` helper paths, so consuming crates that enable the `unused_qualifications` lint no longer get false "unnecessary qualification" warnings attributed to their own fields. A missing `Arbitrary` impl still reports an error pointing at the offending field (the interpolated field type keeps its span); the impl-level duplicate of that error now attributes to the derive attribute instead of the field.
+
+### Other Notes
+
+- Split the derive implementation into an internal `proptest-derive-internal` library crate; `proptest-derive` is now a thin proc-macro shim that converts tokens and delegates. No change to the `#[derive(Arbitrary)]` API, the generated code, or the diagnostics — the split lets the pipeline be exercised (and documented) as ordinary library code, and the parse step is now panic-free (a malformed token stream surfaces as a `compile_error!` instead of unwinding).
+- The `value` codegen now produces its `fn() -> T` strategy through a typed `let` coercion (`{ let value_fn: fn() -> _ = || <expr>; value_fn }`) instead of an `as fn() -> _` cast; behavior is identical, and a user item named `value_fn` referenced from the pinned expression still resolves to the user's item (pinned by a regression test).
+- Replaced the crate's `#[macro_use] extern crate syn;` / `#[macro_use] extern crate quote;` globs with per-module `use` imports of `quote!`, `quote_spanned!`, `parse_quote!`, and `Token!`, and spelled out the anonymous lifetime (`Ctx<'_>`) across the internal derive pipeline. No generated-code or diagnostic changes.
+
 ## 0.8.0
 
 ### Breaking Changes

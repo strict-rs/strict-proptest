@@ -20,28 +20,34 @@ use crate::strategy::*;
 
 use super::string::not_utf8_bytes;
 
-arbitrary!(CString,
+std_arbitrary_with_params!(CString,
     SFnPtrMap<VecStrategy<RangeInclusive<u8>>, Self>, SizeRange;
-    args => static_map(vec(1..=u8::MAX, args + 1), |mut vec| {
-        vec.pop().unwrap();
+    args => static_map(vec(1..=u8::MAX, args), |vec| {
         // Could use: Self::from_vec_unchecked(vec) safely.
         Self::new(vec).unwrap()
     })
 );
 
-arbitrary!(OsString, MapInto<StrategyFor<String>, Self>,
+std_arbitrary_with_params!(OsString, MapInto<StrategyFor<String>, Self>,
     <String as Arbitrary>::Parameters;
-    a => any_with::<String>(a).prop_map_into()
+    args => any_with::<String>(args).prop_map_into()
 );
 
+/// Implements `Arbitrary` for a DST-pointer wrapper around `CStr`/`OsStr`.
+///
+/// For each wrapper `W`, `W<CStr>` maps from an arbitrary `CString` and
+/// `W<OsStr>` from an arbitrary `OsString`, using `prop_map_into` so the
+/// wrapper reuses the owned type's strategy and parameters.
 macro_rules! dst_wrapped {
     ($($w: ident),*) => {
-        $(arbitrary!($w<CStr>, MapInto<StrategyFor<CString>, Self>, SizeRange;
-            a => any_with::<CString>(a).prop_map_into()
+        $(std_arbitrary_with_params!($w<CStr>,
+            MapInto<StrategyFor<CString>, Self>, SizeRange;
+            args => any_with::<CString>(args).prop_map_into()
         );)*
-        $(arbitrary!($w<OsStr>, MapInto<StrategyFor<OsString>, Self>,
+        $(std_arbitrary_with_params!($w<OsStr>,
+            MapInto<StrategyFor<OsString>, Self>,
             <String as Arbitrary>::Parameters;
-            a => any_with::<OsString>(a).prop_map_into()
+            args => any_with::<OsString>(args).prop_map_into()
         );)*
     };
 }
@@ -63,11 +69,11 @@ arbitrary!(FromBytesWithNulError, SMapped<Option<u16>, Self>; {
         if let Some(pos) = opt_pos {
             let pos = pos as usize;
             // Allocate pos + 2 so that we never reallocate:
-            let mut v = Vec::<u8>::with_capacity(pos + 2);
-            v.extend(core::iter::repeat_n(1, pos));
-            v.push(0);
-            v.push(1);
-            CStr::from_bytes_with_nul(v.as_slice()).unwrap_err()
+            let mut bytes = Vec::<u8>::with_capacity(pos + 2);
+            bytes.extend(core::iter::repeat_n(1, pos));
+            bytes.push(0);
+            bytes.push(1);
+            CStr::from_bytes_with_nul(bytes.as_slice()).unwrap_err()
         } else {
             CStr::from_bytes_with_nul(b"").unwrap_err()
         }
@@ -82,6 +88,14 @@ arbitrary!(IntoStringError, SFnPtrMap<BoxedStrategy<Vec<u8>>, Self>;
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TestFailure, ensure, ensure_some};
+
+    use super::*;
+    use crate::arbitrary::any_with;
+    use crate::collection::size_range;
+    use crate::strategy::{Strategy, ValueTree};
+    use crate::test_runner::TestRunner;
+
     no_panic_test!(
         c_string => CString,
         os_string => OsString,
@@ -97,4 +111,45 @@ mod test {
         arc_c_str => Arc<CStr>,
         arc_os_str => Arc<OsStr>
     );
+
+    fn ensure_c_string_contract(
+        bounds: SizeRange,
+        expected: impl Fn(usize) -> bool,
+        context: &'static str,
+    ) -> Result<(), TestFailure> {
+        let mut runner = TestRunner::deterministic();
+        let strategy = any_with::<CString>(bounds);
+        for _ in 0..64 {
+            let value = ensure_some(
+                strategy.new_tree(&mut runner).ok(),
+                "CString strategy generates a value tree",
+            )?
+            .current();
+            let bytes = value.as_bytes();
+            ensure(expected(bytes.len()), context)?;
+            ensure(
+                !bytes.contains(&0),
+                "generated CString bytes contain no interior NUL",
+            )?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn c_string_respects_zero_length_range() -> Result<(), TestFailure> {
+        ensure_c_string_contract(
+            size_range(0..=0),
+            |len| len == 0,
+            "zero-length CString range generates empty byte strings",
+        )
+    }
+
+    #[test]
+    fn c_string_respects_bounded_length_range() -> Result<(), TestFailure> {
+        ensure_c_string_contract(
+            size_range(3..=5),
+            |len| (3..=5).contains(&len),
+            "bounded CString range generates lengths inside the range",
+        )
+    }
 }

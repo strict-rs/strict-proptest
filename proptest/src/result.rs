@@ -38,6 +38,11 @@ use crate::test_runner::*;
 // Re-export the type for easier usage.
 pub use crate::option::{Probability, prob};
 
+/// `MapFn` wrapping a generated success value into `Ok`.
+///
+/// Applied to the `Ok` arm of the `Result` unions so a delegate strategy's
+/// values arrive as `Result::Ok`; the `PhantomData` fixes the `T` and `E`
+/// types without storing anything.
 struct WrapOk<T, E>(PhantomData<T>, PhantomData<E>);
 impl<T, E> Clone for WrapOk<T, E> {
     fn clone(&self) -> Self {
@@ -46,16 +51,21 @@ impl<T, E> Clone for WrapOk<T, E> {
 }
 impl<T, E> Copy for WrapOk<T, E> {}
 impl<T, E> fmt::Debug for WrapOk<T, E> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "WrapOk")
     }
 }
 impl<T: fmt::Debug, E: fmt::Debug> statics::MapFn<T> for WrapOk<T, E> {
     type Output = Result<T, E>;
-    fn apply(&self, t: T) -> Result<T, E> {
-        Ok(t)
+    fn apply(&self, inner: T) -> Result<T, E> {
+        Ok(inner)
     }
 }
+/// `MapFn` wrapping a generated failure value into `Err`.
+///
+/// Applied to the `Err` arm of the `Result` unions so a delegate strategy's
+/// values arrive as `Result::Err`; the `PhantomData` fixes the `T` and `E`
+/// types without storing anything.
 struct WrapErr<T, E>(PhantomData<T>, PhantomData<E>);
 impl<T, E> Clone for WrapErr<T, E> {
     fn clone(&self) -> Self {
@@ -64,19 +74,23 @@ impl<T, E> Clone for WrapErr<T, E> {
 }
 impl<T, E> Copy for WrapErr<T, E> {}
 impl<T, E> fmt::Debug for WrapErr<T, E> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "WrapErr")
     }
 }
 impl<T: fmt::Debug, E: fmt::Debug> statics::MapFn<E> for WrapErr<T, E> {
     type Output = Result<T, E>;
-    fn apply(&self, e: E) -> Result<T, E> {
-        Err(e)
+    fn apply(&self, err: E) -> Result<T, E> {
+        Err(err)
     }
 }
 
+/// The `Err`-producing half of a `Result` union: the `E` strategy mapped
+/// through `WrapErr` so its generated values arrive as `Err`.
 type MapErr<T, E> =
     statics::Map<E, WrapErr<<T as Strategy>::Value, <E as Strategy>::Value>>;
+/// The `Ok`-producing half of a `Result` union: the `T` strategy mapped
+/// through `WrapOk` so its generated values arrive as `Ok`.
 type MapOk<T, E> =
     statics::Map<T, WrapOk<<T as Strategy>::Value, <E as Strategy>::Value>>;
 
@@ -120,14 +134,14 @@ opaque_strategy_wrapper! {
 impl<T: Strategy + fmt::Debug, E: Strategy + fmt::Debug> fmt::Debug
     for MaybeOk<T, E>
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "MaybeOk({:?})", self.0)
     }
 }
 impl<T: Strategy + fmt::Debug, E: Strategy + fmt::Debug> fmt::Debug
     for MaybeErr<T, E>
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "MaybeErr({:?})", self.0)
     }
 }
@@ -147,7 +161,7 @@ where
     T::Tree: fmt::Debug,
     E::Tree: fmt::Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "MaybeOkValueTree({:?})", self.0)
     }
 }
@@ -167,23 +181,26 @@ where
     T::Tree: fmt::Debug,
     E::Tree: fmt::Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "MaybeErrValueTree({:?})", self.0)
     }
 }
 
-/// Create a strategy for `Result`s where `Ok` values are taken from `t` and
-/// `Err` values are taken from `e`.
+/// Create a strategy for `Result`s where `Ok` values are taken from
+/// `ok_strategy` and `Err` values are taken from `err_strategy`.
 ///
 /// `Ok` and `Err` are chosen with equal probability.
 ///
 /// Generated values shrink to `Err`.
-pub fn maybe_ok<T: Strategy, E: Strategy>(t: T, e: E) -> MaybeOk<T, E> {
-    maybe_ok_weighted(0.5, t, e)
+pub fn maybe_ok<T: Strategy, E: Strategy>(
+    ok_strategy: T,
+    err_strategy: E,
+) -> MaybeOk<T, E> {
+    maybe_ok_weighted(0.5, ok_strategy, err_strategy)
 }
 
-/// Create a strategy for `Result`s where `Ok` values are taken from `t` and
-/// `Err` values are taken from `e`.
+/// Create a strategy for `Result`s where `Ok` values are taken from
+/// `ok_strategy` and `Err` values are taken from `err_strategy`.
 ///
 /// `probability_of_ok` is the probability (between 0.0 and 1.0, exclusive)
 /// that `Ok` is initially chosen.
@@ -191,8 +208,8 @@ pub fn maybe_ok<T: Strategy, E: Strategy>(t: T, e: E) -> MaybeOk<T, E> {
 /// Generated values shrink to `Err`.
 pub fn maybe_ok_weighted<T: Strategy, E: Strategy>(
     probability_of_ok: impl Into<Probability>,
-    t: T,
-    e: E,
+    ok_strategy: T,
+    err_strategy: E,
 ) -> MaybeOk<T, E> {
     let prob = probability_of_ok.into().into();
     let (ok_weight, err_weight) = float_to_weight(prob);
@@ -200,36 +217,49 @@ pub fn maybe_ok_weighted<T: Strategy, E: Strategy>(
     MaybeOk(TupleUnion::new((
         (
             err_weight,
-            Arc::new(statics::Map::new(e, WrapErr(PhantomData, PhantomData))),
+            Arc::new(statics::Map::new(
+                err_strategy,
+                WrapErr(PhantomData, PhantomData),
+            )),
         ),
         (
             ok_weight,
-            Arc::new(statics::Map::new(t, WrapOk(PhantomData, PhantomData))),
+            Arc::new(statics::Map::new(
+                ok_strategy,
+                WrapOk(PhantomData, PhantomData),
+            )),
         ),
     )))
 }
 
-/// Create a strategy for `Result`s where `Ok` values are taken from `t` and
-/// `Err` values are taken from `e`.
+/// Create a strategy for `Result`s where `Ok` values are taken from
+/// `ok_strategy` and `Err` values are taken from `err_strategy`.
 ///
 /// `Ok` and `Err` are chosen with equal probability.
 ///
 /// Generated values shrink to `Ok`.
-pub fn maybe_err<T: Strategy, E: Strategy>(t: T, e: E) -> MaybeErr<T, E> {
-    maybe_err_weighted(0.5, t, e)
+pub fn maybe_err<T: Strategy, E: Strategy>(
+    ok_strategy: T,
+    err_strategy: E,
+) -> MaybeErr<T, E> {
+    maybe_err_weighted(0.5, ok_strategy, err_strategy)
 }
 
-/// Create a strategy for `Result`s where `Ok` values are taken from `t` and
-/// `Err` values are taken from `e`.
+/// Create a strategy for `Result`s where `Ok` values are taken from
+/// `ok_strategy` and `Err` values are taken from `err_strategy`.
 ///
 /// `probability_of_ok` is the probability (between 0.0 and 1.0, exclusive)
 /// that `Err` is initially chosen.
 ///
 /// Generated values shrink to `Ok`.
+#[allow(
+    clippy::single_call_fn,
+    reason = "the Err-weighted Result strategy that the maybe_err combinator delegates to"
+)]
 pub fn maybe_err_weighted<T: Strategy, E: Strategy>(
     probability_of_err: impl Into<Probability>,
-    t: T,
-    e: E,
+    ok_strategy: T,
+    err_strategy: E,
 ) -> MaybeErr<T, E> {
     let prob = probability_of_err.into().into();
     let (err_weight, ok_weight) = float_to_weight(prob);
@@ -237,11 +267,17 @@ pub fn maybe_err_weighted<T: Strategy, E: Strategy>(
     MaybeErr(TupleUnion::new((
         (
             ok_weight,
-            Arc::new(statics::Map::new(t, WrapOk(PhantomData, PhantomData))),
+            Arc::new(statics::Map::new(
+                ok_strategy,
+                WrapOk(PhantomData, PhantomData),
+            )),
         ),
         (
             err_weight,
-            Arc::new(statics::Map::new(e, WrapErr(PhantomData, PhantomData))),
+            Arc::new(statics::Map::new(
+                err_strategy,
+                WrapErr(PhantomData, PhantomData),
+            )),
         ),
     )))
 }
@@ -253,13 +289,13 @@ mod test {
     use super::*;
 
     fn count_ok_of_1000(
-        s: impl Strategy<Value = Result<(), ()>>,
+        strategy: impl Strategy<Value = Result<(), ()>>,
     ) -> Result<u32, TestFailure> {
         let mut runner = TestRunner::deterministic();
         let mut count = 0;
         for _ in 0..1000 {
             count += ensure_some(
-                s.new_tree(&mut runner).ok(),
+                strategy.new_tree(&mut runner).ok(),
                 "result strategy generates a value tree",
             )?
             .current()

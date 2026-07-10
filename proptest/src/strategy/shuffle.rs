@@ -31,17 +31,26 @@ pub trait Shuffleable {
     /// Return the length of this collection.
     fn shuffle_len(&self) -> usize;
     /// Swap the elements at the given indices.
-    fn shuffle_swap(&mut self, a: usize, b: usize);
+    fn shuffle_swap(&mut self, first_index: usize, second_index: usize);
 }
 
-/// Swap the elements at `a` and `b` when both indices are in bounds; an
-/// out-of-bounds pair leaves the slice untouched. Callers draw indices below
-/// `shuffle_len()`, so the untouched arm is unreachable in normal operation.
-fn swap_if_in_bounds<T>(slice: &mut [T], a: usize, b: usize) {
-    if a == b {
+/// Swap the elements at `first_index` and `second_index` when both indices
+/// are in bounds; an out-of-bounds pair leaves the slice untouched. Callers
+/// draw indices below `shuffle_len()`, so the untouched arm is unreachable
+/// in normal operation.
+fn swap_if_in_bounds<T>(
+    slice: &mut [T],
+    first_index: usize,
+    second_index: usize,
+) {
+    if first_index == second_index {
         return;
     }
-    let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+    let (lo, hi) = if first_index < second_index {
+        (first_index, second_index)
+    } else {
+        (second_index, first_index)
+    };
     if let Some((head, tail)) = slice.split_at_mut_checked(hi) {
         if let (Some(first), Some(second)) =
             (head.get_mut(lo), tail.first_mut())
@@ -51,6 +60,9 @@ fn swap_if_in_bounds<T>(slice: &mut [T], a: usize, b: usize) {
     }
 }
 
+/// Implement `Shuffleable` for a slice- or array-like type by delegating
+/// `shuffle_len` to `len()` and `shuffle_swap` to the bounds-guarded
+/// `swap_if_in_bounds`.
 macro_rules! shuffleable {
     ($($t:tt)*) => {
         impl<T> Shuffleable for $($t)* {
@@ -58,8 +70,8 @@ macro_rules! shuffleable {
                 self.len()
             }
 
-            fn shuffle_swap(&mut self, a: usize, b: usize) {
-                swap_if_in_bounds(self, a, b);
+            fn shuffle_swap(&mut self, first_index: usize, second_index: usize) {
+                swap_if_in_bounds(self, first_index, second_index);
             }
         }
     }
@@ -75,9 +87,9 @@ impl<T> Shuffleable for VecDeque<T> {
 
     /// `VecDeque::swap` panics out of bounds, so both indices are guarded
     /// first; callers draw indices below `shuffle_len()`.
-    fn shuffle_swap(&mut self, a: usize, b: usize) {
-        if a < self.len() && b < self.len() {
-            self.swap(a, b);
+    fn shuffle_swap(&mut self, first_index: usize, second_index: usize) {
+        if first_index < self.len() && second_index < self.len() {
+            self.swap(first_index, second_index);
         }
     }
 }
@@ -141,7 +153,10 @@ where
 /// See `Strategy::prop_shuffle()`.
 #[derive(Clone, Debug)]
 pub struct ShuffleValueTree<V> {
+    /// The source value tree producing the collection to be shuffled.
     inner: V,
+    /// The generator driving the swap pass; cloned on every `current()` so the
+    /// permutation is reproduced identically each time.
     rng: TestRng,
     /// The maximum amount to move any one element during shuffling.
     ///
@@ -159,17 +174,19 @@ impl<V: ValueTree> ShuffleValueTree<V>
 where
     V::Value: Shuffleable,
 {
-    fn init_dist(&self, dflt: usize) -> usize {
+    /// Lazily initialise `dist` to a binary search seeded with `dflt` if it is
+    /// not set yet.
+    fn ensure_dist_initialized(&self, dflt: usize) {
         if self.dist.get().is_none() {
             self.dist.set(Some(num::usize::BinarySearch::new(dflt)));
         }
-
-        self.dist.get().unwrap().current()
     }
 
+    /// Force `dist` to be initialised from the current value's length so that
+    /// later shrink calls behave consistently even when invoked out of order.
     fn force_init_dist(&self) {
         if self.dist.get().is_none() {
-            self.init_dist(self.current().shuffle_len());
+            self.ensure_dist_initialized(self.current().shuffle_len());
         }
     }
 }
@@ -186,7 +203,8 @@ where
         // The maximum distance to swap elements. This could be larger than
         // the permuted collection if it has reduced size during shrinking;
         // that's OK, since we only use this to filter swaps.
-        let max_swap = self.init_dist(len);
+        self.ensure_dist_initialized(len);
+        let max_swap = self.dist.get().unwrap().current();
 
         // If empty collection or all swaps will be filtered out, there's
         // nothing to shuffle.
@@ -240,6 +258,7 @@ where
 mod test {
     use std::borrow::ToOwned;
     use std::collections::HashSet;
+    use std::{format, vec};
 
     use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
 
@@ -292,11 +311,11 @@ mod test {
 
             let mut prev_dist = i32::MAX;
             loop {
-                let v = value.current();
+                let shuffled = value.current();
                 // Compute the "shuffle distance" by summing the absolute
                 // distance of each element's displacement.
                 let mut dist = 0;
-                for (ix, &nominal) in v.iter().enumerate() {
+                for (ix, &nominal) in shuffled.iter().enumerate() {
                     dist += (nominal - ix as i32).abs();
                 }
 

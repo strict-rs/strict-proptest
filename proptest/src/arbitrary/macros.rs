@@ -7,12 +7,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg_attr(not(feature = "std"), allow(unused_macros))]
-
 //==============================================================================
 // Macros for quick implementing:
 //==============================================================================
 
+/// Writes an `impl Arbitrary` for a type in a single line.
+///
+/// The full form `arbitrary!([bounds] T, Strat, Params; args => expr)` fixes
+/// the `Strategy` and `Parameters` types and gives the body access to the
+/// generated params; shorter forms default `Params` to `()` or wrap a constant
+/// value in `Just<Self>`. The list form `arbitrary!(A, B, ...)` expands each
+/// name to `arbitrary!(T, T::Any; T::ANY)`, used for the bool and integer
+/// primitives.
 macro_rules! arbitrary {
     ([$($bounds : tt)*] $typ: ty, $strat: ty, $params: ty;
         $args: ident => $logic: expr) => {
@@ -33,9 +39,6 @@ macro_rules! arbitrary {
             _args => $crate::strategy::Just($logic)
         );
     };
-    ($typ: ty, $strat: ty, $params: ty; $args: ident => $logic: expr) => {
-        arbitrary!([] $typ, $strat, $params; $args => $logic);
-    };
     ($typ: ty, $strat: ty; $logic: expr) => {
         arbitrary!([] $typ, $strat; $logic);
     };
@@ -47,15 +50,15 @@ macro_rules! arbitrary {
     };
 }
 
+/// Implements `Arbitrary` for a newtype `W<A>` built by passing an arbitrary
+/// `A` through a constructor.
+///
+/// The value is drawn from `any::<A>()` and mapped through the explicit
+/// constructor with `static_map`, giving `Strategy = SMapped<A, Self>`; a
+/// matching `lift1!` impl is emitted so the newtype can also be lifted.
 macro_rules! wrap_ctor {
-    ($wrap: ident) => {
-        wrap_ctor!([] $wrap);
-    };
     ($wrap: ident, $maker: expr) => {
         wrap_ctor!([] $wrap, $maker);
-    };
-    ([$($bound : tt)*] $wrap: ident) => {
-        wrap_ctor!([$($bound)*] $wrap, $wrap::new);
     };
     ([$($bound : tt)*] $wrap: ident, $maker: expr) => {
         arbitrary!([A: $crate::arbitrary::Arbitrary + $($bound)*] $wrap<A>,
@@ -67,6 +70,12 @@ macro_rules! wrap_ctor {
     };
 }
 
+/// Implements `Arbitrary` for a wrapper `W<A>` built from an arbitrary `A`
+/// via `From`/`Into`.
+///
+/// Reuses `A`'s own strategy, mapping it with `prop_map_into` to give
+/// `Strategy = MapInto<A::Strategy, Self>`, and emits the companion `lift1!`
+/// impl. Used for wrappers such as `Box`, `Rc`, and `Arc`.
 macro_rules! wrap_from {
     ($wrap: ident) => {
         wrap_from!([] $wrap);
@@ -81,6 +90,13 @@ macro_rules! wrap_from {
     };
 }
 
+/// Implements `Arbitrary` for types whose value is produced by a
+/// zero-argument function at generation time.
+///
+/// Each `Type, f` pair becomes an impl with
+/// `Strategy = LazyJust<Self, fn() -> Self>`, deferring construction until a
+/// value is drawn rather than capturing it in a constant. Suited to values
+/// that cannot be built in a `const` initializer.
 macro_rules! lazy_just {
     ($($self: ty, $fun: expr);+) => {
         $(
@@ -100,19 +116,15 @@ macro_rules! lazy_just {
 /// use special shrinking methods can be handled separately.
 #[cfg(test)]
 macro_rules! no_panic_test {
-    ($($module: ident => $self: ty),+) => {
+    ($($name: ident => $self: ty),+ $(,)?) => {
         $(
-            mod $module {
-                #[allow(unused_imports)]
-                use super::super::*;
-                #[test]
-                fn no_panic() -> $crate::strict::TestResult {
-                    $crate::strict::ensure_property(
-                        &$crate::arbitrary::any::<$self>(),
-                        concat!(module_path!(), "::no_panic"),
-                        |_| Ok(()),
-                    )
-                }
+            #[test]
+            fn $name() -> $crate::strict::TestResult {
+                $crate::strict::ensure_property(
+                    &$crate::arbitrary::any::<$self>(),
+                    concat!(module_path!(), "::", stringify!($name)),
+                    |_| Ok(()),
+                )
             }
         )+
     };

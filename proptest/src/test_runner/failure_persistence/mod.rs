@@ -13,10 +13,13 @@ use core::fmt::Display;
 use core::result::Result;
 use core::str::FromStr;
 
+/// The `std`-only file-backed backend (`FileFailurePersistence`).
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 mod file;
+/// The in-memory `BTreeMap`-backed backend (`MapFailurePersistence`).
 mod map;
+/// The private no-op backend (`NoopFailurePersistence`).
 mod noop;
 
 #[cfg(feature = "std")]
@@ -33,7 +36,7 @@ use crate::test_runner::Seed;
 pub struct PersistedSeed(pub(crate) Seed);
 
 impl Display for PersistedSeed {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0.to_persistence())
     }
 }
@@ -125,8 +128,8 @@ pub trait FailurePersistence: Send + Sync + fmt::Debug {
     fn as_any(&self) -> &dyn Any;
 }
 
-impl<'a, 'b> PartialEq<dyn FailurePersistence + 'b>
-    for dyn FailurePersistence + 'a
+impl<'b> PartialEq<dyn FailurePersistence + 'b>
+    for dyn FailurePersistence + '_
 {
     fn eq(&self, other: &(dyn FailurePersistence + 'b)) -> bool {
         FailurePersistence::eq(self, other)
@@ -144,10 +147,10 @@ mod tests {
     use super::PersistedSeed;
     use crate::test_runner::rng::Seed;
 
-    pub const INC_SEED: PersistedSeed = PersistedSeed(Seed::XorShift([
+    pub(super) const INC_SEED: PersistedSeed = PersistedSeed(Seed::XorShift([
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
     ]));
 
-    pub const HI_PATH: Option<&str> = Some("hi");
-    pub const UNREL_PATH: Option<&str> = Some("unrelated");
+    pub(super) const HI_PATH: Option<&str> = Some("hi");
+    pub(super) const UNREL_PATH: Option<&str> = Some("unrelated");
 }

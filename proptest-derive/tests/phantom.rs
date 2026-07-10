@@ -6,10 +6,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Compile-and-run coverage for the derive's `PhantomData` field
+//! detection.
+//!
+//! Derives `Arbitrary` for structs carrying a `PhantomData<T>` field
+//! written through every import spelling (`::std::marker::PhantomData`,
+//! `marker::PhantomData`, bare `PhantomData`, and `std::marker::`), then
+//! instantiates each with a phantom type that is not `Arbitrary`. The
+//! phantom parameter must not receive the generated `Arbitrary` bound.
+
 use proptest::prelude::Arbitrary;
 use proptest_derive::Arbitrary;
 
-use std::marker;
 use std::marker::PhantomData;
 
 #[derive(Debug)]
@@ -22,7 +30,7 @@ struct T1<T>(::std::marker::PhantomData<T>);
 struct T2(T1<NotArbitrary>);
 
 #[derive(Debug, Arbitrary)]
-struct T3<T>(marker::PhantomData<T>);
+struct T3<T>(PhantomData<T>);
 
 #[derive(Debug, Arbitrary)]
 struct T4(T3<NotArbitrary>);
@@ -34,7 +42,7 @@ struct T5<T>(PhantomData<T>);
 struct T6(T5<NotArbitrary>);
 
 #[derive(Debug, Arbitrary)]
-struct T7<T>(std::marker::PhantomData<T>);
+struct T7<T>(PhantomData<T>);
 
 #[derive(Debug, Arbitrary)]
 struct T8(T7<NotArbitrary>);
@@ -43,7 +51,7 @@ struct T8(T7<NotArbitrary>);
 struct T9<A, B, C> {
     _a: A,
     _b: B,
-    c: PhantomData<C>,
+    _c: PhantomData<C>,
 }
 
 #[test]

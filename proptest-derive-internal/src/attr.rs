@@ -11,7 +11,7 @@
 use quote::ToTokens;
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
-use syn::{self, Attribute, Expr, Ident, Lit, Meta, Type};
+use syn::{self, Attribute, Expr, Ident, Lit, Meta, Token, Type, parse_quote};
 
 use crate::error::{self, Ctx, DeriveResult};
 use crate::interp;
@@ -23,7 +23,7 @@ use crate::util;
 
 /// Parsed attributes in our logical model.
 #[derive(Clone)]
-pub struct ParsedAttributes {
+pub(crate) struct ParsedAttributes {
     /// If we've been ordered to skip this item.
     /// This is only valid for enum variants.
     pub skip: bool,
@@ -35,14 +35,14 @@ pub struct ParsedAttributes {
     /// The mode for `Strategy` to use. See that type for more.
     pub strategy: StratMode,
     /// Filter expressions if any.
-    pub filter: Vec<syn::Expr>,
-    /// True if no_bound was specified.
+    pub filter: Vec<Expr>,
+    /// True if `no_bound` was specified.
     pub no_bound: bool,
 }
 
 /// The mode for the associated item `Strategy` to use.
 #[derive(Clone)]
-pub enum StratMode {
+pub(crate) enum StratMode {
     /// This means that no explicit strategy was specified
     /// and that we thus should use `Arbitrary` for whatever
     /// it is that needs a strategy.
@@ -63,7 +63,7 @@ pub enum StratMode {
 
 /// The mode for the associated item `Parameters` to use.
 #[derive(Clone)]
-pub enum ParamsMode {
+pub(crate) enum ParamsMode {
     /// Nothing has been specified. The children are now free to
     /// specify their parameters, and if nothing is specified, then
     /// `<X as Arbitrary>::Parameters` will be used for a type `X`.
@@ -85,14 +85,14 @@ pub enum ParamsMode {
 
 impl ParamsMode {
     /// Returns `true` iff the mode was explicitly set.
-    pub fn is_set(&self) -> bool {
+    pub(crate) fn is_set(&self) -> bool {
         !matches!(self, ParamsMode::Passthrough)
     }
 
     /// Converts the mode to an `Option` of an `Option` of a type
     /// where the outer `Option` is `None` iff the mode wasn't set
     /// and the inner `Option` is `None` iff the mode was `Default`.
-    pub fn into_option(self) -> Option<Option<Type>> {
+    pub(crate) fn into_option(self) -> Option<Option<Type>> {
         use self::ParamsMode::*;
         match self {
             Passthrough => None,
@@ -104,15 +104,15 @@ impl ParamsMode {
 
 impl StratMode {
     /// Returns `true` iff the mode was explicitly set.
-    pub fn is_set(&self) -> bool {
+    pub(crate) fn is_set(&self) -> bool {
         !matches!(self, StratMode::Arbitrary)
     }
 }
 
 /// Parse the attributes specified on an item and parsed by syn
 /// into our logical model that we work with.
-pub fn parse_attributes(
-    ctx: Ctx,
+pub(crate) fn parse_attributes(
+    ctx: Ctx<'_>,
     attrs: &[Attribute],
 ) -> DeriveResult<ParsedAttributes> {
     let attrs = parse_attributes_base(ctx, attrs)?;
@@ -123,8 +123,12 @@ pub fn parse_attributes(
 }
 
 /// Parse the attributes specified on a type definition...
-pub fn parse_top_attributes(
-    ctx: Ctx,
+#[allow(
+    clippy::single_call_fn,
+    reason = "entry point reading the type-level #[proptest(...)] attributes on the derive input"
+)]
+pub(crate) fn parse_top_attributes(
+    ctx: Ctx<'_>,
     attrs: &[Attribute],
 ) -> DeriveResult<ParsedAttributes> {
     parse_attributes_base(ctx, attrs)
@@ -134,7 +138,14 @@ pub fn parse_top_attributes(
 /// and returns true if we've been ordered to not set an `Arbitrary`
 /// bound on the given type variable the attributes are from,
 /// no matter what.
-pub fn has_no_bound(ctx: Ctx, attrs: &[Attribute]) -> DeriveResult<bool> {
+#[allow(
+    clippy::single_call_fn,
+    reason = "inspect a type variable's attributes to report whether no_bound was requested"
+)]
+pub(crate) fn has_no_bound(
+    ctx: Ctx<'_>,
+    attrs: &[Attribute],
+) -> DeriveResult<bool> {
     let attrs = parse_attributes_base(ctx, attrs)?;
     error::if_anything_specified(ctx, &attrs, error::TY_VAR);
     Ok(attrs.no_bound)
@@ -143,7 +154,7 @@ pub fn has_no_bound(ctx: Ctx, attrs: &[Attribute]) -> DeriveResult<bool> {
 /// Parse the attributes specified on an item and parsed by syn
 /// into our logical model that we work with.
 fn parse_attributes_base(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     attrs: &[Attribute],
 ) -> DeriveResult<ParsedAttributes> {
     let acc = parse_accumulate(ctx, attrs);
@@ -167,14 +178,26 @@ fn parse_attributes_base(
 /// The internal state of the attribute parser.
 #[derive(Default)]
 struct ParseAcc {
+    /// Set when `#[proptest(skip)]` was seen; drops an enum variant.
     skip: Option<()>,
+    /// The relative variant weight from `#[proptest(weight = N)]`.
     weight: Option<u32>,
+    /// Set when `#[proptest(no_params)]` was seen; use the default
+    /// `Parameters`.
     no_params: Option<()>,
+    /// The explicit `Parameters` type from `#[proptest(params = "Ty")]`.
     params: Option<Type>,
+    /// The explicit strategy expression from `#[proptest(strategy = ...)]`.
     strategy: Option<Expr>,
+    /// The constant value expression from `#[proptest(value = ...)]`.
     value: Option<Expr>,
+    /// The regex source from `#[proptest(regex = ...)]`.
     regex: Option<Expr>,
+    /// The accumulated `#[proptest(filter = ...)]` predicates — the only
+    /// repeatable modifier.
     filter: Vec<Expr>,
+    /// Set when `#[proptest(no_bound)]` was seen; suppress the `Arbitrary`
+    /// bound.
     no_bound: Option<()>,
 }
 
@@ -182,7 +205,14 @@ struct ParseAcc {
 // Internals: Extraction & Filtering
 //==============================================================================
 
-fn parse_accumulate(ctx: Ctx, attrs: &[Attribute]) -> ParseAcc {
+/// Fold every `#[proptest(..)]` modifier on an item into a single `ParseAcc`,
+/// ignoring non-proptest attributes and flattening grouped modifiers so each
+/// is dispatched uniformly.
+#[allow(
+    clippy::single_call_fn,
+    reason = "fold every #[proptest(...)] modifier on one item into a single ParseAcc"
+)]
+fn parse_accumulate(ctx: Ctx<'_>, attrs: &[Attribute]) -> ParseAcc {
     let mut state = ParseAcc::default();
 
     // Get rid of attributes we don't care about:
@@ -202,6 +232,10 @@ fn parse_accumulate(ctx: Ctx, attrs: &[Attribute]) -> ParseAcc {
 /// Returns `true` iff the attribute has to do with proptest.
 /// Otherwise, the attribute is irrevant to us and we will simply
 /// ignore it in our processing.
+#[allow(
+    clippy::single_call_fn,
+    reason = "tell #[proptest(...)] attributes apart from unrelated attributes"
+)]
 fn is_proptest_attr(attr: &Attribute) -> bool {
     util::eq_simple_path("proptest", attr.path())
 }
@@ -210,7 +244,11 @@ fn is_proptest_attr(attr: &Attribute) -> bool {
 /// We do this to treat all pieces uniformly whether a single
 /// `#[proptest(..)]` was used or many. This simplifies the
 /// logic somewhat.
-fn extract_modifiers(ctx: Ctx, attr: &Attribute) -> Vec<Meta> {
+#[allow(
+    clippy::single_call_fn,
+    reason = "flatten one #[proptest(...)] attribute into its individual Meta modifiers"
+)]
+fn extract_modifiers(ctx: Ctx<'_>, attr: &Attribute) -> Vec<Meta> {
     // Ensure we've been given an outer attribute form.
     if !is_outer_attr(attr) {
         error::inner_attr(ctx);
@@ -237,6 +275,10 @@ fn extract_modifiers(ctx: Ctx, attr: &Attribute) -> Vec<Meta> {
 /// Returns true iff the given attribute is an outer one, i.e: `#[<attr>]`.
 /// An inner attribute is the other possibility and has the syntax `#![<attr>]`.
 /// Note that `<attr>` is a meta-variable for the contents inside.
+#[allow(
+    clippy::single_call_fn,
+    reason = "recognize the outer #[..] attribute form rather than the inner bang form"
+)]
 fn is_outer_attr(attr: &Attribute) -> bool {
     syn::AttrStyle::Outer == attr.style
 }
@@ -247,7 +289,11 @@ fn is_outer_attr(attr: &Attribute) -> bool {
 
 /// Dispatches an attribute modifier to handlers and
 /// let's them add stuff into our accumulartor.
-fn dispatch_attribute(ctx: Ctx, mut acc: ParseAcc, meta: Meta) -> ParseAcc {
+#[allow(
+    clippy::single_call_fn,
+    reason = "route one parsed modifier name through the dispatch table to its handler"
+)]
+fn dispatch_attribute(ctx: Ctx<'_>, mut acc: ParseAcc, meta: Meta) -> ParseAcc {
     // Dispatch table for attributes:
     let path = meta.path();
     if let Some(name) = path.get_ident().map(ToString::to_string) {
@@ -272,7 +318,14 @@ fn dispatch_attribute(ctx: Ctx, mut acc: ParseAcc, meta: Meta) -> ParseAcc {
     acc
 }
 
-fn dispatch_unknown_mod(ctx: Ctx, name: &str) {
+/// Report an unknown `#[proptest(..)]` modifier, suggesting the intended name
+/// for common typos (`no_bounds`, `weights`, `strat`, …) and otherwise
+/// emitting a plain unknown-modifier error.
+#[allow(
+    clippy::single_call_fn,
+    reason = "match an unrecognized modifier name against common typos to suggest a fix"
+)]
+fn dispatch_unknown_mod(ctx: Ctx<'_>, name: &str) {
     match name {
         "no_bounds" => error::did_you_mean(ctx, name, "no_bound"),
         "weights" | "weighted" => error::did_you_mean(ctx, name, "weight"),
@@ -294,10 +347,14 @@ fn dispatch_unknown_mod(ctx: Ctx, name: &str) {
 // Internals: no_bound
 //==============================================================================
 
-/// Parse a no_bound attribute.
+/// Parse a `no_bound` attribute.
 /// Valid forms are:
 /// + `#[proptest(no_bound)]`
-fn parse_no_bound(ctx: Ctx, acc: &mut ParseAcc, meta: Meta) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "record a requested no_bound into the parse accumulator"
+)]
+fn parse_no_bound(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: Meta) {
     parse_bare_modifier(ctx, &mut acc.no_bound, meta, error::no_bound_malformed)
 }
 
@@ -308,7 +365,11 @@ fn parse_no_bound(ctx: Ctx, acc: &mut ParseAcc, meta: Meta) {
 /// Parse a skip attribute.
 /// Valid forms are:
 /// + `#[proptest(skip)]`
-fn parse_skip(ctx: Ctx, acc: &mut ParseAcc, meta: Meta) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "flag a skipped variant by recording skip into the parse accumulator"
+)]
+fn parse_skip(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: Meta) {
     parse_bare_modifier(ctx, &mut acc.skip, meta, error::skip_malformed)
 }
 
@@ -324,7 +385,11 @@ fn parse_skip(ctx: Ctx, acc: &mut ParseAcc, meta: Meta) {
 /// + `#[proptest(weight("<expr>""))]`
 ///
 /// The `<integer>` must also fit within an `u32` and be unsigned.
-fn parse_weight(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "evaluate the weight = <int> modifier to a u32 and store it"
+)]
+fn parse_weight(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: &Meta) {
     error_if_set(ctx, &acc.weight, meta);
 
     // Convert to a weight if possible:
@@ -338,8 +403,8 @@ fn parse_weight(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
         .filter(|&weight| weight <= u128::from(u32::MAX))
         .map(|weight| weight as u32);
 
-    if let v @ Some(_) = weight {
-        acc.weight = v;
+    if let matched_weight @ Some(_) = weight {
+        acc.weight = matched_weight;
     } else {
         error::weight_malformed(ctx, meta)
     }
@@ -354,7 +419,11 @@ fn parse_weight(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
 /// + `#[proptest(filter(<ident>))]`
 /// + `#[proptest(filter = "<expr>")]`
 /// + `#[proptest(filter("<expr>")]`
-fn parse_filter(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "collect one filter(...) predicate expression into the accumulator"
+)]
+fn parse_filter(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: &Meta) {
     if let Some(filter) = match normalize_meta(meta.clone()) {
         Some(NormMeta::Lit(Lit::Str(lit))) => lit.parse().ok(),
         Some(NormMeta::Word(ident)) => Some(parse_quote!( #ident )),
@@ -375,7 +444,11 @@ fn parse_filter(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
 /// + `#[proptest(regex = "<string>")]`
 /// + `#[proptest(regex("<string>")]`
 /// + `#[proptest(regex(<ident>)]`
-fn parse_regex(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "read the regex = <expr> modifier into a regex strategy source"
+)]
+fn parse_regex(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: &Meta) {
     error_if_set(ctx, &acc.regex, meta);
 
     if let expr @ Some(_) = match normalize_meta(meta.clone()) {
@@ -396,7 +469,11 @@ fn parse_regex(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
 /// + `#[proptest(value("<expr>")]`
 /// + `#[proptest(value(<literal>)]`
 /// + `#[proptest(value(<ident>)]`
-fn parse_value(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "treat value = <expr> as a constant-producing strategy base"
+)]
+fn parse_value(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: &Meta) {
     parse_strategy_base(ctx, &mut acc.value, meta)
 }
 
@@ -407,7 +484,11 @@ fn parse_value(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
 /// + `#[proptest(strategy("<expr>")]`
 /// + `#[proptest(strategy(<literal>)]`
 /// + `#[proptest(strategy(<ident>)]`
-fn parse_strategy(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "treat strategy = <expr> as an explicit strategy base"
+)]
+fn parse_strategy(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: &Meta) {
     parse_strategy_base(ctx, &mut acc.strategy, meta)
 }
 
@@ -418,7 +499,7 @@ fn parse_strategy(ctx: Ctx, acc: &mut ParseAcc, meta: &Meta) {
 /// + `#[proptest(<meta.name()>("<expr>")]`
 /// + `#[proptest(<meta.name()>(<literal>)]`
 /// + `#[proptest(<meta.name()>(<ident>)]`
-fn parse_strategy_base(ctx: Ctx, loc: &mut Option<Expr>, meta: &Meta) {
+fn parse_strategy_base(ctx: Ctx<'_>, loc: &mut Option<Expr>, meta: &Meta) {
     error_if_set(ctx, loc, meta);
 
     if let expr @ Some(_) = match normalize_meta(meta.clone()) {
@@ -435,8 +516,12 @@ fn parse_strategy_base(ctx: Ctx, loc: &mut Option<Expr>, meta: &Meta) {
 /// Combines any parsed explicit strategy, value, and regex into a single
 /// value and fails if both an explicit strategy / value / regex was set.
 /// Only one of them can be set, or none.
+#[allow(
+    clippy::single_call_fn,
+    reason = "reconcile strategy, value, and regex options into one exclusive StratMode"
+)]
 fn parse_strat_mode(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     strat: Option<Expr>,
     value_expr: Option<Expr>,
     regex: Option<Expr>,
@@ -456,8 +541,12 @@ fn parse_strat_mode(
 
 /// Combines a potentially set `params` and `no_params` into a single value
 /// and fails if both have been set. Only one of them can be set, or none.
+#[allow(
+    clippy::single_call_fn,
+    reason = "reconcile params and no_params options into one exclusive ParamsMode"
+)]
 fn parse_params_mode(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     no_params: Option<()>,
     ty_params: Option<Type>,
 ) -> DeriveResult<ParamsMode> {
@@ -477,7 +566,11 @@ fn parse_params_mode(
 /// + `#[proptest(params = "<type>"]`
 ///
 /// The latter form is required for more complex types.
-fn parse_params(ctx: Ctx, acc: &mut ParseAcc, meta: Meta) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "record the params(<Type>) modifier as an explicit Parameters type"
+)]
+fn parse_params(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: Meta) {
     error_if_set(ctx, &acc.params, &meta);
 
     let typ = match normalize_meta(meta) {
@@ -499,7 +592,11 @@ fn parse_params(ctx: Ctx, acc: &mut ParseAcc, meta: Meta) {
 /// Parses an order to use the default Parameters type and value.
 /// Valid forms are:
 /// + `#[proptest(no_params)]`
-fn parse_no_params(ctx: Ctx, acc: &mut ParseAcc, meta: Meta) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "note no_params so the derive omits an explicit Parameters type"
+)]
+fn parse_no_params(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: Meta) {
     parse_bare_modifier(
         ctx,
         &mut acc.no_params,
@@ -514,10 +611,10 @@ fn parse_no_params(ctx: Ctx, acc: &mut ParseAcc, meta: Meta) {
 
 /// Parses a bare attribute of the form `#[proptest(<attr>)]` and sets `loc`.
 fn parse_bare_modifier(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     loc: &mut Option<()>,
     meta: Meta,
-    malformed: fn(Ctx),
+    malformed: fn(Ctx<'_>),
 ) {
     error_if_set(ctx, loc, &meta);
 
@@ -529,13 +626,17 @@ fn parse_bare_modifier(
 }
 
 /// Emits a "set again" error iff the given option `.is_some()`.
-fn error_if_set<T>(ctx: Ctx, loc: &Option<T>, meta: &Meta) {
+fn error_if_set<T>(ctx: Ctx<'_>, loc: &Option<T>, meta: &Meta) {
     if loc.is_some() {
         error::set_again(ctx, meta)
     }
 }
 
 /// Constructs a type out of an identifier.
+#[allow(
+    clippy::single_call_fn,
+    reason = "turn a bare identifier modifier argument into a syn Type path"
+)]
 fn ident_to_type(ident: Ident) -> Type {
     Type::Path(syn::TypePath {
         qself: None,
@@ -544,6 +645,10 @@ fn ident_to_type(ident: Ident) -> Type {
 }
 
 /// Extract a `lit` in `NormMeta::Lit(<lit>)`.
+#[allow(
+    clippy::single_call_fn,
+    reason = "pull the literal payload out of a normalized modifier meta"
+)]
 fn extract_lit(meta: NormMeta) -> Option<Lit> {
     if let NormMeta::Lit(lit) = meta {
         Some(lit)

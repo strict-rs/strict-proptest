@@ -17,33 +17,33 @@ use crate::strategy::statics::static_map;
 use crate::strategy::*;
 
 arbitrary!(RangeFull; ..);
-wrap_ctor!(RangeFrom, |a| a..);
-wrap_ctor!(RangeTo, |a| ..a);
+wrap_ctor!(RangeFrom, |endpoint| endpoint..);
+wrap_ctor!(RangeTo, |endpoint| ..endpoint);
 
-wrap_ctor!(RangeToInclusive, |a| ..=a);
+wrap_ctor!(RangeToInclusive, |endpoint| ..=endpoint);
 
 arbitrary!(
     [A: PartialOrd + Arbitrary] RangeInclusive<A>,
     SMapped<(A, A), Self>, product_type![A::Parameters, A::Parameters];
     args => static_map(any_with::<(A, A)>(args),
-        |(a, b)| if b < a { b..=a } else { a..=b })
+        |(first, second)| if second < first { second..=first } else { first..=second })
 );
 
 lift1!([PartialOrd] RangeInclusive<A>; base => {
     let base = Arc::new(base);
-    (base.clone(), base).prop_map(|(a, b)| if b < a { b..=a } else { a..=b })
+    (base.clone(), base).prop_map(|(first, second)| if second < first { second..=first } else { first..=second })
 });
 
 arbitrary!(
     [A: PartialOrd + Arbitrary] Range<A>,
     SMapped<(A, A), Self>, product_type![A::Parameters, A::Parameters];
     args => static_map(any_with::<(A, A)>(args),
-        |(a, b)| if b < a { b..a } else { a..b })
+        |(first, second)| if second < first { second..first } else { first..second })
 );
 
 lift1!([PartialOrd] Range<A>; base => {
     let base = Arc::new(base);
-    (base.clone(), base).prop_map(|(a, b)| if b < a { b..a } else { a..b })
+    (base.clone(), base).prop_map(|(first, second)| if second < first { second..first } else { first..second })
 });
 
 #[cfg(feature = "unstable")]
@@ -52,10 +52,10 @@ arbitrary!(
     TupleUnion<(WA<SMapped<Y, Self>>, WA<SMapped<R, Self>>)>,
     product_type![Y::Parameters, R::Parameters];
     args => {
-        let product_unpack![y, r] = args;
+        let product_unpack![y, complete_params] = args;
         prop_oneof![
             static_map(any_with::<Y>(y), CoroutineState::Yielded),
-            static_map(any_with::<R>(r), CoroutineState::Complete)
+            static_map(any_with::<R>(complete_params), CoroutineState::Complete)
         ]
     }
 );
@@ -88,6 +88,8 @@ impl<A: fmt::Debug + 'static, B: fmt::Debug + 'static>
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         range_full => RangeFull,
         range_from => RangeFrom<usize>,

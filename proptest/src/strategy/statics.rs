@@ -35,16 +35,20 @@ use crate::test_runner::*;
 
 /// Essentially `Fn (&T) -> bool`.
 pub trait FilterFn<T> {
-    /// Test whether `t` passes the filter.
-    fn apply(&self, t: &T) -> bool;
+    /// Test whether `subject` passes the filter.
+    fn apply(&self, subject: &T) -> bool;
 }
 
 /// Static version of `strategy::Filter`.
 #[derive(Clone)]
 #[must_use = "strategies do nothing unless used"]
 pub struct Filter<S, F> {
+    /// The strategy or value tree whose values are being filtered.
     source: S,
+    /// The reason recorded with the runner each time a value is rejected.
     whence: Reason,
+    /// The `FilterFn` predicate deciding acceptance, stored by value rather
+    /// than behind an `Arc`.
     fun: F,
 }
 
@@ -63,7 +67,7 @@ impl<S, F> Filter<S, F> {
 }
 
 impl<S: fmt::Debug, F> fmt::Debug for Filter<S, F> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Filter")
             .field("source", &self.source)
             .field("whence", &self.whence)
@@ -93,6 +97,13 @@ impl<S: Strategy, F: FilterFn<S::Value> + Clone> Strategy for Filter<S, F> {
 }
 
 impl<S: ValueTree, F: FilterFn<S::Value>> Filter<S, F> {
+    /// After the source shrinks, `complicate()` it back until the predicate
+    /// accepts the current value again.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the source cannot be complicated back into an accepted
+    /// value, which would indicate a broken source `ValueTree`.
     fn ensure_acceptable(&mut self) {
         while !self.fun.apply(&self.source.current()) {
             if !self.source.complicate() {
@@ -141,14 +152,17 @@ pub trait MapFn<T> {
     type Output: fmt::Debug;
 
     /// Map `T` to `Output`.
-    fn apply(&self, t: T) -> Self::Output;
+    fn apply(&self, subject: T) -> Self::Output;
 }
 
 /// Static version of `strategy::Map`.
 #[derive(Clone)]
 #[must_use = "strategies do nothing unless used"]
 pub struct Map<S, F> {
+    /// The strategy or value tree whose values are being mapped.
     source: S,
+    /// The `MapFn` mapping function, stored by value rather than behind an
+    /// `Arc`.
     fun: F,
 }
 
@@ -160,7 +174,7 @@ impl<S, F> Map<S, F> {
 }
 
 impl<S: fmt::Debug, F> fmt::Debug for Map<S, F> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Map")
             .field("source", &self.source)
             .field("fun", &"<function>")
@@ -173,8 +187,8 @@ impl<S: Strategy, F: Clone + MapFn<S::Value>> Strategy for Map<S, F> {
     type Value = F::Output;
 
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-        self.source.new_tree(runner).map(|v| Map {
-            source: v,
+        self.source.new_tree(runner).map(|tree| Map {
+            source: tree,
             fun: self.fun.clone(),
         })
     }
@@ -203,6 +217,8 @@ impl<I, O: fmt::Debug> MapFn<I> for fn(I) -> O {
     }
 }
 
+/// Wrap `strat` in a `statics::Map` that applies the function pointer `fun`,
+/// letting callers name the resulting type without dynamic dispatch.
 pub(crate) fn static_map<S: Strategy, O: fmt::Debug>(
     strat: S,
     fun: fn(S::Value) -> O,
@@ -225,8 +241,8 @@ mod test {
         #[derive(Clone, Copy, Debug)]
         struct MyFilter;
         impl FilterFn<i32> for MyFilter {
-            fn apply(&self, &v: &i32) -> bool {
-                0 == v % 3
+            fn apply(&self, &candidate: &i32) -> bool {
+                0 == candidate % 3
             }
         }
 
@@ -264,8 +280,8 @@ mod test {
         struct MyMap;
         impl MapFn<i32> for MyMap {
             type Output = i32;
-            fn apply(&self, v: i32) -> i32 {
-                v * 2
+            fn apply(&self, element: i32) -> i32 {
+                element * 2
             }
         }
 
@@ -274,7 +290,7 @@ mod test {
         crate::strict::ensure_property(
             &input,
             "the static map applies its function to every value",
-            |v| ensure(0 == v % 2, "the mapped value is even"),
+            |mapped| ensure(0 == mapped % 2, "the mapped value is even"),
         )
     }
 }

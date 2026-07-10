@@ -67,13 +67,17 @@ pub trait StateMachineTest {
     /// Override this function to add some teardown logic on the SUT state
     /// at the end of each test case, returning a teardown failure as a
     /// [`TestFailure`]. The default implementation simply drops the state.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "default no-op teardown hook for per-case state-machine-test cleanup"
+    )]
     fn teardown(
         state: Self::SystemUnderTest,
         ref_state: <Self::Reference as ReferenceStateMachine>::State,
     ) -> TestResult {
-        // This is to avoid `unused_variables` warning
-        let _ = state;
-        let _ = ref_state;
+        // Consume the arguments; the default teardown just drops them.
+        drop(state);
+        drop(ref_state);
         Ok(())
     }
 
@@ -97,7 +101,7 @@ pub trait StateMachineTest {
             eprintln!("Running a test case with {} transitions.", trans_len);
         }
         #[cfg(not(feature = "std"))]
-        let _ = (config, trans_len);
+        drop((config, trans_len));
 
         let mut concrete_state = Self::init_test(&ref_state);
 
@@ -111,7 +115,8 @@ pub trait StateMachineTest {
             // the first step of its shrinking process which removes any unseen
             // transitions.
             if let Some(seen_counter) = seen_counter.as_mut() {
-                seen_counter.fetch_add(1, atomic::Ordering::SeqCst);
+                let _previous_seen =
+                    seen_counter.fetch_add(1, atomic::Ordering::SeqCst);
             }
 
             #[cfg(feature = "std")]
@@ -322,7 +327,7 @@ mod tests {
         use proptest::strategy::{BoxedStrategy, Just, Strategy};
         use proptest::strict::{TestFailure, TestResult};
         use proptest::test_runner::Config;
-        use strict_test_support::ensure;
+        use strict_test_support::{ensure, ensure_some};
 
         use crate::{ReferenceStateMachine, StateMachineTest};
 
@@ -367,7 +372,7 @@ mod tests {
                 match transition {
                     Op::Push(value) => state.push(*value),
                     Op::Pop => {
-                        state.pop();
+                        let _popped = state.pop();
                     }
                 }
                 state
@@ -408,7 +413,10 @@ mod tests {
                             !state.is_empty(),
                             "Pop only reaches a non-empty stack",
                         )?;
-                        state.pop();
+                        let _popped = ensure_some(
+                            state.pop(),
+                            "Pop removes an element from a non-empty stack",
+                        )?;
                     }
                 }
                 ensure(

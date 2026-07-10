@@ -17,12 +17,22 @@ use crate::test_runner::*;
 /// See `Strategy::prop_filter_map()`.
 #[must_use = "strategies do nothing unless used"]
 pub struct FilterMap<S, F> {
+    /// The strategy whose values are mapped and filtered.
     pub(super) source: S,
+    /// The reason recorded with the runner each time a value is rejected.
     pub(super) whence: Reason,
+    /// The closure mapping a source value to `Some(output)` or `None`, held
+    /// behind an `Arc` so the wrapper clones cheaply.
     pub(super) fun: Arc<F>,
 }
 
 impl<S, F> FilterMap<S, F> {
+    /// Wrap `source` so that only values `fun` maps to `Some` are produced,
+    /// recording `whence` with the runner on each rejection.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "cache a FilterMap combinator's mapping closure and rejection reason"
+    )]
     pub(super) fn new(source: S, whence: Reason, fun: F) -> Self {
         Self {
             source,
@@ -33,7 +43,7 @@ impl<S, F> FilterMap<S, F> {
 }
 
 impl<S: fmt::Debug, F> fmt::Debug for FilterMap<S, F> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FilterMap")
             .field("source", &self.source)
             .field("whence", &self.whence)
@@ -76,8 +86,13 @@ impl<S: Strategy, F: Fn(S::Value) -> Option<O>, O: fmt::Debug> Strategy
 
 /// `ValueTree` corresponding to `FilterMap`.
 pub struct FilterMapValueTree<V, F, O> {
+    /// The source value tree being shrunk.
     source: V,
+    /// The mapped output cached after (re)acceptance, so the next `current()`
+    /// need not re-run the closure; emptied once consumed.
     current: Cell<Option<O>>,
+    /// The closure mapping a source value to `Some(output)` or `None`, held
+    /// behind an `Arc` so the tree clones cheaply.
     fun: Arc<F>,
 }
 
@@ -90,7 +105,7 @@ impl<V: Clone + ValueTree, F: Fn(V::Value) -> Option<O>, O> Clone
 }
 
 impl<V: fmt::Debug, F, O> fmt::Debug for FilterMapValueTree<V, F, O> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FilterMapValueTree")
             .field("source", &self.source)
             .field("current", &"<current>")
@@ -102,6 +117,8 @@ impl<V: fmt::Debug, F, O> fmt::Debug for FilterMapValueTree<V, F, O> {
 impl<V: ValueTree, F: Fn(V::Value) -> Option<O>, O>
     FilterMapValueTree<V, F, O>
 {
+    /// Build a value tree over `source`, seeding the cache with the already
+    /// computed `current` output and sharing the mapping closure `fun`.
     fn new(source: V, fun: &Arc<F>, current: O) -> Self {
         Self {
             source,
@@ -110,11 +127,24 @@ impl<V: ValueTree, F: Fn(V::Value) -> Option<O>, O>
         }
     }
 
+    /// Recompute the mapped output from the source's current value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the closure returns `None` for a value it previously
+    /// accepted, which would be an internal logic error.
     fn fresh_current(&self) -> O {
         (self.fun)(self.source.current())
             .expect("internal logic error; this is a bug!")
     }
 
+    /// After the source shrinks, `complicate()` it back until the closure maps
+    /// the current value to `Some`, caching that output.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the source cannot be complicated back into an accepted
+    /// value, which would indicate a broken source `ValueTree`.
     fn ensure_acceptable(&mut self) {
         loop {
             if let Some(current) = (self.fun)(self.source.current()) {
@@ -173,8 +203,12 @@ mod test {
 
     #[test]
     fn test_filter_map() -> Result<(), TestFailure> {
-        let input = (0..256).prop_filter_map("%3 + 1", |v| {
-            if 0 == v % 3 { Some(v + 1) } else { None }
+        let input = (0..256).prop_filter_map("%3 + 1", |candidate| {
+            if 0 == candidate % 3 {
+                Some(candidate + 1)
+            } else {
+                None
+            }
         });
 
         for _ in 0..256 {
@@ -209,8 +243,12 @@ mod test {
     #[test]
     fn test_filter_map_sanity() {
         check_strategy_sanity(
-            (0..256).prop_filter_map("!%5 * 2", |v| {
-                if 0 != v % 5 { Some(v * 2) } else { None }
+            (0..256).prop_filter_map("!%5 * 2", |candidate| {
+                if 0 != candidate % 5 {
+                    Some(candidate * 2)
+                } else {
+                    None
+                }
             }),
             Some(CheckStrategySanityOptions {
                 // Due to internal rejection sampling, `simplify()` can

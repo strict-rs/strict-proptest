@@ -18,6 +18,11 @@ use crate::strategy::*;
 
 wrap_from!(Arc);
 
+/// Implements `Arbitrary` for atomic integer and bool types.
+///
+/// Each `AtomicType, base` pair generates an arbitrary value of the primitive
+/// `base` and passes it to `AtomicType::new` via `static_map`
+/// (`Strategy = SMapped<$base, Self>`).
 macro_rules! atomic {
     ($($type: ident, $base: ty);+) => {
         $(arbitrary!($type, SMapped<$base, Self>;
@@ -50,6 +55,8 @@ arbitrary!(Ordering,
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         arc => Arc<u8>,
         atomic_bool => AtomicBool,

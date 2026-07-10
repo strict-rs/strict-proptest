@@ -23,12 +23,15 @@ use crate::test_runner::*;
 /// See `Strategy::prop_map()`.
 #[must_use = "strategies do nothing unless used"]
 pub struct Map<S, F> {
+    /// The strategy or value tree whose values are being mapped.
     pub(super) source: S,
+    /// The mapping function, applied on every `current()` and held behind an
+    /// `Arc` so the wrapper clones cheaply.
     pub(super) fun: Arc<F>,
 }
 
 impl<S: fmt::Debug, F> fmt::Debug for Map<S, F> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Map")
             .field("source", &self.source)
             .field("fun", &"<function>")
@@ -50,8 +53,8 @@ impl<S: Strategy, O: fmt::Debug, F: Fn(S::Value) -> O> Strategy for Map<S, F> {
     type Value = O;
 
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-        self.source.new_tree(runner).map(|v| Map {
-            source: v,
+        self.source.new_tree(runner).map(|tree| Map {
+            source: tree,
             fun: Arc::clone(&self.fun),
         })
     }
@@ -87,7 +90,9 @@ impl<S: ValueTree, O: fmt::Debug, F: Fn(S::Value) -> O> ValueTree
 /// See `Strategy::prop_map_into()`.
 #[must_use = "strategies do nothing unless used"]
 pub struct MapInto<S, O> {
+    /// The strategy or value tree whose values are converted via `Into`.
     pub(super) source: S,
+    /// Marker recording the target type `O` the source values convert into.
     pub(super) output: PhantomData<O>,
 }
 
@@ -103,7 +108,7 @@ impl<S, O> MapInto<S, O> {
 }
 
 impl<S: fmt::Debug, O> fmt::Debug for MapInto<S, O> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MapInto")
             .field("source", &self.source)
             .finish()
@@ -156,12 +161,15 @@ where
 /// See `Strategy::prop_perturb()`.
 #[must_use = "strategies do nothing unless used"]
 pub struct Perturb<S, F> {
+    /// The strategy whose values are perturbed.
     pub(super) source: S,
+    /// The perturbation function, given the value and a random generator, held
+    /// behind an `Arc` so the wrapper clones cheaply.
     pub(super) fun: Arc<F>,
 }
 
 impl<S: fmt::Debug, F> fmt::Debug for Perturb<S, F> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Perturb")
             .field("source", &self.source)
             .field("fun", &"<function>")
@@ -199,13 +207,18 @@ impl<S: Strategy, O: fmt::Debug, F: Fn(S::Value, TestRng) -> O> Strategy
 ///
 /// See `Strategy::prop_perturb()`.
 pub struct PerturbValueTree<S, F> {
+    /// The source value tree being shrunk.
     source: S,
+    /// The perturbation function, held behind an `Arc` so the tree clones
+    /// cheaply.
     fun: Arc<F>,
+    /// The generator snapshotted at `new_tree` time and cloned on every
+    /// `current()`, so the perturbation stays stable across shrink steps.
     rng: TestRng,
 }
 
 impl<S: fmt::Debug, F> fmt::Debug for PerturbValueTree<S, F> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PerturbValueTree")
             .field("source", &self.source)
             .field("fun", &"<function>")
@@ -260,9 +273,9 @@ mod test {
     #[test]
     fn test_map() -> Result<(), TestFailure> {
         crate::strict::ensure_property(
-            &(0..10).prop_map(|v| v * 2),
+            &(0..10).prop_map(|element| element * 2),
             "prop_map applies the mapping to every value",
-            |v| ensure(0 == v % 2, "the mapped value is even"),
+            |mapped| ensure(0 == mapped % 2, "the mapped value is even"),
         )
     }
 
@@ -271,14 +284,17 @@ mod test {
         crate::strict::ensure_property(
             &(0..10u8).prop_map_into::<usize>(),
             "prop_map_into converts every value",
-            |v| ensure(v < 10, "the converted value keeps its bound"),
+            |converted| {
+                ensure(converted < 10, "the converted value keeps its bound")
+            },
         )
     }
 
     #[test]
     fn perturb_uses_same_rng_every_time() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
-        let input = Just(1).prop_perturb(|v, mut rng| v + rng.next_u32());
+        let input =
+            Just(1).prop_perturb(|element, mut rng| element + rng.next_u32());
 
         for _ in 0..16 {
             let value = ensure_some(
@@ -297,17 +313,17 @@ mod test {
     #[test]
     fn perturb_uses_varying_random_seeds() -> Result<(), TestFailure> {
         let mut runner = TestRunner::default();
-        let input = Just(1).prop_perturb(|v, mut rng| v + rng.next_u32());
+        let input =
+            Just(1).prop_perturb(|element, mut rng| element + rng.next_u32());
 
         let mut seen = HashSet::new();
         for _ in 0..64 {
-            seen.insert(
-                ensure_some(
-                    input.new_tree(&mut runner).ok(),
-                    "perturb strategy generates a value tree",
-                )?
-                .current(),
-            );
+            let value = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "perturb strategy generates a value tree",
+            )?
+            .current();
+            ensure(seen.insert(value), "each perturb seed is distinct")?;
         }
 
         ensure_eq(&64, &seen.len(), "every tree drew a distinct seed")

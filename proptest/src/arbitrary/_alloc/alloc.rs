@@ -19,12 +19,12 @@ use crate::arbitrary::*;
 use crate::strategy::statics::static_map;
 use crate::strategy::*;
 
-arbitrary!(self::alloc::Global; self::alloc::Global);
+arbitrary!(alloc::Global; alloc::Global);
 
 // Not Debug.
 //lazy_just!(System, || System);
 
-arbitrary!(self::alloc::Layout, SFnPtrMap<(Range<u8>, StrategyFor<usize>), Self>;
+arbitrary!(alloc::Layout, SFnPtrMap<(Range<u8>, StrategyFor<usize>), Self>;
     // 1. align must be a power of two and <= (1 << 31):
     // 2. "when rounded up to the nearest multiple of align, must not overflow".
     static_map((0u8..32u8, any::<usize>()), |(align_power, size)| {
@@ -34,11 +34,11 @@ arbitrary!(self::alloc::Layout, SFnPtrMap<(Range<u8>, StrategyFor<usize>), Self>
         let max_size = (1usize << (usize::BITS - 1)) - (1 << usize::from(align_power));
         // Not quite a uniform distribution due to clamping,
         // but probably good enough
-        self::alloc::Layout::from_size_align(cmp::min(max_size, size), align).unwrap()
+        alloc::Layout::from_size_align(cmp::min(max_size, size), align).unwrap()
     })
 );
 
-arbitrary!(self::alloc::AllocError, Just<Self>; Just(self::alloc::AllocError));
+arbitrary!(alloc::AllocError, Just<Self>; Just(alloc::AllocError));
 /* 2018-07-28 CollectionAllocErr is not currently available outside of using
  * the `alloc` crate, which would require a different nightly feature. For now,
  * disable.
@@ -49,11 +49,11 @@ arbitrary!(alloc::collections::CollectionAllocErr, TupleUnion<(WA<Just<Self>>, W
 
 #[cfg(test)]
 mod test {
-    multiplex_alloc!(::alloc::alloc, ::std::alloc);
+    use super::*;
 
     no_panic_test!(
-        layout => self::alloc::Layout,
-        alloc_err => self::alloc::AllocError
+        layout => alloc::Layout,
+        alloc_err => alloc::AllocError
         //collection_alloc_err => alloc::collections::CollectionAllocErr
     );
 }

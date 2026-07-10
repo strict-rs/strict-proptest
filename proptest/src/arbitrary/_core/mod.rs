@@ -17,6 +17,7 @@ mod fmt;
 mod iter;
 mod marker;
 mod mem;
+/// `Arbitrary` impls for the `NonZero*` integer types, filtering out zero.
 mod non_zero;
 mod num;
 mod option;

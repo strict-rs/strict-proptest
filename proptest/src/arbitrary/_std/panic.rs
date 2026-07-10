@@ -15,5 +15,7 @@ wrap_ctor!(AssertUnwindSafe, AssertUnwindSafe);
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(assert_unwind_safe => AssertUnwindSafe<u8>);
 }

@@ -100,21 +100,23 @@ pub trait Arbitrary: Sized + fmt::Debug {
 // Type aliases for associated types
 //==============================================================================
 
-/// `StrategyFor` allows you to mention the type of [`Strategy`] for the input
-/// type `A` without directly using associated types or without resorting to
-/// existential types. This way, if implementation of [`Arbitrary`] changes,
-/// your tests should not break. This can be especially beneficial when the
-/// type of `Strategy` that you are dealing with is very long in name
-/// (the case with generics).
+/// Names the [`Strategy`] type that [`Arbitrary`] produces for `A`.
+///
+/// This lets you mention that type without directly using associated types or
+/// resorting to existential types. This way, if the implementation of
+/// [`Arbitrary`] changes, your tests should not break. This can be especially
+/// beneficial when the type of `Strategy` that you are dealing with is very
+/// long in name (the case with generics).
 ///
 /// [`Arbitrary`]: trait.Arbitrary.html
 /// [`Strategy`]: ../strategy/trait.Strategy.html
 pub type StrategyFor<A> = <A as Arbitrary>::Strategy;
 
-/// `ParamsFor` allows you to mention the type of [`Parameters`] for the input
-/// type `A` without directly using associated types or without resorting to
-/// existential types. This way, if implementation of [`Arbitrary`] changes,
-/// your tests should not break.
+/// Names the [`Parameters`] type that [`Arbitrary`] accepts for `A`.
+///
+/// This lets you mention that type without directly using associated types or
+/// resorting to existential types. This way, if the implementation of
+/// [`Arbitrary`] changes, your tests should not break.
 ///
 /// [`Parameters`]: trait.Arbitrary.html#associatedtype.Parameters
 /// [`Arbitrary`]: trait.Arbitrary.html
@@ -126,7 +128,9 @@ pub type ParamsFor<A> = <A as Arbitrary>::Parameters;
 //==============================================================================
 
 /// Generates a [`Strategy`] producing [`Arbitrary`][trait Arbitrary] values of
-/// `A`. Unlike [`arbitrary`][fn arbitrary], it should be used for being
+/// `A`.
+///
+/// Unlike [`arbitrary`][fn arbitrary], it should be used for being
 /// explicit on what `A` is. For clarity, this may be a good idea.
 ///
 /// Use this version instead of [`arbitrary`][fn arbitrary] if you want to be
@@ -167,9 +171,10 @@ pub fn any<A: Arbitrary>() -> StrategyFor<A> {
 }
 
 /// Generates a [`Strategy`] producing [`Arbitrary`] values of `A` with the
-/// given configuration arguments passed in `args`. Unlike [`arbitrary_with`],
-/// it should be used for being explicit on what `A` is.
-/// For clarity, this may be a good idea.
+/// given configuration arguments passed in `args`.
+///
+/// Unlike [`arbitrary_with`], it should be used for being explicit on what
+/// `A` is. For clarity, this may be a good idea.
 ///
 /// Use this version instead of [`arbitrary_with`] if you want to be clear which
 /// type you want to generate a `Strategy` for, or if you don't have an anchoring
@@ -244,6 +249,10 @@ pub fn any_with<A: Arbitrary>(args: ParamsFor<A>) -> StrategyFor<A> {
 /// [`Arbitrary`]: trait.Arbitrary.html
 /// [`Strategy`]: ../strategy/trait.Strategy.html
 #[must_use = "strategies do nothing unless used"]
+#[allow(
+    clippy::single_call_fn,
+    reason = "delegate the inference-friendly arbitrary::arbitrary free function to A::arbitrary"
+)]
 pub fn arbitrary<A, S>() -> S
 where
     // The backlinking here cause an injection which helps type inference.

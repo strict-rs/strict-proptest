@@ -51,7 +51,9 @@ use crate::test_runner::*;
 #[must_use = "strategies do nothing unless used"]
 #[derive(Clone, Copy, Debug)]
 pub struct UniformArrayStrategy<S, T> {
+    /// The inner strategy every array element is drawn from.
     strategy: S,
+    /// Ties the strategy to the concrete array type `T` it produces.
     _marker: PhantomData<T>,
 }
 
@@ -64,6 +66,10 @@ impl<S, T> UniformArrayStrategy<S, T> {
     ///
     /// Prefer the `uniformXX` functions at module-level unless something
     /// precludes their use.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "pair one inner strategy with its array-length marker to form a UniformArrayStrategy"
+    )]
     pub fn new(strategy: S) -> Self {
         UniformArrayStrategy {
             strategy,
@@ -75,8 +81,12 @@ impl<S, T> UniformArrayStrategy<S, T> {
 /// A `ValueTree` operating over a fixed-size array.
 #[derive(Clone, Copy, Debug)]
 pub struct ArrayValueTree<T> {
+    /// The per-element value trees backing each array slot.
     tree: T,
+    /// Index of the element `simplify()` is currently trying to shrink.
     shrinker: usize,
+    /// Element that last accepted a simplification, so `complicate()` knows
+    /// which one to back out.
     last_shrinker: Option<usize>,
 }
 
@@ -96,6 +106,11 @@ pub fn uniform<S: Strategy, const N: usize>(
     }
 }
 
+/// Defines a fixed-arity `uniformN` constructor for arrays of length `$n`.
+///
+/// Each expansion emits a `pub fn` named `$uni` returning a
+/// `UniformArrayStrategy` over `[S::Value; $n]`, giving the length-1 through
+/// length-32 entry points a name that avoids the turbofish `uniform` needs.
 macro_rules! small_array {
     ($n:tt $uni:ident) => {
         /// Create a strategy to generate fixed-length arrays.
@@ -220,8 +235,8 @@ mod test {
 
     #[test]
     fn shrinks_fully_ltr() -> Result<(), TestFailure> {
-        fn pass(a: [i32; 2]) -> bool {
-            a[0] * a[1] <= 9
+        fn pass(pair: [i32; 2]) -> bool {
+            pair[0] * pair[1] <= 9
         }
 
         let input = [0..32, 0..32];

@@ -9,126 +9,160 @@
 
 #[cfg(feature = "handle-panics")]
 mod internal {
-    //! Implementation of scoped panic hooks
+    //! Thread-scoped suppression of the process panic hook.
     //!
-    //! 1. `with_hook` serves as entry point, it executes body closure with panic hook closure
-    //!     installed as scoped panic hook
-    //! 2. Upon first execution, current panic hook is replaced with `scoped_hook_dispatcher`
-    //!     in a thread-safe manner, and original hook is stored for later use
-    //! 3. When panic occurs, `scoped_hook_dispatcher` either delegates execution to scoped
-    //!     panic hook, if one is installed, or back to original hook stored earlier.
-    //!     This preserves original behavior when scoped hook isn't used
-    //! 4. When `with_hook` is used, it replaces stored scoped hook pointer with pointer to
-    //!     hook closure passed as parameter. Old hook pointer is set to be restored unconditionally
-    //!     via drop guard. Then, normal body closure is executed.
+    //! The first call to `suppress_panic_hook` installs a dispatching panic
+    //! hook process-wide and records the hook it replaced. While a thread has
+    //! suppression active the dispatcher drops the panic report for panics
+    //! raised on that thread; otherwise it forwards to the recorded hook. This
+    //! lets the runner silence the intermediate backtraces printed while
+    //! shrinking without touching the unwind (the panic is still caught by
+    //! `catch_unwind` in the runner) and without affecting panics on any other
+    //! thread or outside a scope.
     use std::boxed::Box;
     use std::cell::Cell;
-    use std::panic::{PanicInfo, set_hook, take_hook};
-    use std::sync::Once;
-    use std::{mem, ptr};
+    use std::panic::{PanicHookInfo, set_hook, take_hook};
+    use std::sync::OnceLock;
+    use std::thread_local;
 
     thread_local! {
-        /// Pointer to currently installed scoped panic hook, if any
-        ///
-        /// NB: pointers to arbitrary fn's are fat, and Rust doesn't allow crafting null pointers
-        /// to fat objects. So we just store const pointer to tuple with whatever data we need
-        static SCOPED_HOOK_PTR: Cell<*const (*mut dyn FnMut(&PanicInfo<'_>),)> = Cell::new(ptr::null());
+        /// Whether panic reports raised on the current thread are currently
+        /// being suppressed. Held `true` only for the duration of a
+        /// `suppress_panic_hook` body.
+        static SUPPRESSED: Cell<bool> = const { Cell::new(false) };
     }
 
-    static INIT_ONCE: Once = Once::new();
-    /// Default panic hook, the one which was present before installing scoped one
-    ///
-    /// NB: no need for external sync, value is mutated only once, when init is performed
-    static mut DEFAULT_HOOK: Option<Box<dyn Fn(&PanicInfo<'_>) + Send + Sync>> =
-        None;
-    /// Replaces currently installed panic hook with `scoped_hook_dispatcher` once,
-    /// in a thread-safe manner
-    fn init() {
-        INIT_ONCE.call_once(|| {
-            let old_handler = take_hook();
-            set_hook(Box::new(scoped_hook_dispatcher));
-            unsafe {
-                DEFAULT_HOOK = Some(old_handler);
-            }
+    /// The panic hook that was installed before this module took over. The
+    /// dispatcher forwards to it whenever suppression is inactive. Populated
+    /// exactly once, when the dispatching hook is installed.
+    static PREVIOUS_HOOK: OnceLock<
+        Box<dyn Fn(&PanicHookInfo<'_>) + Send + Sync>,
+    > = OnceLock::new();
+
+    /// Installs the process-global dispatching panic hook on first use,
+    /// recording the hook it replaces so the dispatcher can forward to it.
+    /// Idempotent: later calls observe the already-initialized cell and do
+    /// nothing.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "one-time installer of the dispatching panic hook, invoked only from suppress_panic_hook"
+    )]
+    fn install_dispatcher() {
+        let _previous = PREVIOUS_HOOK.get_or_init(|| {
+            let previous = take_hook();
+            set_hook(Box::new(dispatch));
+            previous
         });
     }
-    /// Panic hook which delegates execution to scoped hook,
-    /// if one installed, or to default hook
-    fn scoped_hook_dispatcher(info: &PanicInfo<'_>) {
-        let handler = SCOPED_HOOK_PTR.get();
-        if !handler.is_null() {
-            // It's assumed that if container's ptr is not null, ptr to `FnMut` is non-null too.
-            // Correctness **must** be ensured by hook switch code in `with_hook`
-            let hook = unsafe { &mut *(*handler).0 };
-            (hook)(info);
+
+    /// Process-global panic hook. Forwards to the previously installed hook,
+    /// unless the panicking thread has suppression active, in which case the
+    /// report is dropped without interrupting the unwind.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "the process panic-hook body, named only so it can be registered once with set_hook"
+    )]
+    fn dispatch(panic_info: &PanicHookInfo<'_>) {
+        if SUPPRESSED.get() {
             return;
         }
-
-        #[allow(static_mut_refs)]
-        if let Some(hook) = unsafe { DEFAULT_HOOK.as_ref() } {
-            (hook)(info);
-        }
-    }
-    /// Executes stored closure when dropped
-    struct Finally<F: FnOnce()>(Option<F>);
-
-    impl<F: FnOnce()> Finally<F> {
-        fn new(body: F) -> Self {
-            Self(Some(body))
+        if let Some(previous) = PREVIOUS_HOOK.get() {
+            previous(panic_info);
         }
     }
 
-    impl<F: FnOnce()> Drop for Finally<F> {
+    /// Restores the current thread's suppression flag to a saved value when
+    /// dropped, so the flag is reset even if the guarded body unwinds.
+    struct RestoreSuppression(bool);
+
+    impl Drop for RestoreSuppression {
         fn drop(&mut self) {
-            if let Some(body) = self.0.take() {
-                body();
-            }
+            SUPPRESSED.set(self.0);
         }
     }
-    /// Executes main closure `body` while installing `guard` as scoped panic hook,
-    /// for execution duration.
+
+    /// Runs `body` with panic reports raised on the current thread suppressed.
     ///
-    /// Any panics which happen during execution of `body` are passed to `guard` hook
-    /// to collect any info necessary, although unwind process is **NOT** interrupted.
-    /// See module documentation for details
-    ///
-    /// # Parameters
-    /// * `panic_hook` - scoped panic hook, functions for the duration of `body` execution
-    /// * `body` - actual logic covered by `panic_hook`
+    /// A panic inside `body` still unwinds normally (and is caught by the
+    /// caller); only its stderr report is silenced. The previous flag value is
+    /// restored on the way out, including on unwind, so nested scopes and
+    /// other threads are unaffected.
     ///
     /// # Returns
-    /// `body`'s return value
-    pub fn with_hook<R>(
-        mut panic_hook: impl FnMut(&PanicInfo<'_>),
+    /// `body`'s return value.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "the scoped-suppression entry point, called only from the runner's per-case call_test"
+    )]
+    pub(in crate::test_runner) fn suppress_panic_hook<R>(
         body: impl FnOnce() -> R,
     ) -> R {
-        init();
-        // Construct scoped hook pointer
-        let guard_tuple = (unsafe {
-            // `mem::transmute` is needed due to borrow checker restrictions to erase all lifetimes
-            mem::transmute(&mut panic_hook as *mut dyn FnMut(&PanicInfo<'_>))
-        },);
-        let old_tuple = SCOPED_HOOK_PTR.replace(&guard_tuple);
-        // Old scoped hook **must** be restored before leaving function scope to keep it sound
-        let _undo = Finally::new(|| {
-            SCOPED_HOOK_PTR.set(old_tuple);
-        });
+        install_dispatcher();
+        let previous = SUPPRESSED.replace(true);
+        let _restore = RestoreSuppression(previous);
         body()
+    }
+
+    #[cfg(test)]
+    mod test {
+        use super::{SUPPRESSED, suppress_panic_hook};
+        use std::cell::Cell;
+        use strict_test_support::{TestFailure, ensure};
+
+        #[test]
+        fn returns_body_value_and_clears_suppression() -> Result<(), TestFailure>
+        {
+            let produced = suppress_panic_hook(|| 7_u8);
+            ensure(produced == 7, "the body's return value passes through")?;
+            ensure(
+                !SUPPRESSED.get(),
+                "suppression is cleared once the scope ends",
+            )
+        }
+
+        #[test]
+        fn nested_scopes_restore_the_outer_flag() -> Result<(), TestFailure> {
+            let active_inside = Cell::new(false);
+            let active_after_inner = Cell::new(false);
+            suppress_panic_hook(|| {
+                active_inside.set(SUPPRESSED.get());
+                suppress_panic_hook(|| ());
+                active_after_inner.set(SUPPRESSED.get());
+            });
+            ensure(
+                active_inside.get(),
+                "suppression is active while the scope runs",
+            )?;
+            ensure(
+                active_after_inner.get(),
+                "an inner scope restores the outer scope's suppression",
+            )?;
+            ensure(
+                !SUPPRESSED.get(),
+                "suppression is cleared once the outer scope ends",
+            )
+        }
     }
 }
 
 #[cfg(not(feature = "handle-panics"))]
 mod internal {
-    use core::panic::PanicInfo;
+    //! No-op suppression used when `handle-panics` is disabled: the body runs
+    //! unchanged and the default panic hook still prints.
 
-    /// Simply executes `body` and returns its execution result.
-    /// Hook parameter is ignored
-    pub fn with_hook<R>(
-        _: impl FnMut(&PanicInfo<'_>),
+    /// Runs `body` unchanged; panic reports are not suppressed.
+    ///
+    /// # Returns
+    /// `body`'s return value.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "the handle-panics-off no-op entry point, called only from the runner's per-case call_test"
+    )]
+    pub(in crate::test_runner) fn suppress_panic_hook<R>(
         body: impl FnOnce() -> R,
     ) -> R {
         body()
     }
 }
 
-pub use internal::with_hook;
+pub(super) use internal::suppress_panic_hook;

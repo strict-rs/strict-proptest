@@ -7,8 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{Arc, Box, Rc, fmt};
-use core::cmp;
+use crate::std_facade::{Arc, Box, Rc, fmt, vec};
 
 use crate::strategy::*;
 use crate::test_runner::*;
@@ -17,10 +16,11 @@ use crate::test_runner::*;
 // Traits
 //==============================================================================
 
-/// A new [`ValueTree`] from a [`Strategy`] when [`Ok`] or otherwise [`Err`]
-/// when a new value-tree can not be produced for some reason such as
-/// in the case of filtering with a predicate which always returns false.
-/// You should pass in your strategy as the type parameter.
+/// The result of building a [`ValueTree`] from a [`Strategy`].
+///
+/// This is [`Ok`] carrying the new value tree, or [`Err`] when one cannot be
+/// produced for some reason, such as filtering with a predicate which always
+/// returns false. You should pass in your strategy as the type parameter.
 ///
 /// [`Strategy`]: trait.Strategy.html
 /// [`ValueTree`]: trait.ValueTree.html
@@ -47,16 +47,19 @@ pub trait Strategy: fmt::Debug {
 
     /// Generate a new value tree from the given runner.
     ///
-    /// This may fail if there are constraints on the generated value and the
-    /// generator is unable to produce anything that satisfies them. Any
-    /// failure is wrapped in `TestError::Abort`.
-    ///
     /// This method is generally expected to be deterministic. That is, given a
     /// `TestRunner` with its RNG in a particular state, this should produce an
     /// identical `ValueTree` every time. Non-deterministic strategies do not
     /// cause problems during normal operation, but they do break failure
     /// persistence since it is implemented by simply saving the seed used to
     /// generate the test case.
+    ///
+    /// ## Errors
+    ///
+    /// Returns `Err` if there are constraints on the generated value that the
+    /// generator cannot satisfy, for instance a `prop_filter` predicate that
+    /// rejects every candidate. Any such failure is wrapped in
+    /// `TestError::Abort`.
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self>;
 
     /// Returns a strategy which produces values transformed by the function
@@ -314,6 +317,10 @@ pub trait Strategy: fmt::Debug {
     /// whole-input rejections.
     ///
     /// `whence` is used to record where and why the rejection occurred.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "forward the Strategy::prop_filter trait method to the Filter combinator constructor"
+    )]
     fn prop_filter<R: Into<Reason>, F: Fn(&Self::Value) -> bool>(
         self,
         whence: R,
@@ -348,6 +355,10 @@ pub trait Strategy: fmt::Debug {
     /// whole-input rejections.
     ///
     /// `whence` is used to record where and why the rejection occurred.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "forward the Strategy::prop_filter_map trait method to the FilterMap combinator constructor"
+    )]
     fn prop_filter_map<F: Fn(Self::Value) -> Option<O>, O: fmt::Debug>(
         self,
         whence: impl Into<Reason>,
@@ -662,9 +673,12 @@ impl<T: ValueTree> ValueTree for NoShrink<T> {
 // Trait objects
 //==============================================================================
 
+/// Blanket-implement `Strategy` for a pointer-like wrapper (`Box`, `Rc`,
+/// `Arc`, `&`, `&mut`) around a strategy by delegating `new_tree` to the
+/// pointee.
 macro_rules! proxy_strategy {
-    ($typ:ty $(, $lt:tt)*) => {
-        impl<$($lt,)* S : Strategy + ?Sized> Strategy for $typ {
+    ($typ:ty) => {
+        impl<S: Strategy + ?Sized> Strategy for $typ {
             type Tree = S::Tree;
             type Value = S::Value;
 
@@ -675,8 +689,8 @@ macro_rules! proxy_strategy {
     };
 }
 proxy_strategy!(Box<S>);
-proxy_strategy!(&'a S, 'a);
-proxy_strategy!(&'a mut S, 'a);
+proxy_strategy!(&S);
+proxy_strategy!(&mut S);
 proxy_strategy!(Rc<S>);
 proxy_strategy!(Arc<S>);
 
@@ -770,6 +784,8 @@ impl<T: fmt::Debug> Strategy for SBoxedStrategy<T> {
     }
 }
 
+/// Internal adapter that boxes an inner strategy's `ValueTree` into
+/// `BoxedVT`, so `boxed()`/`sboxed()` can erase the concrete tree type.
 #[derive(Debug)]
 struct BoxedStrategyWrapper<T>(T);
 impl<T: Strategy> Strategy for BoxedStrategyWrapper<T>
@@ -821,6 +837,10 @@ impl Default for CheckStrategySanityOptions {
 /// Drive a fresh clone of `state` to its shrink fixed point, panicking once
 /// `simplify()`/`complicate()` keep reporting change past 65536 steps — a
 /// near-certain infinite loop in the strategy's shrink state machine.
+#[allow(
+    clippy::single_call_fn,
+    reason = "drive a cloned value tree to its shrink fixed point, panicking on a runaway loop"
+)]
 fn assert_shrink_converges<V: ValueTree + Clone + fmt::Debug>(state: &V) {
     let mut state = state.clone();
     let mut count = 0;
@@ -836,6 +856,10 @@ fn assert_shrink_converges<V: ValueTree + Clone + fmt::Debug>(state: &V) {
 /// the last state that still reported a change and the number of
 /// complications applied; panics past 65536 complications (a possible
 /// infinite loop), citing `full_state` in the message.
+#[allow(
+    clippy::single_call_fn,
+    reason = "repeatedly complicate a value tree to its ceiling, returning the last stable state"
+)]
 fn complicate_to_fixed_point<V: ValueTree + Clone + fmt::Debug>(
     complicated: &mut V,
     full_state: &V,
@@ -878,21 +902,28 @@ fn complicate_to_fixed_point<V: ValueTree + Clone + fmt::Debug>(
 ///
 /// This can work with fallible strategies, but limits how many times it will
 /// retry failures.
+///
+/// ## Panics
+///
+/// Panics if the strategy violates the `simplify`/`complicate` contract (any
+/// of the internal consistency checks fail), if it fails to generate a value
+/// 100 times in a row, or if shrinking fails to converge, meaning `simplify()`
+/// or `complicate()` keep reporting a change more than 65536 times in a row.
 pub fn check_strategy_sanity<S: Strategy>(
     strategy: S,
     options: Option<CheckStrategySanityOptions>,
 ) where
     S::Tree: Clone + fmt::Debug,
-    S::Value: cmp::PartialEq,
+    S::Value: PartialEq,
 {
     // Like assert_eq!, but also pass if both values do not equal themselves.
     // This allows the test to work correctly with things like NaN.
     macro_rules! assert_same {
         ($a:expr, $b:expr, $($stuff:tt)*) => { {
-            let a = $a;
-            let b = $b;
-            if a == a || b == b {
-                assert_eq!(a, b, $($stuff)*);
+            let left = $a;
+            let right = $b;
+            if left == left || right == right {
+                assert_eq!(left, right, $($stuff)*);
             }
         } }
     }
@@ -909,11 +940,11 @@ pub fn check_strategy_sanity<S: Strategy>(
         let mut state;
         loop {
             let err = match strategy.new_tree(&mut runner) {
-                Ok(s) => {
-                    state = s;
+                Ok(tree) => {
+                    state = tree;
                     break;
                 }
-                Err(e) => e,
+                Err(reason) => reason,
             };
 
             gen_tries += 1;
@@ -1067,5 +1098,102 @@ pub fn check_strategy_sanity<S: Strategy>(
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::string::ToString as _;
+
+    use strict_test_support::{
+        TestFailure, ensure, ensure_contains, ensure_some,
+    };
+
+    use crate::strict::ensure_property;
+
+    // The blanket `impl Strategy for &S` / `&mut S` is selected only when the
+    // reference is itself the `Strategy` type parameter, not when a reference
+    // is merely the method receiver (that resolves to the pointee). Because
+    // `ensure_property` is generic over `S: Strategy` and takes `&S`, passing
+    // `&by_ref` binds `S = &U` and passing `&by_mut` binds `S = &mut U`, so
+    // `new_tree` dispatches through the blanket delegate. The pointee here is a
+    // numeric range, whose value tree does the actual generation and shrinking.
+
+    #[test]
+    fn shared_reference_strategy_generates_through_the_blanket_impl()
+    -> Result<(), TestFailure> {
+        let base = 0_u32..10;
+        let by_ref = &base;
+        ensure_property(
+            &by_ref,
+            "a shared reference to a strategy generates like the pointee",
+            |value| ensure(value < 10, "the generated value keeps the bound"),
+        )
+    }
+
+    #[test]
+    fn mut_reference_strategy_generates_through_the_blanket_impl()
+    -> Result<(), TestFailure> {
+        let mut base = 0_u32..10;
+        let by_mut = &mut base;
+        ensure_property(
+            &by_mut,
+            "a mutable reference to a strategy generates like the pointee",
+            |value| ensure(value < 10, "the generated value keeps the bound"),
+        )
+    }
+
+    #[test]
+    fn shared_reference_strategy_falsifies_and_shrinks()
+    -> Result<(), TestFailure> {
+        let base = 1_u32..32;
+        let by_ref = &base;
+        let failure = ensure_some(
+            ensure_property(
+                &by_ref,
+                "a false property through a shared reference still falsifies",
+                |value| ensure(value < 1, "the value stays below one"),
+            )
+            .err(),
+            "a false property must falsify through the reference impl",
+        )?;
+        let rendered = failure.to_string();
+        ensure_contains(
+            &rendered,
+            "property falsified",
+            "the reference-impl failure names the falsified family",
+        )?;
+        ensure_contains(
+            &rendered,
+            "minimal failing input: 1",
+            "shrinking through the reference impl reaches the minimal input",
+        )
+    }
+
+    #[test]
+    fn mut_reference_strategy_falsifies_and_shrinks() -> Result<(), TestFailure>
+    {
+        let mut base = 1_u32..32;
+        let by_mut = &mut base;
+        let failure = ensure_some(
+            ensure_property(
+                &by_mut,
+                "a false property through a mutable reference still falsifies",
+                |value| ensure(value < 1, "the value stays below one"),
+            )
+            .err(),
+            "a false property must falsify through the mut reference impl",
+        )?;
+        let rendered = failure.to_string();
+        ensure_contains(
+            &rendered,
+            "property falsified",
+            "the mut-reference-impl failure names the falsified family",
+        )?;
+        ensure_contains(
+            &rendered,
+            "minimal failing input: 1",
+            "shrinking through the mut reference impl reaches the minimal input",
+        )
     }
 }

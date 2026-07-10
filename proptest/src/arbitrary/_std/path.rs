@@ -35,7 +35,11 @@ arbitrary!(StripPrefixError; Path::new("").strip_prefix("a").unwrap_err());
 /// representation of `PathParams` can be changed without affecting the API.
 #[derive(Debug)]
 pub struct PathParamsOutput {
+    /// Whether to generate an absolute path (rooted at `MAIN_SEPARATOR`)
+    /// rather than a relative one.
     is_absolute: bool,
+    /// The path components to append in order; each has any embedded path
+    /// separators stripped before being pushed.
     components: Vec<String>,
 }
 
@@ -89,7 +93,7 @@ impl Arbitrary for PathBuf {
                     // string.
                     let component = component
                         .chars()
-                        .filter(|&c| !std::path::is_separator(c))
+                        .filter(|&ch| !is_separator(ch))
                         .collect::<String>();
                     out.push(&component);
                 }
@@ -100,6 +104,11 @@ impl Arbitrary for PathBuf {
     }
 }
 
+/// Implements `Arbitrary` for a DST-pointer wrapper around `Path`
+/// (`Box<Path>`, `Rc<Path>`, `Arc<Path>`).
+///
+/// Each wrapper reuses `PathBuf`'s strategy and `PathParams`, mapping the
+/// generated `PathBuf` into the wrapper with `prop_map_into`.
 macro_rules! dst_wrapped {
     ($($w: ident),*) => {
         $(
@@ -121,6 +130,8 @@ dst_wrapped!(Box, Rc, Arc);
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         strip_prefix_error => StripPrefixError,
         path_buf => PathBuf,

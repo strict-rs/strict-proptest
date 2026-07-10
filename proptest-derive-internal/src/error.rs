@@ -11,7 +11,7 @@
 use std::fmt::Display;
 
 use proc_macro2::TokenStream;
-use quote::ToTokens;
+use quote::{ToTokens, quote};
 
 use crate::attr::ParsedAttributes;
 
@@ -20,37 +20,41 @@ use crate::attr::ParsedAttributes;
 //==============================================================================
 
 /// Item name of structs.
-pub const STRUCT: &str = "struct";
+pub(crate) const STRUCT: &str = "struct";
 
 /// Item name of struct fields.
-pub const STRUCT_FIELD: &str = "struct field";
+pub(crate) const STRUCT_FIELD: &str = "struct field";
 
 /// Item name of enums.
-pub const ENUM: &str = "enum";
+pub(crate) const ENUM: &str = "enum";
 
 /// Item name of enum variants.
-pub const ENUM_VARIANT: &str = "enum variant";
+pub(crate) const ENUM_VARIANT: &str = "enum variant";
 
 /// Item name of enum variant fields.
-pub const ENUM_VARIANT_FIELD: &str = "enum variant field";
+pub(crate) const ENUM_VARIANT_FIELD: &str = "enum variant field";
 
 /// Item name for a type variable.
-pub const TY_VAR: &str = "a type variable";
+pub(crate) const TY_VAR: &str = "a type variable";
 
 //==============================================================================
 // Checkers
 //==============================================================================
 
 /// Ensures that the type is not parametric over lifetimes.
-pub fn if_has_lifetimes(ctx: Ctx, ast: &syn::DeriveInput) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "reject derive inputs parametric over lifetimes with diagnostic E0001"
+)]
+pub(crate) fn if_has_lifetimes(ctx: Ctx<'_>, ast: &syn::DeriveInput) {
     if ast.generics.lifetimes().count() > 0 {
         has_lifetimes(ctx);
     }
 }
 
 /// Ensures that no attributes were specified on `item_kind`.
-pub fn if_anything_specified(
-    ctx: Ctx,
+pub(crate) fn if_anything_specified(
+    ctx: Ctx<'_>,
     attrs: &ParsedAttributes,
     item_kind: &str,
 ) {
@@ -62,8 +66,8 @@ pub fn if_anything_specified(
 
 /// Ensures that things only allowed on an enum variant is not present on
 /// `item_kind` which is not an enum variant.
-pub fn if_enum_attrs_present(
-    ctx: Ctx,
+pub(crate) fn if_enum_attrs_present(
+    ctx: Ctx<'_>,
     attrs: &ParsedAttributes,
     item_kind: &str,
 ) {
@@ -72,8 +76,12 @@ pub fn if_enum_attrs_present(
 }
 
 /// Ensures that parameters is not present on `item_kind`.
-pub fn if_specified_filter(
-    ctx: Ctx,
+#[allow(
+    clippy::single_call_fn,
+    reason = "reject a filter attribute that is meaningless on this item_kind"
+)]
+pub(crate) fn if_specified_filter(
+    ctx: Ctx<'_>,
     attrs: &ParsedAttributes,
     item_kind: &str,
 ) {
@@ -83,8 +91,8 @@ pub fn if_specified_filter(
 }
 
 /// Ensures that parameters is not present on `item_kind`.
-pub fn if_specified_params(
-    ctx: Ctx,
+pub(crate) fn if_specified_params(
+    ctx: Ctx<'_>,
     attrs: &ParsedAttributes,
     item_kind: &str,
 ) {
@@ -94,8 +102,8 @@ pub fn if_specified_params(
 }
 
 /// Ensures that an explicit strategy or value is not present on `item_kind`.
-pub fn if_strategy_present(
-    ctx: Ctx,
+pub(crate) fn if_strategy_present(
+    ctx: Ctx<'_>,
     attrs: &ParsedAttributes,
     item_kind: &str,
 ) {
@@ -109,7 +117,14 @@ pub fn if_strategy_present(
 }
 
 /// Ensures that a strategy, value, params, filter is not present on a unit variant.
-pub fn if_present_on_unit_variant(ctx: Ctx, attrs: &ParsedAttributes) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "reject strategy, value, regex, params, or filter set on a unit variant"
+)]
+pub(crate) fn if_present_on_unit_variant(
+    ctx: Ctx<'_>,
+    attrs: &ParsedAttributes,
+) {
     /// Ensures that an explicit strategy or value is not present on a unit variant.
     use crate::attr::StratMode::*;
     match attrs.strategy {
@@ -129,7 +144,14 @@ pub fn if_present_on_unit_variant(ctx: Ctx, attrs: &ParsedAttributes) {
 }
 
 /// Ensures that parameters or filter is not present on a unit struct.
-pub fn if_present_on_unit_struct(ctx: Ctx, attrs: &ParsedAttributes) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "reject params or filter attributes set on a unit struct"
+)]
+pub(crate) fn if_present_on_unit_struct(
+    ctx: Ctx<'_>,
+    attrs: &ParsedAttributes,
+) {
     if attrs.params.is_set() {
         params_on_unit_struct(ctx)
     }
@@ -140,14 +162,22 @@ pub fn if_present_on_unit_struct(ctx: Ctx, attrs: &ParsedAttributes) {
 }
 
 /// Ensures that skip is not present on `item_kind`.
-pub fn if_skip_present(ctx: Ctx, attrs: &ParsedAttributes, item_kind: &str) {
+pub(crate) fn if_skip_present(
+    ctx: Ctx<'_>,
+    attrs: &ParsedAttributes,
+    item_kind: &str,
+) {
     if attrs.skip {
         illegal_skip(ctx, item_kind)
     }
 }
 
 /// Ensures that a weight is not present on `item_kind`.
-pub fn if_weight_present(ctx: Ctx, attrs: &ParsedAttributes, item_kind: &str) {
+pub(crate) fn if_weight_present(
+    ctx: Ctx<'_>,
+    attrs: &ParsedAttributes,
+    item_kind: &str,
+) {
     if attrs.weight.is_some() {
         illegal_weight(ctx, item_kind)
     }
@@ -162,32 +192,34 @@ pub fn if_weight_present(ctx: Ctx, attrs: &ParsedAttributes, item_kind: &str) {
 /// normal error in the sense that it halts progress in the macro
 /// immediately instead of allowing other errors to be accumulated.
 #[derive(Debug)]
-pub struct Fatal;
+pub(crate) struct Fatal;
 
 /// The return type of a possibly fatal computation in the macro.
-pub type DeriveResult<T> = Result<T, Fatal>;
+pub(crate) type DeriveResult<T> = Result<T, Fatal>;
 
 /// A mutable view / shorthand for the context.
 /// Prefer this type over `Context` in functions.
-pub type Ctx<'ctx> = &'ctx mut Context;
+pub(crate) type Ctx<'ctx> = &'ctx mut Context;
 
 /// The context / environment that the macro is operating in.
 /// Right now, it simply tracks all the errors collected during
 /// the running of the macro.
 #[derive(Default)]
-pub struct Context {
+pub(crate) struct Context {
+    /// The messages collected during the derive; each becomes part of the
+    /// emitted `compile_error!` so multiple problems surface at once.
     errors: Vec<String>,
 }
 
 impl Context {
     /// Add a non-fatal error to the context.
-    pub fn error<T: Display>(&mut self, msg: T) {
+    pub(crate) fn error<T: Display>(&mut self, msg: T) {
         self.errors.push(msg.to_string());
     }
 
     /// Add an error to the context and produce an erroring
     /// computation that will halt the macro.
-    pub fn fatal<T: Display, A>(&mut self, msg: T) -> DeriveResult<A> {
+    pub(crate) fn fatal<T: Display, A>(&mut self, msg: T) -> DeriveResult<A> {
         self.error(msg);
         Err(Fatal)
     }
@@ -195,7 +227,7 @@ impl Context {
     /// Consume the context and if there were any errors,
     /// emit `compile_error!(..)` such that the crate using
     /// `#[derive(Arbitrary)]` will fail to compile.
-    pub fn check(mut self) -> Result<(), TokenStream> {
+    pub(crate) fn check(mut self) -> Result<(), TokenStream> {
         fn compile_error(msg: &str) -> TokenStream {
             quote! {
                 compile_error!(#msg);
@@ -235,30 +267,54 @@ macro_rules! mk_err_msg {
 }
 
 /// A macro constructing errors that do halt compilation immediately.
+///
+/// Every fatal constructor is called from a sibling module, so all arms emit
+/// `pub(crate) fn` (crate-visible inside this public module — neither
+/// `unreachable_pub` nor `redundant_pub_crate` fires).
 macro_rules! fatal {
     ($error: ident, $code: ident, $msg: expr) => {
-        pub fn $error<T>(ctx: Ctx) -> DeriveResult<T> {
+        #[allow(clippy::single_call_fn, reason = "fatal! macro arm generating each zero-argument fatal error constructor")]
+        pub(crate) fn $error<T>(ctx: Ctx<'_>) -> DeriveResult<T> {
             ctx.fatal(mk_err_msg!($code, $msg))
         }
     };
     ($error: ident ($($arg: ident: $arg_ty: ty),*), $code: ident,
      $msg: expr, $($fmt: tt)+) => {
-        pub fn $error<T>(ctx: Ctx, $($arg: $arg_ty),*) -> DeriveResult<T> {
+        pub(crate) fn $error<T>(ctx: Ctx<'_>, $($arg: $arg_ty),*) -> DeriveResult<T> {
             ctx.fatal(mk_err_msg!($code, format!($msg, $($fmt)+)))
         }
     };
 }
 
 /// A macro constructing fatal errors that do not halt compilation immediately.
+///
+/// The `local` arms emit a plain private `fn` for constructors only ever
+/// called from the checkers in this file; the unmarked arms emit `pub(crate)
+/// fn` for the constructors sibling modules call.
 macro_rules! error {
+    (local $error: ident, $code: ident, $msg: expr) => {
+        #[allow(clippy::single_call_fn, reason = "error! macro arm generating each zero-argument non-fatal error constructor")]
+        fn $error(ctx: Ctx<'_>) {
+            ctx.error(mk_err_msg!($code, $msg))
+        }
+    };
+    (local $error: ident ($($arg: ident: $arg_ty: ty),*), $code: ident,
+     $msg: expr, $($fmt: tt)+) => {
+        #[allow(clippy::single_call_fn, reason = "error! macro arm generating each formatted non-fatal error constructor")]
+        fn $error(ctx: Ctx<'_>, $($arg: $arg_ty),*) {
+            ctx.error(mk_err_msg!($code, format!($msg, $($fmt)+)))
+        }
+    };
     ($error: ident, $code: ident, $msg: expr) => {
-        pub fn $error(ctx: Ctx) {
+        #[allow(clippy::single_call_fn, reason = "error! macro arm generating each zero-argument non-fatal error constructor")]
+        pub(crate) fn $error(ctx: Ctx<'_>) {
             ctx.error(mk_err_msg!($code, $msg))
         }
     };
     ($error: ident ($($arg: ident: $arg_ty: ty),*), $code: ident,
      $msg: expr, $($fmt: tt)+) => {
-        pub fn $error(ctx: Ctx, $($arg: $arg_ty),*) {
+        #[allow(clippy::single_call_fn, reason = "error! macro arm generating each formatted non-fatal error constructor")]
+        pub(crate) fn $error(ctx: Ctx<'_>, $($arg: $arg_ty),*) {
             ctx.error(mk_err_msg!($code, format!($msg, $($fmt)+)))
         }
     };
@@ -268,7 +324,7 @@ macro_rules! error {
 // that is parametric over lifetimes. Since proptest does not support
 // such types (yet), neither can we.
 error!(
-    has_lifetimes,
+    local has_lifetimes,
     E0001,
     "Cannot derive `Arbitrary` for types with generic lifetimes, such as: \
      `struct Foo<'a> { bar: &'a str }`. Currently, strategies for such types \
@@ -333,7 +389,7 @@ error!(
 // `#[proptest(value = "<expr>")]` is specified on an `item_kind`
 // that does not support setting an explicit value or strategy.
 // An enum or struct does not support that.
-error!(illegal_strategy(attr: &str, item_kind: &str), E0007,
+error!(local illegal_strategy(attr: &str, item_kind: &str), E0007,
     "`#[proptest({0} = \"<expr>\")]` is not allowed on {1}. Only struct fields, \
     enum variants and fields inside those can use an explicit {0}.",
     attr, item_kind);
@@ -342,7 +398,7 @@ error!(illegal_strategy(attr: &str, item_kind: &str), E0007,
 // that does not support setting an explicit value or strategy.
 // See `illegal_strategy` for more.
 error!(
-    illegal_regex(item_kind: &str),
+    local illegal_regex(item_kind: &str),
     E0007,
     "`#[proptest(regex = \"<string>\")]` is not allowed on {0}. Only struct \
      fields, enum variant fields can use an explicit regex.",
@@ -352,7 +408,7 @@ error!(
 // Happens when `#[proptest(skip)]` is specified on an `item_kind` that does
 // not support skipping. Only enum variants support skipping.
 error!(
-    illegal_skip(item_kind: &str),
+    local illegal_skip(item_kind: &str),
     E0008,
     "A {} can't be `#[proptest(skip)]`ed, only enum variants can be skipped.",
     item_kind
@@ -361,7 +417,7 @@ error!(
 // Happens when `#[proptest(weight = <integer>)]` is specified on an
 // `item_kind` that does not support weighting.
 error!(
-    illegal_weight(item_kind: &str),
+    local illegal_weight(item_kind: &str),
     E0009,
     "`#[proptest(weight = <integer>)]` is not allowed on {} as it is \
      meaningless. Only enum variants can be assigned weights.",
@@ -373,7 +429,7 @@ error!(
 // then that applies, and the `params` on `item_kind` would be meaningless
 // wherefore it is forbidden.
 error!(
-    parent_has_param(item_kind: &str),
+    local parent_has_param(item_kind: &str),
     E0010,
     "Cannot set the associated type `Parameters` of `Arbitrary` with either \
      `#[proptest(no_params)]` or `#[proptest(params(<type>)]` on {} since it \
@@ -399,7 +455,7 @@ fatal!(
 // which would cause the value to be generated without consulting the
 // `filter`.
 error!(
-    meaningless_filter(item_kind: &str),
+    local meaningless_filter(item_kind: &str),
     E0012,
     "Cannot set `#[proptest(filter = <expr>)]` on {} since it is set on the \
      item_kind which it is inside of that outer item_kind specifies how to generate \
@@ -600,7 +656,7 @@ error!(skipped_variant_has_filter(item_kind: &str), E0028,
 // `#[proptest(strategy = "<expr>")]` or `#[proptest(value = "<expr>")]`
 // would be pointless.
 error!(
-    strategy_on_unit_variant(what: &str),
+    local strategy_on_unit_variant(what: &str),
     E0029,
     "Setting `#[proptest({0} = \"<expr>\")]` on a unit variant has no effect \
      and is redundant because there is nothing to configure.",
@@ -609,7 +665,7 @@ error!(
 
 // See `strategy_on_unit_variant`.
 error!(
-    regex_on_unit_variant,
+    local regex_on_unit_variant,
     E0029,
     "Setting `#[proptest(regex = \"<string>\")]` on a unit variant has no effect \
     and is redundant because there is nothing to configure."
@@ -618,7 +674,7 @@ error!(
 // There's only one way to produce a specific unit variant, so setting
 // `#[proptest(params = "<type>")]` would be pointless.
 error!(
-    params_on_unit_variant,
+    local params_on_unit_variant,
     E0029,
     "Setting `#[proptest(params = \"<type>\")]` on a unit variant has \
      no effect and is redundant because there is nothing to configure."
@@ -627,7 +683,7 @@ error!(
 // There's only one way to produce a specific unit variant, so setting
 // `#[proptest(filter = "<expr>")]` would be pointless.
 error!(
-    filter_on_unit_variant,
+    local filter_on_unit_variant,
     E0029,
     "Setting `#[proptest(filter = \"<expr>\")]` on a unit variant has \
      no effect and is redundant because there is nothing to further filter."
@@ -637,7 +693,7 @@ error!(
 // struct. There's only one way to produce a unit struct, so specifying
 // `Parameters` would be pointless.
 error!(
-    params_on_unit_struct,
+    local params_on_unit_struct,
     E0030,
     "Setting `#[proptest(params = \"<type>\")]` on a unit struct has no effect \
     and is redundant because there is nothing to configure."
@@ -647,7 +703,7 @@ error!(
 // struct. There's only one way to produce a unit struct, so filtering
 // would be pointless.
 error!(
-    filter_on_unit_struct,
+    local filter_on_unit_struct,
     E0030,
     "Setting `#[proptest(filter = \"<expr>\")]` on a unit struct has no effect \
     and is redundant because there is nothing to filter."

@@ -6,6 +6,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Compile-and-run coverage for `#[derive(Arbitrary)]` on enums of many
+//! shapes and arities.
+//!
+//! Derives `Arbitrary` for enums ranging from 1 to 25 variants that mix
+//! unit, tuple (`V()`), and struct (`V {}`) variant shapes, then for
+//! payload-carrying and nested enums whose generated values are checked
+//! to stay within per-variant scoring bounds. This guards variant-count
+//! scaling in the union codegen and that every variant's payload is
+//! generated.
+
 use proptest::prelude::{Arbitrary, any};
 use proptest::strict::{TestResult, ensure_property};
 use proptest_derive::Arbitrary;
@@ -438,38 +448,38 @@ enum T25 {
 
 #[derive(Clone, Debug, Arbitrary)]
 enum Alan {
-    A(usize),
-    B(String),
-    C(()),
-    D(u32),
-    E(f64),
-    F(char),
+    Unsigned(usize),
+    Text(String),
+    Empty(()),
+    Word(u32),
+    Real(f64),
+    Letter(char),
 }
 
 impl Alan {
     fn payload_score(&self) -> usize {
         match self {
-            Self::A(value) => usize::from(value.count_ones() > 0),
-            Self::B(value) => 1 + usize::from(!value.is_empty()),
-            Self::C(()) => 2,
-            Self::D(value) => 3 + usize::from(*value > 0),
-            Self::E(value) => 4 + usize::from(value.is_sign_negative()),
-            Self::F(value) => 5 + usize::from(value.len_utf8() > 0),
+            Self::Unsigned(payload) => usize::from(payload.count_ones() > 0),
+            Self::Text(payload) => 1 + usize::from(!payload.is_empty()),
+            Self::Empty(()) => 2,
+            Self::Word(payload) => 3 + usize::from(*payload > 0),
+            Self::Real(payload) => 4 + usize::from(payload.is_sign_negative()),
+            Self::Letter(payload) => 5 + usize::from(payload.len_utf8() > 0),
         }
     }
 }
 
 #[derive(Clone, Debug, Arbitrary)]
 enum SameType {
-    A(usize),
-    B(usize),
+    Former(usize),
+    Latter(usize),
 }
 
 impl SameType {
     fn payload_score(&self) -> usize {
         match self {
-            Self::A(value) => usize::from(value.count_ones() > 0),
-            Self::B(value) => 1 + usize::from(value.count_ones() > 0),
+            Self::Former(payload) => usize::from(payload.count_ones() > 0),
+            Self::Latter(payload) => 1 + usize::from(payload.count_ones() > 0),
         }
     }
 }
@@ -483,8 +493,8 @@ enum OneTwo {
 impl OneTwo {
     fn width(&self) -> usize {
         match self {
-            Self::One(value) => {
-                let _ = value.count_ones();
+            Self::One(payload) => {
+                let _ = payload.count_ones();
                 1
             }
             Self::Two(left, right) => {
@@ -506,8 +516,8 @@ impl ZeroOneTwo {
     fn width(&self) -> usize {
         match self {
             Self::Zero => 0,
-            Self::One(value) => {
-                let _ = value.count_ones();
+            Self::One(payload) => {
+                let _ = payload.count_ones();
                 1
             }
             Self::Two(left, right) => {
@@ -527,7 +537,7 @@ enum Nested {
 impl Nested {
     fn payload_score(&self) -> usize {
         match self {
-            Self::First(value) => value.payload_score(),
+            Self::First(payload) => payload.payload_score(),
             Self::Second(left, right) => left.width() + right.width(),
         }
     }

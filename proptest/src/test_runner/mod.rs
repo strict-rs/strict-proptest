@@ -12,17 +12,26 @@
 //! You do not normally need to access things in this module directly except
 //! when implementing new low-level strategies.
 
+/// Runtime configuration (`Config`) and the `PROPTEST_*` env overlay.
 mod config;
 #[cfg(feature = "std")]
 pub(crate) mod diagnostics;
+/// Per-case and whole-test outcome types (`TestCaseError` / `TestError`).
 mod errors;
+/// Pluggable storage for minimized failing seeds.
 mod failure_persistence;
+/// The `Reason` wrapper carried by rejects and failures.
 mod reason;
+/// The fork replay log shared between parent and child processes.
 #[cfg(feature = "fork")]
 mod replay;
+/// Optional caching of case outcomes to skip re-running inputs.
 mod result_cache;
+/// The seedable, reproducible `TestRng` and its persisted seed codec.
 mod rng;
+/// The `TestRunner` execution and shrink loop.
 mod runner;
+/// Scoped panic-hook handling that silences shrink-phase panics.
 #[cfg(feature = "std")]
 mod scoped_panic_hook;
 

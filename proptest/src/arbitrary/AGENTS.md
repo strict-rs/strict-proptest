@@ -40,11 +40,11 @@ Impls are partitioned by what they require and `#[cfg]`-gated, one tier per depe
 
 These exist so a typical impl is one line. They encode the subsystem's contract, spelled out on `no_panic_test!`'s doc: an `Arbitrary` impl only has to *generate* a value without panicking — shrinking quality is secondary and tested separately.
 
-- `arbitrary!` — writes the `impl Arbitrary`. Full form `arbitrary!([bounds] T, Strat, Params; args => expr)`; shorter forms default `Params = ()` or wrap a constant as `Just<Self>`; the list form `arbitrary!(A, B, …)` expands each to `arbitrary!(T, T::Any; T::ANY)` (used for the bool/integer primitives).
-- `wrap_ctor!(W[, ctor])` — newtype `W<A>` mapped from `any::<A>()` through `ctor` (default `W::new`) as `SMapped<A, Self>` via `static_map`; also emits the matching `lift1!`.
+- `arbitrary!` — writes the `impl Arbitrary`. Full form `arbitrary!([bounds] T, Strat, Params; args => expr)`; shorter shared forms default `Params = ()` or wrap a constant as `Just<Self>`; the list form `arbitrary!(A, B, …)` expands each to `arbitrary!(T, T::Any; T::ANY)` (used for the bool/integer primitives). The `std`-only full-params shorthand lives in `_std/mod.rs` as `std_arbitrary_with_params!`, so no-std builds do not compile arms they cannot use.
+- `wrap_ctor!(W, ctor)` / `wrap_ctor!([bounds] W, ctor)` — newtype `W<A>` mapped from `any::<A>()` through the explicit constructor as `SMapped<A, Self>` via `static_map`; also emits the matching `lift1!`. The `std`-only default-constructor shorthand lives in `_std/mod.rs` as `std_wrap_ctor_default!`.
 - `wrap_from!([bound] W)` — same idea via `From`/`Into` (`MapInto<A::Strategy, Self>` + `prop_map_into`); also emits `lift1!`.
 - `lazy_just!(T, f; …)` — `Strategy = LazyJust<Self, fn() -> Self>`, deferring construction to generation time.
-- `no_panic_test!(name => Type, …)` — `#[cfg(test)]` only; generates a `proptest!` test that draws `any::<Type>()` and asserts no panic. Every impl module ends with one.
+- `no_panic_test!(name => Type, …)` — `#[cfg(test)]` only; emits one test function per `name` that draws `any::<Type>()` through the strict runner and asserts no panic. Every impl module ends with one.
 
 ## Higher-order traits (`functor.rs`)
 

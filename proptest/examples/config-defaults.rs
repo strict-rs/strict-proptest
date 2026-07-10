@@ -7,6 +7,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Prints the debug form of the runner's default `Config`.
+//!
+//! Under the default `std` feature that default is environment-resolved, so
+//! `PROPTEST_*` overrides show through — for example `PROPTEST_CASES=42`
+//! makes the printed `cases` field read `42`. A quick way to inspect the
+//! runner's effective configuration.
+
 use proptest::test_runner::Config;
 
 fn main() {

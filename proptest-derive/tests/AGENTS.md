@@ -53,11 +53,12 @@ Every `tests/*.rs` follows the same two-part shape, and new cases should match i
 - a `#[test] fn asserting_arbitrary()` containing a local `fn assert_arbitrary<T: Arbitrary>() {}` called once per derived type — a pure compile-time check that the impl and its bounds resolve;
 - one or more `proptest! { … }` blocks that actually generate values and `prop_assert!` the attribute semantics (e.g. that a `value`/`strategy`/`filter`/`regex`/`weight` produced what it should), usually via `any_with::<T>(params)` when params are involved.
 
-The derive is pulled in either as `use proptest_derive::Arbitrary;` or `#[macro_use] extern crate proptest_derive;`. `skip.rs` and `uninhabited-pass.rs` carry `#![feature(never_type)]` — the concrete reason the suite needs nightly.
+The derive is pulled in as `use proptest_derive::Arbitrary;` in every top-level integration test (the raw-rustc `compile-fail/` fixtures still use the `#[macro_use] extern crate proptest_derive;` form). `skip.rs` and `uninhabited-pass.rs` carry `#![feature(never_type)]` — the concrete reason the suite needs nightly.
 
 Each file targets one attribute / feature area:
 
 - **struct.rs** — baseline named-field structs of varying arity, no `#[proptest(...)]` attributes.
+- **lint_clean.rs** — derives compiled under `deny(warnings)` and `deny(unsafe_code)`, pinning that generated impls are item-scope and allowance-free for the rustc lint surfaces that used to require generated allowances.
 - **enum.rs** — enums from 1 to 25 variants mixing unit / `V()` / `V {}` shapes, plus payload-carrying enums; checks variant-count scaling and that every payload is generated.
 - **units.rs** — degenerate empty shapes: unit struct `T0;`, empty `T1 {}` / `T2()`, and unit/empty enum variants.
 - **value.rs** — field `#[proptest(value = …)]` / `value(…)`: literals, expressions, and `fn`-path calls yielding a constant field.

@@ -6,6 +6,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Grab-bag coverage for `#[proptest(...)]` combinations not exercised by the
+//! per-modifier test files.
+//!
+//! The derived enums mix container-level `params` with variant-level
+//! `value`, `strategy`, `no_params`, and `params` attributes on each variant,
+//! and each property confirms the payloads stay reachable and pinned.
+
 use proptest::prelude::{Arbitrary, any, any_with};
 use proptest::strategy::Just;
 use proptest::strict::{TestResult, ensure_property};
@@ -41,17 +48,17 @@ impl Foo {
 
 #[derive(Clone, Debug, Arbitrary)]
 #[proptest(params = "usize")]
-enum A {
-    B,
-    #[proptest(strategy = "Just(A::C(1))")]
-    C(usize),
+enum Custom {
+    Unit,
+    #[proptest(strategy = "Just(Custom::Fixed(1))")]
+    Fixed(usize),
 }
 
-impl A {
+impl Custom {
     fn payload(&self) -> Option<usize> {
         match self {
-            Self::B => None,
-            Self::C(value) => Some(*value),
+            Self::Unit => None,
+            Self::Fixed(payload) => Some(*payload),
         }
     }
 }
@@ -59,38 +66,38 @@ impl A {
 #[derive(Clone, Debug, Arbitrary)]
 enum Bobby {
     #[proptest(no_params)]
-    B(usize),
-    #[proptest(no_params, value = "Bobby::C(1)")]
-    C(usize),
-    #[proptest(no_params, strategy = "Just(Bobby::D(1))")]
-    D(usize),
-    #[proptest(params(Complex), value = "Bobby::E(1)")]
-    E(usize),
-    #[proptest(params(Complex), strategy = "Just(Bobby::F(1))")]
-    F(usize),
+    Defaulted(usize),
+    #[proptest(no_params, value = "Bobby::Valued(1)")]
+    Valued(usize),
+    #[proptest(no_params, strategy = "Just(Bobby::Strategized(1))")]
+    Strategized(usize),
+    #[proptest(params(Complex), value = "Bobby::ParamValued(1)")]
+    ParamValued(usize),
+    #[proptest(params(Complex), strategy = "Just(Bobby::ParamStrategized(1))")]
+    ParamStrategized(usize),
 }
 
 impl Bobby {
     fn payload(&self) -> usize {
         match self {
-            Self::B(value)
-            | Self::C(value)
-            | Self::D(value)
-            | Self::E(value)
-            | Self::F(value) => *value,
+            Self::Defaulted(payload)
+            | Self::Valued(payload)
+            | Self::Strategized(payload)
+            | Self::ParamValued(payload)
+            | Self::ParamStrategized(payload) => *payload,
         }
     }
 }
 
 #[derive(Clone, Debug, Arbitrary)]
 enum Quux {
-    B(#[proptest(no_params)] usize),
-    C(usize, String),
-    #[proptest(value = "Quux::D(2, \"a\".into())")]
-    D(usize, String),
-    #[proptest(strategy = "Just(Quux::E(1337))")]
-    E(u32),
-    F {
+    Bare(#[proptest(no_params)] usize),
+    Pair(usize, String),
+    #[proptest(value = "Quux::PinnedPair(2, \"a\".into())")]
+    PinnedPair(usize, String),
+    #[proptest(strategy = "Just(Quux::PinnedWord(1337))")]
+    PinnedWord(u32),
+    Braced {
         #[proptest(strategy = "10usize..20usize")]
         _foo: usize,
     },
@@ -99,16 +106,18 @@ enum Quux {
 impl Quux {
     fn payload_score(&self) -> usize {
         match self {
-            Self::B(value) => *value,
-            Self::C(value, text) | Self::D(value, text) => *value + text.len(),
-            Self::E(value) => {
-                if *value == 1337 {
+            Self::Bare(payload) => *payload,
+            Self::Pair(payload, text) | Self::PinnedPair(payload, text) => {
+                *payload + text.len()
+            }
+            Self::PinnedWord(payload) => {
+                if *payload == 1337 {
                     1337
                 } else {
                     0
                 }
             }
-            Self::F { _foo: value } => *value,
+            Self::Braced { _foo: payload } => *payload,
         }
     }
 }
@@ -129,7 +138,7 @@ fn foo_value_constructor_sets_payload() -> TestResult {
 #[test]
 fn a_custom_strategy_sets_c_payload() -> TestResult {
     ensure_property(
-        &any_with::<A>(0usize),
+        &any_with::<Custom>(0usize),
         "a variant strategy pins the C payload",
         |value| {
             if let Some(payload) = value.payload() {
@@ -146,11 +155,14 @@ fn bobby_attributes_keep_payloads_reachable() -> TestResult {
         &any::<Bobby>(),
         "per-variant params spellings keep payloads reachable",
         |value| match &value {
-            Bobby::B(_) => {
+            Bobby::Defaulted(_) => {
                 let _ = value.payload();
                 Ok(())
             }
-            Bobby::C(_) | Bobby::D(_) | Bobby::E(_) | Bobby::F(_) => {
+            Bobby::Valued(_)
+            | Bobby::Strategized(_)
+            | Bobby::ParamValued(_)
+            | Bobby::ParamStrategized(_) => {
                 ensure_eq(&value.payload(), &1, "the pinned payload is one")
             }
         },
@@ -163,21 +175,21 @@ fn quux_attributes_keep_payloads_reachable() -> TestResult {
         &any::<Quux>(),
         "mixed variant attributes keep payload scores reachable",
         |value| match &value {
-            Quux::B(_) | Quux::C(_, _) => {
+            Quux::Bare(_) | Quux::Pair(_, _) => {
                 let _ = value.payload_score();
                 Ok(())
             }
-            Quux::D(_, _) => ensure_eq(
+            Quux::PinnedPair(_, _) => ensure_eq(
                 &value.payload_score(),
                 &3,
                 "the value variant scores three",
             ),
-            Quux::E(_) => ensure_eq(
+            Quux::PinnedWord(_) => ensure_eq(
                 &value.payload_score(),
                 &1337,
                 "the strategy variant scores 1337",
             ),
-            Quux::F { _foo } => ensure(
+            Quux::Braced { _foo } => ensure(
                 (10..20).contains(_foo),
                 "the range strategy stays in bounds",
             ),
@@ -190,7 +202,7 @@ fn asserting_arbitrary() {
     fn assert_arbitrary<T: Arbitrary>() {}
 
     assert_arbitrary::<Foo>();
-    assert_arbitrary::<A>();
+    assert_arbitrary::<Custom>();
     assert_arbitrary::<Bobby>();
     assert_arbitrary::<Quux>();
 }

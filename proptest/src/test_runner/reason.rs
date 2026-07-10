@@ -30,25 +30,25 @@ impl Reason {
 }
 
 impl From<&'static str> for Reason {
-    fn from(s: &'static str) -> Self {
-        Reason(s.into())
+    fn from(message: &'static str) -> Self {
+        Reason(message.into())
     }
 }
 
 impl From<String> for Reason {
-    fn from(s: String) -> Self {
-        Reason(s.into())
+    fn from(message: String) -> Self {
+        Reason(message.into())
     }
 }
 
 impl From<Box<str>> for Reason {
-    fn from(s: Box<str>) -> Self {
-        Reason(String::from(s).into())
+    fn from(message: Box<str>) -> Self {
+        Reason(String::from(message).into())
     }
 }
 
 impl fmt::Display for Reason {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self.message(), f)
     }
 }

@@ -7,33 +7,42 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Tutorial date-parser property test at its first, buggy stage.
+//!
+//! Backs the Proptest Book's `getting-started` chapter. A naive `parse_date`
+//! byte-slices a length-10 `&str`, and the `doesnt_crash` property feeds it
+//! arbitrary strings until proptest finds and shrinks a multi-byte input that
+//! panics on a non-char-boundary slice, so this example fails by design.
+
 use proptest::prelude::*;
 
-fn parse_date(s: &str) -> Option<(u32, u32, u32)> {
-    if 10 != s.len() {
+/// Parse a date in `YYYY-MM-DD` form using the tutorial's first buggy parser.
+fn parse_date(input: &str) -> Option<(u32, u32, u32)> {
+    if 10 != input.len() {
         return None;
     }
     // !
-    if "-" != &s[4..5] || "-" != &s[7..8] {
+    if "-" != &input[4..5] || "-" != &input[7..8] {
         return None;
     }
 
-    let year = &s[0..4];
-    let month = &s[6..7]; // !
-    let day = &s[8..10];
+    let year = &input[0..4];
+    let month = &input[6..7]; // !
+    let day = &input[8..10];
 
     year.parse::<u32>().ok().and_then(|y| {
-        month
-            .parse::<u32>()
-            .ok()
-            .and_then(|m| day.parse::<u32>().ok().map(|d| (y, m, d)))
+        month.parse::<u32>().ok().and_then(|month_num| {
+            day.parse::<u32>()
+                .ok()
+                .map(|day_num| (y, month_num, day_num))
+        })
     })
 }
 
 // NB We omit #[test] on these functions so that main() can call them.
 proptest! {
-    fn doesnt_crash(s in "\\PC*") {
-        parse_date(&s);
+    fn doesnt_crash(input in "\\PC*") {
+        let _parsed = parse_date(&input);
     }
 }
 

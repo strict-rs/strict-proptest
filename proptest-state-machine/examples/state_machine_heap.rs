@@ -11,13 +11,12 @@
 //! for a heap implementation that has a bug in it. The heap `MyHeap` is in the
 //! `system_under_test` module inlined at the bottom of this file.
 
-#[macro_use]
-extern crate proptest_state_machine;
-
 use proptest::prelude::*;
 use proptest::strict::{TestFailure, TestResult};
 use proptest::test_runner::Config;
-use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
+use proptest_state_machine::{
+    ReferenceStateMachine, StateMachineTest, prop_state_machine,
+};
 use strict_test_support::ensure;
 use system_under_test::MyHeap;
 
@@ -60,12 +59,15 @@ fn main() -> TestResult {
 /// An empty type used for the `ReferenceStateMachine` implementation. The
 /// actual state of it represented by `Vec<i32>`, but it doesn't have to
 /// contained inside this type.
+#[derive(Clone, Copy, Debug)]
 pub struct HeapStateMachine;
 
 /// The possible transitions of the state machine.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Transition {
+    /// Remove the maximum element from the heap.
     Pop,
+    /// Insert the given value into the heap.
     Push(i32),
 }
 
@@ -95,9 +97,9 @@ impl ReferenceStateMachine for HeapStateMachine {
     ) -> Self::State {
         match transition {
             Transition::Pop => {
-                state.pop();
+                let _popped = state.pop();
             }
-            Transition::Push(value) => state.push(*value),
+            Transition::Push(element) => state.push(*element),
         }
         state
     }
@@ -134,7 +136,7 @@ impl StateMachineTest for MyHeap<i32> {
 
                 // Check a post-condition.
                 match result {
-                    Some(value) => {
+                    Some(popped) => {
                         ensure(
                             !was_empty,
                             "a popped value implies the heap was non-empty",
@@ -143,7 +145,7 @@ impl StateMachineTest for MyHeap<i32> {
                         // greater than the "maximum" we were just given.
                         for in_heap in state.iter() {
                             ensure(
-                                value >= *in_heap,
+                                popped >= *in_heap,
                                 "the popped value is greater than or equal \
                                  to every value still in the heap",
                             )?;
@@ -155,7 +157,7 @@ impl StateMachineTest for MyHeap<i32> {
                     )?,
                 }
             }
-            Transition::Push(value) => state.push(value),
+            Transition::Push(element) => state.push(element),
         }
         Ok(state)
     }
@@ -181,32 +183,41 @@ impl StateMachineTest for MyHeap<i32> {
 /// <https://doc.rust-lang.org/stable/std/collections/struct.BinaryHeap.html>,
 /// except slow and buggy.
 mod system_under_test {
-    use std::cmp;
-
+    /// Minimal max-heap implementation used as the system under test.
     #[derive(Clone, Debug)]
-    pub struct MyHeap<T> {
+    pub(crate) struct MyHeap<T> {
+        /// Backing array storing heap elements in max-heap order.
         data: Vec<T>,
     }
 
-    impl<T: cmp::Ord> MyHeap<T> {
-        pub fn new() -> Self {
+    impl<T: Ord> MyHeap<T> {
+        /// Create an empty heap.
+        #[allow(
+            clippy::single_call_fn,
+            reason = "the empty hand-rolled max-heap the example puts under test"
+        )]
+        pub(crate) fn new() -> Self {
             MyHeap { data: vec![] }
         }
 
-        pub fn is_empty(&self) -> bool {
+        /// Return whether the heap contains no elements.
+        pub(crate) fn is_empty(&self) -> bool {
             self.data.is_empty()
         }
 
-        pub fn len(&self) -> usize {
+        /// Return the number of elements currently stored in the heap.
+        pub(crate) fn len(&self) -> usize {
             self.data.len()
         }
 
-        pub fn iter(&self) -> impl Iterator<Item = &T> {
+        /// Iterate over the heap's backing storage.
+        pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
             self.data.iter()
         }
 
-        pub fn push(&mut self, value: T) {
-            self.data.push(value);
+        /// Insert an element and restore the max-heap ordering upward.
+        pub(crate) fn push(&mut self, element: T) {
+            self.data.push(element);
             let mut index = self.data.len() - 1;
             while index > 0 {
                 let parent = (index - 1) / 2;
@@ -220,7 +231,8 @@ mod system_under_test {
         }
 
         // This implementation is wrong, because it doesn't preserve ordering
-        pub fn pop_wrong(&mut self) -> Option<T> {
+        /// Remove the root without restoring heap order.
+        pub(crate) fn pop_wrong(&mut self) -> Option<T> {
             if self.is_empty() {
                 None
             } else {
@@ -229,8 +241,9 @@ mod system_under_test {
         }
 
         // Fixed implementation of pop()
+        /// Remove the maximum element while preserving heap order.
         #[allow(dead_code)]
-        pub fn pop(&mut self) -> Option<T> {
+        pub(crate) fn pop(&mut self) -> Option<T> {
             if self.is_empty() {
                 return None;
             }

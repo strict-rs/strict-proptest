@@ -13,10 +13,11 @@ use core::any::Any;
 use crate::test_runner::failure_persistence::FailurePersistence;
 use crate::test_runner::failure_persistence::PersistedSeed;
 
-/// Failure persistence option that loads and saves seeds in memory
-/// on the heap. This may be useful when accumulating test failures
-/// across multiple `TestRunner` instances for external reporting
-/// or batched persistence.
+/// In-memory failure persistence backed by a heap map.
+///
+/// Loads and saves seeds in memory rather than on disk. This may be
+/// useful when accumulating test failures across multiple `TestRunner`
+/// instances for external reporting or batched persistence.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MapFailurePersistence {
     /// Backing map, keyed by source_file.
@@ -40,12 +41,12 @@ impl FailurePersistence for MapFailurePersistence {
         seed: PersistedSeed,
         _shrunken_value: &dyn fmt::Debug,
     ) {
-        let s = match source_file {
+        let source = match source_file {
             Some(sf) => sf,
             None => return,
         };
-        let set = self.map.entry(s).or_default();
-        set.insert(seed);
+        let set = self.map.entry(source).or_default();
+        let _inserted = set.insert(seed);
     }
 
     fn box_clone(&self) -> Box<dyn FailurePersistence> {
@@ -82,30 +83,30 @@ mod tests {
 
     #[test]
     fn seeds_recoverable() -> Result<(), TestFailure> {
-        let mut p = MapFailurePersistence::default();
-        p.save_persisted_failure2(HI_PATH, INC_SEED, &"");
-        let restored = p.load_persisted_failures2(HI_PATH);
+        let mut persistence = MapFailurePersistence::default();
+        persistence.save_persisted_failure2(HI_PATH, INC_SEED, &"");
+        let restored = persistence.load_persisted_failures2(HI_PATH);
         ensure_eq(&1, &restored.len(), "one saved seed is restored")?;
         let first =
             ensure_some(restored.first(), "the restored list has a head")?;
         ensure(INC_SEED == *first, "the restored seed equals the saved one")?;
 
         ensure(
-            p.load_persisted_failures2(None).is_empty(),
+            persistence.load_persisted_failures2(None).is_empty(),
             "a missing source restores nothing",
         )?;
         ensure(
-            p.load_persisted_failures2(UNREL_PATH).is_empty(),
+            persistence.load_persisted_failures2(UNREL_PATH).is_empty(),
             "an unrelated source restores nothing",
         )
     }
 
     #[test]
     fn seeds_deduplicated() -> Result<(), TestFailure> {
-        let mut p = MapFailurePersistence::default();
-        p.save_persisted_failure2(HI_PATH, INC_SEED, &"");
-        p.save_persisted_failure2(HI_PATH, INC_SEED, &"");
-        let restored = p.load_persisted_failures2(HI_PATH);
+        let mut persistence = MapFailurePersistence::default();
+        persistence.save_persisted_failure2(HI_PATH, INC_SEED, &"");
+        persistence.save_persisted_failure2(HI_PATH, INC_SEED, &"");
+        let restored = persistence.load_persisted_failures2(HI_PATH);
         ensure_eq(&1, &restored.len(), "identical seeds are deduplicated")
     }
 }

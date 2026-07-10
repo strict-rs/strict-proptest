@@ -65,6 +65,10 @@ const DETERMINISTIC_SEED: u64 = 0x5EED;
 /// Map a raw `STRICT_TEST_SEED` value onto an RNG seed: `random` opts into
 /// OS entropy, a bare integer pins that exact seed, and unset or any
 /// unrecognized value pins the fixed [`DETERMINISTIC_SEED`].
+#[allow(
+    clippy::single_call_fn,
+    reason = "map the raw STRICT_TEST_SEED value onto random, fixed, or the default deterministic seed"
+)]
 fn resolve_seed(raw: Option<&str>) -> RngSeed {
     match raw {
         Some("random") => RngSeed::Random,
@@ -75,11 +79,16 @@ fn resolve_seed(raw: Option<&str>) -> RngSeed {
     }
 }
 
-/// The runner configuration used by [`ensure_property`]: failure
-/// persistence is disabled (no `proptest-regressions/` files are written)
-/// and the RNG seed is resolved from `STRICT_TEST_SEED`; everything else
-/// comes from [`Config::default`], which honors the remaining `PROPTEST_*`
-/// environment variables.
+/// The runner configuration used by [`ensure_property`].
+///
+/// Failure persistence is disabled (no `proptest-regressions/` files are
+/// written) and the RNG seed is resolved from `STRICT_TEST_SEED`; everything
+/// else comes from [`Config::default`], which honors the remaining
+/// `PROPTEST_*` environment variables.
+#[allow(
+    clippy::single_call_fn,
+    reason = "the persistence-off, STRICT_TEST_SEED-seeded Config that backs ensure_property"
+)]
 pub fn strict_default_config() -> Config {
     Config {
         failure_persistence: None,
@@ -158,6 +167,10 @@ where
 /// minimal failing input), or [`TestFailure::PropertyAborted`] when the
 /// runner cannot complete a run (for example, a strategy filter rejects
 /// too many inputs).
+#[allow(
+    clippy::single_call_fn,
+    reason = "drive TestRunner::run under a caller Config, mapping TestError onto TestFailure"
+)]
 pub fn ensure_property_with_config<S, F>(
     strategy: &S,
     context: &'static str,

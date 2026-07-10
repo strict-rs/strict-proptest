@@ -5,6 +5,7 @@
 - The minimum supported Rust version has been increased to 1.96.0.
 - Removed the `Arbitrary` implementations for `std::sync::Mutex`, `std::sync::RwLock`, `std::sync::Condvar`, and `std::sync::WaitTimeoutResult` (and the `ArbitraryF1` lifts for the two locks). The poisoning-prone std locks conflict with the strict lint policy, and `WaitTimeoutResult` cannot be produced without them; compile-fail coverage pins the removals.
 - `#[property_test]` (re-exported under the `attr-macro` feature) now generates strict tests: the wrapper returns `proptest::strict::TestResult`, runs through `proptest::strict::ensure_property`, and rejects `()` property bodies at compile time. See the `proptest-macro` changelog for the full codegen contract.
+- Renamed the public weighted-union type alias `W<T>` to `Weighted<T>` (re-exported as `proptest::strategy::Weighted`). The `WA<T>` alias is unchanged.
 
 ### Bug Fixes
 
@@ -14,16 +15,32 @@
 - The uniform float samplers (`FloatUniform::new` / `new_inclusive`) now validate their bounds and return rand's `uniform::Error` values instead of panicking on non-finite or empty ranges.
 - A failure to create or initialize the fork temp file now aborts the run as `TestError::Abort` instead of panicking, and `BarrierWaitResult` generation degrades to a leader result instead of panicking when OS thread spawning fails.
 - A closed stderr no longer aborts a run: runner warnings and hints are written best-effort through a typed diagnostics catalog with unchanged message text.
+- `prop_compose!`'s two-argument-list form now expands when an argument list uses the `name: type` syntax: the rule referenced an unbound `$strategy` metavariable (so any use failed to compile) and its matcher's trailing `$(,)?` made multi-binding lists ambiguous.
 
 ### New Additions
 
 - Added the `proptest::strict` module behind the new default-on `strict-test` feature (requires `std`): `ensure_property` and `ensure_property_with_config` run a strategy against a closure returning `Result<(), TestFailure>` (`proptest::strict::TestResult`) and map runner outcomes onto `TestFailure::PropertyFalsified` / `TestFailure::PropertyAborted` instead of panicking, with `TestFailure` re-exported from `strict-test-support`. `strict_default_config()` starts from `Config::default()` (ordinary `PROPTEST_*` environment behavior preserved), disables failure persistence, and seeds deterministically from `STRICT_TEST_SEED`: unset or unparseable pins the fixed seed `0x5EED`, `random` opts into OS entropy, and an integer pins that exact seed.
 - Added typed fallible constructors alongside the panicking legacy forms: `Union::try_new_uniform` / `Union::try_new_weighted` / `try_float_to_weight` (with `UnionBuildError`), the `collection::try_vec` family (with `EmptySizeRange` via `SizeRange::ensure_nonempty`), `sample::try_subsequence` / `sample::try_select` / `Index::try_index`, `SampledBitSetStrategy::try_new` (with `SampledBitsError`), `try_range_subset` (with `RangeSubsetError`), and the crate-internal `Seed::try_from_bytes` (with `SeedLengthError`).
+- The typed strategy-construction error types now implement `Copy`: `collection::EmptySizeRange`, `strategy::UnionBuildError`, `sample::EmptySelection`, `sample::SubsequenceError`, `bits::SampledBitsError`, and (feature `std`) `range_subset::RangeSubsetError`.
+- `string::RegexGeneratorValueTree` now implements `Debug`, rendering opaquely as `RegexGeneratorValueTree { .. }` (the wrapped value tree carries no `Debug` of its own).
 
 ### Other Notes
 
 - Updated the rand dependency family to 0.10 and migrated `TestRng` and internal RNG integration to rand 0.10's trait and seeding APIs, preserving seeded behavior.
+- Updated `bit-set` to 0.11.0 and `bit-vec` to 0.10.0; the
+  `BitSetLike` adapter now uses `BitSet::count` directly instead of the
+  deprecated `BitSet::len` cardinality alias.
+- The `hardware-rng` no-std x86/x86_64 seed path now obtains entropy
+  through safe `getrandom::fill` instead of calling unsafe RDRAND intrinsics
+  directly; OS-less RDRAND consumers select getrandom's `rdrand` backend with
+  `--cfg getrandom_backend="rdrand"`.
 - Failure-persistence files are now written with an OS-atomic header claim (`OpenOptions::create_new`) and whole-record appends instead of a process-global lock; concurrent writers interleave whole records, and torn lines are tolerated (and warned about) on read.
+- Retired every `#[macro_use] extern crate` item in favor of edition-idiomatic path imports: dependency macros are imported at their use sites, the `std_facade` no_std bridge now also re-exports the allocating macros `vec!` and `format!`, and `prop_oneof!`'s eleven-plus-alternative arm expands through `$crate::std_facade::vec!`, making the expansion resolvable at any call site independent of the caller's macro scope.
+- Spelled out the anonymous lifetime (`<'_>`) at every path to a lifetime-carrying type; the only rendered public-signature changes are `char::ranges(Cow<'_, [CharRange]>) -> CharStrategy<'_>` and `ResultCache::key(&self, key: &ResultCacheKey<'_>)`, with identical elision semantics.
+- Removed every trivial numeric cast from the numeric macro bodies (bitset impls, the float samplers, and the int/float-generic test macros, which now take their constants as per-instantiation literal arguments) and made every intentional value discard explicit (`drop(...)` or a plain assignment); two internal tests were strengthened to assert their outcomes (the flat-map regen-limit search must end in a failure, and a sampled subsequence must honor its size range). No behavior changes.
+- Internal hygiene, no behavior changes: `SelectorStrategy` expresses its reserved configuration space with `#[non_exhaustive]` instead of a private unit field; the `float_sampler!` and `multiplex_alloc!` macro expansions narrowed to their real visibilities (private sampler modules; caller-supplied visibility on the facade aliases), dropping a dead test-module alias along the way.
+- The scoped panic hook is now implemented without `unsafe`: a thread-local suppression flag plus a `OnceLock`-saved previous hook replace the raw-pointer / `static mut` / lifetime-transmute machinery (retiring the deprecated `std::panic::PanicInfo` alias along the way); observable behavior is unchanged.
+- Macro hygiene, token-identical expansions: the `prop_oneof!` / `prop_compose!` / `proptest_helper!` transcribers now repeat metavariables under the same Kleene operator their matchers bind them with; `proxy_strategy!` writes the elided reference lifetime instead of a named single-use one; internal union weight validation iterates owned `u32`s instead of references.
 
 ## 1.11.0
 

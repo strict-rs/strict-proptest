@@ -57,18 +57,26 @@ impl Strategy for Weighted {
 /// The `ValueTree` to shrink booleans to false.
 #[derive(Clone, Copy, Debug)]
 pub struct BoolValueTree {
+    /// The boolean this tree currently represents.
     current: bool,
+    /// How far shrinking has progressed for this tree.
     state: ShrinkState,
 }
 
+/// Tracks how far a `BoolValueTree` has moved through its `true` → `false`
+/// shrink.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum ShrinkState {
+    /// No shrink step has been taken yet.
     Untouched,
+    /// The value was simplified from `true` to `false`.
     Simplified,
+    /// Shrinking is exhausted; no further step will change the value.
     Final,
 }
 
 impl BoolValueTree {
+    /// Creates a tree holding `current` with a fresh, untouched shrink state.
     fn new(current: bool) -> Self {
         BoolValueTree {
             current,

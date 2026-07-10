@@ -13,6 +13,8 @@
 use std::borrow::Borrow;
 use std::collections::HashSet;
 
+use syn::Token;
+
 use crate::attr;
 use crate::error::{Ctx, DeriveResult};
 use crate::util;
@@ -23,14 +25,15 @@ use crate::util;
 
 /// `UseTracker` tracks what type variables that have used in `any_with::<Type>`
 /// or similar and thus needs an `Arbitrary` bound added to them.
-pub struct UseTracker {
+pub(crate) struct UseTracker {
     /// Tracks 'usage' of a type variable name.
     /// Allocation of this "map" will happen at once and no further
     /// allocation will happen after that. Only potential updates
     /// will happen after initial allocation.
-    /// We need to preserve insertion order, thus using Vec instead of BTreeMap
-    /// or HashMap. A potential alternative would be indexmap crate, but our
-    /// maps are so small that it would not bring any significant benefit.
+    /// We need to preserve insertion order, thus using `Vec` instead of
+    /// `BTreeMap` or `HashMap`. A potential alternative would be indexmap
+    /// crate, but our maps are so small that it would not bring any
+    /// significant benefit.
     used_map: Vec<(syn::Ident, bool)>,
     /// Extra types to bound by `Arbitrary` in the `where` clause.
     where_types: HashSet<syn::Type>,
@@ -43,18 +46,24 @@ pub struct UseTracker {
 
 /// Models a thing that may have type variables in it that
 /// can be marked as 'used' as defined by `UseTracker`.
-pub trait UseMarkable {
+pub(crate) trait UseMarkable {
+    /// Walk `self` and mark every generic type variable it uses on the
+    /// `tracker`, so those variables receive an `Arbitrary` bound.
     fn mark_uses(&self, tracker: &mut UseTracker);
 }
 
 impl UseTracker {
     /// Constructs the tracker for the given `generics`.
-    pub fn new(generics: syn::Generics) -> Self {
+    #[allow(
+        clippy::single_call_fn,
+        reason = "constructs the UseTracker, seeding every generic param as initially unused"
+    )]
+    pub(crate) fn new(generics: syn::Generics) -> Self {
         // Construct the map by setting all type variables as being unused
         // initially. This is the only time we will allocate for the map.
         let used_map = generics
             .type_params()
-            .map(|v| (v.ident.clone(), false))
+            .map(|type_param| (type_param.ident.clone(), false))
             .collect();
         Self {
             generics,
@@ -65,7 +74,7 @@ impl UseTracker {
     }
 
     /// Stop tracking. `.mark_used` will have no effect.
-    pub fn no_track(&mut self) {
+    pub(crate) fn no_track(&mut self) {
         self.track = false;
     }
 
@@ -91,14 +100,14 @@ impl UseTracker {
 
     /// Mark the type as used.
     fn use_type(&mut self, ty: syn::Type) {
-        self.where_types.insert(ty);
+        let _new_projection = self.where_types.insert(ty);
     }
 
     /// Adds the bound in `for_used` on used type variables and
     /// the bound in `for_not` (`if .is_some()`) on unused type variables.
-    pub fn add_bounds(
+    pub(crate) fn add_bounds(
         &mut self,
-        ctx: Ctx,
+        ctx: Ctx<'_>,
         for_used: &syn::TypeParamBound,
         for_not: Option<syn::TypeParamBound>,
     ) -> DeriveResult<()> {
@@ -126,7 +135,7 @@ impl UseTracker {
     /// `#[proptest(no_bound)]`) get `for_used`, all others get `for_not`.
     fn bound_all_params(
         &mut self,
-        ctx: Ctx,
+        ctx: Ctx<'_>,
         for_used: &syn::TypeParamBound,
         for_not: &syn::TypeParamBound,
     ) -> DeriveResult<()> {
@@ -159,7 +168,7 @@ impl UseTracker {
 
     /// Consumes the (potentially) modified generics that the
     /// tracker was originally constructed with and returns it.
-    pub fn consume(self) -> syn::Generics {
+    pub(crate) fn consume(self) -> syn::Generics {
         self.generics
     }
 }
@@ -180,7 +189,7 @@ impl UseMarkable for syn::Type {
 /// `PhantomData<T>` innards.
 struct PathVisitor<'ut>(&'ut mut UseTracker);
 
-impl<'ut, 'ast> syn::visit::Visit<'ast> for PathVisitor<'ut> {
+impl syn::visit::Visit<'_> for PathVisitor<'_> {
     fn visit_macro(&mut self, _: &syn::Macro) {}
 
     fn visit_type_path(&mut self, tpath: &syn::TypePath) {
@@ -205,6 +214,9 @@ impl<'ut, 'ast> syn::visit::Visit<'ast> for PathVisitor<'ut> {
     }
 }
 
+/// Returns true iff `tpath` is an associated-type projection rooted at a
+/// tracked generic (e.g. `T::Assoc` or `<T as Trait>::Assoc`), which needs a
+/// `where` bound rather than a bound on the parameter itself.
 fn matches_prj_tyvar(ut: &mut UseTracker, tpath: &syn::TypePath) -> bool {
     let path = &tpath.path;
     let segs = &path.segments;
@@ -232,6 +244,13 @@ fn matches_prj_tyvar(ut: &mut UseTracker, tpath: &syn::TypePath) -> bool {
     }
 }
 
+/// Normalize a projection written with a bare qself (`<T>::Assoc`) into the
+/// equivalent qself-free path (`T::Assoc`) so it can be stored as a single
+/// `where`-bounded type; any other path is returned unchanged.
+#[allow(
+    clippy::single_call_fn,
+    reason = "normalizes a bare-qself associated-type projection into a qself-free path"
+)]
 fn adjust_simple_prj(tpath: &syn::TypePath) -> syn::TypePath {
     let segments = tpath
         .qself
@@ -258,6 +277,7 @@ fn adjust_simple_prj(tpath: &syn::TypePath) -> syn::TypePath {
     }
 }
 
+/// Returns the underlying `TypePath` if `ty` is a path type, else `None`.
 fn extract_path(ty: &syn::Type) -> Option<&syn::TypePath> {
     if let syn::Type::Path(tpath) = ty {
         Some(tpath)

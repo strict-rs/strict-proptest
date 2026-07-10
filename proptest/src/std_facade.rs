@@ -10,12 +10,12 @@
 //! This module provides #[cfg(..)]ed type aliases over features.
 
 macro_rules! multiplex_alloc {
-    ($($alloc: path, $std: path),*) => {
+    ($vis:vis $($alloc: path, $std: path),*) => {
         $(
             #[cfg(all(feature = "alloc", not(feature = "std")))]
-            pub use $alloc;
+            $vis use $alloc;
             #[cfg(feature = "std")]
-            pub use $std;
+            $vis use $std;
         )*
     };
 }
@@ -32,9 +32,11 @@ macro_rules! multiplex_core {
 }
 
 multiplex_alloc! {
+    pub
     alloc::borrow::Cow, ::std::borrow::Cow,
     alloc::borrow::ToOwned, ::std::borrow::ToOwned,
     alloc::boxed::Box, ::std::boxed::Box,
+    alloc::format, ::std::format,
     alloc::string::String, ::std::string::String,
     alloc::string, ::std::string,
     alloc::sync::Arc, ::std::sync::Arc,
@@ -55,6 +57,7 @@ multiplex_alloc! {
 
 #[cfg(feature = "std")]
 multiplex_alloc! {
+    pub
     hashmap_core::HashMap, ::std::collections::HashMap,
     hashmap_core::HashSet, ::std::collections::HashSet
 }

@@ -30,7 +30,7 @@ use crate::util;
 /// object is uninhabited or not. A `false` answer means that we can not
 /// tell for sure that the thing is uninhabited, not that we are 100%
 /// certain that it is inhabited.
-pub trait IsUninhabited {
+pub(crate) trait IsUninhabited {
     /// Returns true if the given type is known to be uninhabited.
     /// There may be more scenarios under which the type is uninhabited.
     /// Thus, this is not a complete and exhaustive check.

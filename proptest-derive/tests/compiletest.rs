@@ -6,6 +6,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! The `compiletest_rs` driver for the derive's `compile-fail/` UI cases.
+//!
+//! Runs each file under `tests/compile-fail/` through raw `rustc` and
+//! asserts it fails with the expected diagnostics. Because Cargo does not
+//! build these cases, the harness hand-assembles the `--extern`/`-L`/
+//! `--edition` flags, selecting the freshly built `proptest` and
+//! `proptest_derive` artifacts in `deps/` by matching their Cargo
+//! fingerprints. Two self-tests guard that fingerprint parsing and
+//! feature matching stay exact.
+
 extern crate compiletest_rs as ct;
 
 use serde_json::Value;
@@ -68,6 +78,10 @@ impl CargoFingerprint {
 }
 
 impl CargoArtifacts {
+    #[allow(
+        clippy::single_call_fn,
+        reason = "locates the compiletest binary's own Cargo fingerprint to match sibling artifacts"
+    )]
     fn current() -> Result<Self, TestFailure> {
         let current_exe = ensure_ok(
             env::current_exe(),
@@ -192,6 +206,10 @@ fn json_u64(
     ensure_some(json.get(field).and_then(Value::as_u64), context)
 }
 
+#[allow(
+    clippy::single_call_fn,
+    reason = "extracts a required string field from a parsed Cargo fingerprint JSON value"
+)]
 fn json_str<'a>(
     json: &'a Value,
     field: &str,
@@ -200,6 +218,10 @@ fn json_str<'a>(
     ensure_some(json.get(field).and_then(Value::as_str), context)
 }
 
+#[allow(
+    clippy::single_call_fn,
+    reason = "decodes the fingerprint's double-encoded JSON feature list into a set"
+)]
 fn parse_feature_set(features: &str) -> Result<BTreeSet<String>, TestFailure> {
     Ok(ensure_ok(
         serde_json::from_str::<Vec<String>>(features),
@@ -218,6 +240,10 @@ fn path_to_str(path: &Path) -> Result<&str, TestFailure> {
     Ok(path)
 }
 
+#[allow(
+    clippy::single_call_fn,
+    reason = "assembles the extern, L, and edition rustc flags for the compile-fail harness"
+)]
 fn rustc_flags() -> Result<String, TestFailure> {
     let cargo = CargoArtifacts::current()?;
     let proptest = cargo.extern_arg(
@@ -245,6 +271,10 @@ fn rustc_flags() -> Result<String, TestFailure> {
     ))
 }
 
+#[allow(
+    clippy::single_call_fn,
+    reason = "configures and runs the compiletest_rs suite against the compile-fail fixtures"
+)]
 fn run_mode(src: &'static str, mode: &'static str) -> Result<(), TestFailure> {
     let mut config = ct::Config {
         mode: ensure_some(

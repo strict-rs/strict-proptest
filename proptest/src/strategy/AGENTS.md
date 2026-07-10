@@ -54,7 +54,7 @@ Each file pairs a `Strategy` wrapper with its `ValueTree`; closures live behind 
 
 ### `prop_oneof!` → `Union` / `TupleUnion`
 
-`prop_oneof!` (in `../sugar.rs`) lowers by arm count: the unweighted form `prop_oneof![a, b]` first rewrites to `1 => a, 1 => b`; a single arm collapses to the bare strategy (no union at all); **2 through 10** arms expand to `TupleUnion::new(((w0, Arc::new(s0)), …))` (static, no boxing); **11+** arms fall through to `Union::new_weighted(vec![(w, s.boxed()), …])`, where every arm is `boxed()` into a `BoxedStrategy`. Each `wN` is the relative `u32` weight.
+`prop_oneof!` (in `../sugar.rs`) lowers by arm count: the unweighted form `prop_oneof![a, b]` first rewrites to `1 => a, 1 => b`; a single arm collapses to the bare strategy (no union at all); **2 through 10** arms expand to `TupleUnion::new(((w0, Arc::new(s0)), …))` (static, no boxing); **11+** arms fall through to `Union::new_weighted($crate::std_facade::vec![(w, s.boxed()), …])` (the facade path keeps the expansion resolvable at any call site, in and outside the crate), where every arm is `boxed()` into a `BoxedStrategy`. Each `wN` is the relative `u32` weight.
 
 ## `statics.rs` — a deliberate workaround
 

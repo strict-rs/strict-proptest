@@ -20,25 +20,11 @@
 macro_rules! test_derive {
     ($name:path { $($i:tt)* } expands to { $($o:tt)* }) => {
         {
-            #[allow(dead_code)]
-            fn ensure_compiles() {
-                $($i)*
-                $($o)*
-            }
-
-            test_derive!($name { $($i)* } expands to { $($o)* } no_build)
-        }
-    };
-    ($name:path { $($i:tt)* } expands to { $($o:tt)* } no_build) => {
-        {
-            let expected = ::strict_test_support::ensure_ok(
-                stringify!( $($o)* ).parse::<proc_macro2::TokenStream>(),
-                "output should be a valid TokenStream",
-            )?;
+            let expected = ::quote::quote!($($o)*);
 
             let i = stringify!( $($i)* );
             let parsed = ::strict_test_support::ensure_ok(
-                $crate::syn::parse_str::<$crate::syn::DeriveInput>(i),
+                ::syn::parse_str::<::syn::DeriveInput>(i),
                 concat!("Failed to parse input to `#[derive(",
                     stringify!($name),
                 ")]`"),
@@ -54,17 +40,6 @@ macro_rules! test_derive {
 }
 
 macro_rules! test {
-    (no_build $test_name:ident { $($i:tt)* } expands to { $($o:tt)* }) => {
-        #[test]
-        fn $test_name(
-        ) -> ::core::result::Result<(), ::strict_test_support::TestFailure>
-        {
-            test_derive!(
-                $crate::derive::impl_proptest_arbitrary { $($i)* }
-                expands to { $($o)* } no_build
-            )
-        }
-    };
     ($test_name:ident { $($i:tt)* } expands to { $($o:tt)* }) => {
         #[test]
         fn $test_name(
@@ -87,20 +62,14 @@ test! {
         #[derive(Debug)]
         struct MyUnitStruct;
     } expands to {
-        #[allow(non_local_definitions)]
-        #[allow(non_upper_case_globals)]
-        #[allow(clippy::arc_with_non_send_sync)]
-        const _: () = {
-            use proptest as _proptest;
-        impl _proptest::arbitrary::Arbitrary for MyUnitStruct {
+        impl ::proptest::arbitrary::Arbitrary for MyUnitStruct {
             type Parameters = ();
             type Strategy = fn() -> Self;
 
             fn arbitrary_with(_top: Self::Parameters) -> Self::Strategy {
-                (|| MyUnitStruct {}) as fn() -> _
+                { let value_fn: fn() -> _ = || MyUnitStruct {}; value_fn }
             }
         }
-        };
     }
 }
 
@@ -109,20 +78,14 @@ test! {
         #[derive(Debug)]
         struct MyTupleUnitStruct();
     } expands to {
-        #[allow(non_local_definitions)]
-        #[allow(non_upper_case_globals)]
-        #[allow(clippy::arc_with_non_send_sync)]
-        const _: () = {
-            use proptest as _proptest;
-        impl _proptest::arbitrary::Arbitrary for MyTupleUnitStruct {
+        impl ::proptest::arbitrary::Arbitrary for MyTupleUnitStruct {
             type Parameters = ();
             type Strategy = fn() -> Self;
 
             fn arbitrary_with(_top: Self::Parameters) -> Self::Strategy {
-                (|| MyTupleUnitStruct {}) as fn() -> _
+                { let value_fn: fn() -> _ = || MyTupleUnitStruct {}; value_fn }
             }
         }
-        };
     }
 }
 
@@ -131,19 +94,58 @@ test! {
         #[derive(Debug)]
         struct MyNamedUnitStruct {}
     } expands to {
-        #[allow(non_local_definitions)]
-        #[allow(non_upper_case_globals)]
-        #[allow(clippy::arc_with_non_send_sync)]
-        const _: () = {
-            use proptest as _proptest;
-        impl _proptest::arbitrary::Arbitrary for MyNamedUnitStruct {
+        impl ::proptest::arbitrary::Arbitrary for MyNamedUnitStruct {
             type Parameters = ();
             type Strategy = fn() -> Self;
 
             fn arbitrary_with(_top: Self::Parameters) -> Self::Strategy {
-                (|| MyNamedUnitStruct {}) as fn () -> _
+                { let value_fn: fn() -> _ = || MyNamedUnitStruct {}; value_fn }
             }
         }
-        };
+    }
+}
+
+test! {
+    associated_projection_bounds_are_deduplicated {
+        #[derive(Debug)]
+        struct AssociatedTwice<T: Iterator> {
+            first: T::Item,
+            second: T::Item,
+        }
+    } expands to {
+        impl<T: Iterator + ::std::fmt::Debug>
+            ::proptest::arbitrary::Arbitrary for AssociatedTwice<T>
+        where
+            T::Item: ::proptest::arbitrary::Arbitrary
+        {
+            type Parameters = (
+                <T::Item as ::proptest::arbitrary::Arbitrary> :: Parameters,
+                <T::Item as ::proptest::arbitrary::Arbitrary> :: Parameters,
+            );
+
+            type Strategy = ::proptest::strategy::Map<
+                (
+                    <T::Item as ::proptest::arbitrary::Arbitrary> :: Strategy,
+                    <T::Item as ::proptest::arbitrary::Arbitrary> :: Strategy,
+                ),
+                fn((T::Item, T::Item,)) -> Self
+            >;
+
+            fn arbitrary_with(_top: Self::Parameters) -> Self::Strategy {
+                {
+                    let (param_0, param_1,) = _top;
+                    ::proptest::strategy::Strategy::prop_map(
+                        (
+                            ::proptest::arbitrary::any_with :: <T::Item>(param_0),
+                            ::proptest::arbitrary::any_with :: <T::Item>(param_1),
+                        ),
+                        |(tmp_0, tmp_1,)| AssociatedTwice {
+                            first: tmp_0,
+                            second: tmp_1
+                        }
+                    )
+                }
+            }
+        }
     }
 }

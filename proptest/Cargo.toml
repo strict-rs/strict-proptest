@@ -44,8 +44,8 @@ no_std = ["num-traits/libm"]
 #alloc = ["hashmap_core"]
 alloc = []
 
-# Use a hardware random number generator (instead of static seed) for x86 no_std targets
-hardware-rng = ["x86"]
+# Use hardware entropy instead of static seeds for x86/x86_64 no_std targets.
+hardware-rng = ["dep:getrandom"]
 
 # Enables use of the "fork" feature.
 #
@@ -82,12 +82,12 @@ num-traits = { workspace = true }
 regex-syntax = { workspace = true, optional = true }
 bit-set = { workspace = true, optional = true }
 bit-vec = { workspace = true, optional = true }
+getrandom = { workspace = true, optional = true }
 rand = { workspace = true, features = ["alloc"] }
 rand_xorshift = { workspace = true }
 rand_chacha = { workspace = true }
 rusty-fork = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
-x86 = { workspace = true, optional = true }
 strict-test-support = { workspace = true, optional = true }
 
 [package.metadata.docs.rs]

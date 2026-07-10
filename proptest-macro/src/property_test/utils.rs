@@ -1,15 +1,23 @@
 use syn::{AttrStyle, Attribute, Expr, FnArg, ItemFn, Meta, PatType};
 
 /// A parsed argument, with an optional custom strategy
-pub struct Argument {
+pub(super) struct Argument {
+    /// The parameter's pattern and type (`x: i32`), with any strategy
+    /// attribute already stripped off.
     pub pat_ty: PatType,
+    /// The parameter's `#[strategy = <expr>]` override, if one was given;
+    /// `None` falls back to the type's `Arbitrary` strategy.
     pub strategy: Option<Expr>,
 }
 
 /// Convert a function to a zero-arg function, and return the args
 ///
 /// Panics on any invalid function
-pub fn strip_args(mut f: ItemFn) -> (ItemFn, Vec<Argument>) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "split a function into its argument-less form plus the extracted argument list"
+)]
+pub(super) fn strip_args(mut f: ItemFn) -> (ItemFn, Vec<Argument>) {
     let args = std::mem::take(&mut f.sig.inputs);
     let args = args
         .into_iter()
@@ -24,6 +32,16 @@ pub fn strip_args(mut f: ItemFn) -> (ItemFn, Vec<Argument>) {
     (f, args)
 }
 
+/// Split a parameter into its `#[strategy = <expr>]` override (if any) and the
+/// remaining `PatType`.
+///
+/// Assumes `validate` has already rejected malformed or duplicate strategy
+/// attributes, so the `panic!`s here mark internal bugs rather than user
+/// error.
+#[allow(
+    clippy::single_call_fn,
+    reason = "split one parameter into its strategy override and its bare pattern type"
+)]
 fn strip_strategy(mut pat_ty: PatType) -> Argument {
     let (strategies, others) = pat_ty.attrs.into_iter().partition(is_strategy);
 
@@ -31,7 +49,7 @@ fn strip_strategy(mut pat_ty: PatType) -> Argument {
 
     let strategy = match &strategies[..] {
         [] => None,
-        [s] => match &s.meta {
+        [attr] => match &attr.meta {
             Meta::NameValue(name_value) => Some(name_value.value.clone()),
             _ => panic!("invalid strategies should be filtered by validate"),
         },
@@ -46,7 +64,7 @@ fn strip_strategy(mut pat_ty: PatType) -> Argument {
 /// This means:
 ///  - it is an outer attribute (i.e. `#[...]` not `#![...]`)
 ///  - it contains `strategy = <expr>`
-pub fn is_strategy(attr: &Attribute) -> bool {
+pub(super) fn is_strategy(attr: &Attribute) -> bool {
     let path_correct = attr
         .path()
         .get_ident()
@@ -97,7 +115,7 @@ mod tests {
     #[should_panic]
     fn strip_args_panics_with_self() {
         let f = parse_quote! { fn foo(self) {} };
-        strip_args(f);
+        let _unreachable = strip_args(f);
     }
 
     #[test]

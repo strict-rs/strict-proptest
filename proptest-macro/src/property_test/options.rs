@@ -10,12 +10,19 @@ use syn::{
 pub(super) struct Options {
     /// Collect compiler errors and emit them later, since errors here are largely recoverable
     pub errors: Vec<TokenStream>,
+    /// The user's `config = <expr>`, if given. When present, codegen routes
+    /// through `ensure_property_with_config` with `test_name` / `source_file`
+    /// forced; when absent, the strict defaults apply.
     pub config: Option<Expr>,
+    /// The path to the `proptest` crate from `proptest_path = <path>`, for a
+    /// re-exported or renamed proptest. `None` means the default `::proptest`.
     pub proptest_path: Option<Path>,
 }
 
 impl Options {
-    pub fn true_proptest_path(&self) -> TokenStream {
+    /// Resolve the crate path codegen prefixes onto every emitted item: the
+    /// user's `proptest_path` if set, otherwise `::proptest`.
+    pub(super) fn true_proptest_path(&self) -> TokenStream {
         match &self.proptest_path {
             None => quote! { ::proptest },
             Some(path) => path.to_token_stream(),
@@ -27,6 +34,10 @@ impl Options {
 /// qself-free path can name the proptest crate. Returns the path on success,
 /// or the spanned `compile_error!` statement to record as a recoverable
 /// diagnostic.
+#[allow(
+    clippy::single_call_fn,
+    reason = "validate that a proptest_path value is a bare path to the proptest crate"
+)]
 fn parse_proptest_path(attr_value: &Expr) -> Result<Path, TokenStream> {
     let bad_path = |span| {
         quote_spanned!(span =>
@@ -45,7 +56,7 @@ fn parse_proptest_path(attr_value: &Expr) -> Result<Path, TokenStream> {
 impl Parse for Options {
     // note: this impl takes only the contents of the attr, not the attr itself
     // e.g. it will get `foo = bar, baz = qux`, not `#[macro(foo = bar, baz = qux)]`
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+    fn parse(input: syn::parse::ParseStream<'_>) -> syn::Result<Self> {
         let pairs =
             Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
 

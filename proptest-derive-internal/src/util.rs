@@ -10,6 +10,8 @@
 
 use std::borrow::Borrow;
 
+use syn::{Token, parse_quote};
+
 //==============================================================================
 // General AST manipulation and types
 //==============================================================================
@@ -17,7 +19,7 @@ use std::borrow::Borrow;
 /// Extract the list of fields from a `Fields` from syn.
 /// We don't care about the style, we always and uniformly use {} in
 /// struct literal syntax for making struct and enum variant values.
-pub fn fields_to_vec(fields: syn::Fields) -> Vec<syn::Field> {
+pub(crate) fn fields_to_vec(fields: syn::Fields) -> Vec<syn::Field> {
     use syn::Fields::*;
     match fields {
         Named(fields) => fields.named.into_iter().collect(),
@@ -28,12 +30,16 @@ pub fn fields_to_vec(fields: syn::Fields) -> Vec<syn::Field> {
 
 /// Returns true iff the given type is the literal unit type `()`.
 /// This is treated the same way by `syn` as a 0-tuple.
-pub fn is_unit_type<T: Borrow<syn::Type>>(ty: T) -> bool {
+#[allow(
+    clippy::single_call_fn,
+    reason = "recognize the literal unit type () among syn Types"
+)]
+pub(crate) fn is_unit_type<T: Borrow<syn::Type>>(ty: T) -> bool {
     ty.borrow() == &parse_quote!(())
 }
 
 /// Returns the `Self` type (in the literal syntactic sense).
-pub fn self_ty() -> syn::Type {
+pub(crate) fn self_ty() -> syn::Type {
     parse_quote!(Self)
 }
 
@@ -41,23 +47,33 @@ pub fn self_ty() -> syn::Type {
 // Paths:
 //==============================================================================
 
+/// A `::`-separated sequence of path segments — the shape of a simple path's
+/// segment list.
 type CommaPS = syn::punctuated::Punctuated<syn::PathSegment, Token![::]>;
 
 /// Returns true iff the path is simple, i.e:
 /// just a :: separated list of identifiers.
+#[allow(
+    clippy::single_call_fn,
+    reason = "hold when every path segment is free of generic arguments"
+)]
 fn is_path_simple(path: &syn::Path) -> bool {
     path.segments.iter().all(|ps| ps.arguments.is_empty())
 }
 
 /// Returns true iff lhs matches the rhs.
+#[allow(
+    clippy::single_call_fn,
+    reason = "match a dotted string path against a segment list ident by ident"
+)]
 fn eq_simple_pathseg(lhs: &str, rhs: &CommaPS) -> bool {
     lhs.split("::")
-        .filter(|s| !s.trim().is_empty())
+        .filter(|segment| !segment.trim().is_empty())
         .eq(rhs.iter().map(|ps| ps.ident.to_string()))
 }
 
 /// Returns true iff lhs matches the given simple Path.
-pub fn eq_simple_path(mut lhs: &str, rhs: &syn::Path) -> bool {
+pub(crate) fn eq_simple_path(mut lhs: &str, rhs: &syn::Path) -> bool {
     if !is_path_simple(rhs) {
         return false;
     }
@@ -74,12 +90,16 @@ pub fn eq_simple_path(mut lhs: &str, rhs: &syn::Path) -> bool {
 
 /// Returns true iff the given path matches any of given
 /// paths specified as string slices.
-pub fn match_pathsegs(path: &syn::Path, against: &[&str]) -> bool {
+pub(crate) fn match_pathsegs(path: &syn::Path, against: &[&str]) -> bool {
     against.iter().any(|needle| eq_simple_path(needle, path))
 }
 
 /// Returns true iff the given `PathArguments` is one that has one type
 /// applied to it.
+#[allow(
+    clippy::single_call_fn,
+    reason = "hold when a path segment carries exactly one angle-bracketed type argument"
+)]
 fn pseg_has_single_tyvar(pp: &syn::PathSegment) -> bool {
     use syn::GenericArgument::Type;
     use syn::PathArguments::AngleBracketed;
@@ -94,7 +114,11 @@ fn pseg_has_single_tyvar(pp: &syn::PathSegment) -> bool {
 
 /// Returns true iff the given type is of the form `PhantomData<TY>` where
 /// `TY` can be substituted for any type, including type variables.
-pub fn is_phantom_data(path: &syn::Path) -> bool {
+#[allow(
+    clippy::single_call_fn,
+    reason = "recognize PhantomData<T> across its common import spellings"
+)]
+pub(crate) fn is_phantom_data(path: &syn::Path) -> bool {
     let segs = &path.segments;
     if segs.is_empty() {
         return false;
@@ -122,14 +146,14 @@ pub fn is_phantom_data(path: &syn::Path) -> bool {
 }
 
 /// Extracts a simple non-global path of length 1.
-pub fn extract_simple_path(path: &syn::Path) -> Option<&syn::Ident> {
+pub(crate) fn extract_simple_path(path: &syn::Path) -> Option<&syn::Ident> {
     match_singleton(&path.segments)
         .filter(|f| !path_is_global(path) && f.arguments.is_empty())
         .map(|f| &f.ident)
 }
 
 /// Does the path have a leading `::`?
-pub fn path_is_global(path: &syn::Path) -> bool {
+pub(crate) fn path_is_global(path: &syn::Path) -> bool {
     path.leading_colon.is_some()
 }
 
@@ -138,7 +162,7 @@ pub fn path_is_global(path: &syn::Path) -> bool {
 //==============================================================================
 
 /// Returns `Some(x)` iff the iterable is singleton and otherwise None.
-pub fn match_singleton<T>(it: impl IntoIterator<Item = T>) -> Option<T> {
+pub(crate) fn match_singleton<T>(it: impl IntoIterator<Item = T>) -> Option<T> {
     let mut it = it.into_iter();
     it.next().filter(|_| it.next().is_none())
 }

@@ -7,6 +7,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Plays with value generation by hand: builds a `ValueTree` from a strategy
+//! and reads its `current` value.
+//!
+//! Backs the Proptest Book's tutorial `strategy-basics` chapter. It calls
+//! `Strategy::new_tree` on an `i32` range and a regex string strategy, then
+//! prints each tree's generated value. This is not how proptest is normally
+//! used; it only illustrates the generation layer.
+
 // Shows how to pick values from a strategy.
 //
 // This is *not* how proptest is normally used; it is simply used to play

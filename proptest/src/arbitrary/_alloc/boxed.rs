@@ -15,5 +15,7 @@ wrap_from!(Box);
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(boxed => Box<u8>);
 }

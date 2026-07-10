@@ -17,6 +17,10 @@ use crate::test_runner::rng::RngAlgorithm;
 /// Override the config fields from environment variables, if any are set.
 /// Without the `std` feature this function returns config unchanged.
 #[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "overlay every PROPTEST_* environment variable onto the compiled-in Config"
+)]
 pub fn contextualize_config(mut result: Config) -> Config {
     use std::env;
     use std::ffi::OsString;
@@ -71,9 +75,9 @@ pub fn contextualize_config(mut result: Config) -> Config {
         }
     }
 
-    for (var, raw_value) in
-        env::vars_os().filter_map(|(k, v)| k.into_string().ok().map(|k| (k, v)))
-    {
+    for (var, raw_value) in env::vars_os().filter_map(|(name, os_value)| {
+        name.into_string().ok().map(|name| (name, os_value))
+    }) {
         let var = var.as_str();
 
         #[cfg(feature = "fork")]
@@ -163,6 +167,16 @@ pub fn contextualize_config(result: Config) -> Config {
     result
 }
 
+/// The compiled-in default `Config`, before any environment overlay.
+///
+/// This is the persistence-free baseline shared by both `Default` impls:
+/// under `std`, `DEFAULT_CONFIG` wraps it to add the default
+/// `FileFailurePersistence` and the `PROPTEST_*` overlay; without `std`
+/// it is returned verbatim (so persistence stays `None`).
+#[allow(
+    clippy::single_call_fn,
+    reason = "the persistence-free compiled-in Config baseline shared by std and no_std defaults"
+)]
 fn default_default_config() -> Config {
     Config {
         cases: 256,
@@ -189,8 +203,12 @@ fn default_default_config() -> Config {
     }
 }
 
-// The default config, computed by combining environment variables and
-// defaults.
+/// The process-wide default `Config`, built once on first use.
+///
+/// Starts from `default_default_config()`, switches `failure_persistence`
+/// on to the default `FileFailurePersistence`, and applies the
+/// `PROPTEST_*` env overlay exactly once; `Config::default` (under `std`)
+/// hands out clones of this.
 #[cfg(feature = "std")]
 static DEFAULT_CONFIG: std::sync::LazyLock<Config> =
     std::sync::LazyLock::new(|| {
@@ -446,6 +464,15 @@ pub struct Config {
     pub _non_exhaustive: (),
 }
 
+/// Compare two result-cache factory function pointers by address.
+///
+/// `Config`'s `PartialEq` cannot compare the `result_cache` `fn` field
+/// structurally, so it treats two configs as sharing a cache only when
+/// both point at the very same factory (`core::ptr::fn_addr_eq`).
+#[allow(
+    clippy::single_call_fn,
+    reason = "compare two result-cache factory function pointers by address for Config's PartialEq"
+)]
 fn result_cache_eq(
     left: fn() -> Box<dyn ResultCache>,
     right: fn() -> Box<dyn ResultCache>,
@@ -496,6 +523,10 @@ impl Config {
     ///     Config { cases: 42, .. Config::default() }
     /// );
     /// ```
+    #[allow(
+        clippy::single_call_fn,
+        reason = "a Config that differs from the default only in its configured case count"
+    )]
     pub fn with_cases(cases: u32) -> Self {
         Self {
             cases,
@@ -582,11 +613,15 @@ impl Config {
         self._fork() || self.timeout() > 0
     }
 
+    /// Backing accessor for `fork()`: the raw `fork` field, present only
+    /// when the `fork` feature is enabled.
     #[cfg(feature = "fork")]
     fn _fork(&self) -> bool {
         self.fork
     }
 
+    /// Backing accessor for `fork()`: always `false` when the `fork`
+    /// feature is disabled and there is no `fork` field.
     #[cfg(not(feature = "fork"))]
     fn _fork(&self) -> bool {
         false
@@ -666,7 +701,7 @@ mod tests {
         struct TestResultCache;
 
         impl ResultCache for TestResultCache {
-            fn key(&self, _: &ResultCacheKey) -> u64 {
+            fn key(&self, _: &ResultCacheKey<'_>) -> u64 {
                 1
             }
 

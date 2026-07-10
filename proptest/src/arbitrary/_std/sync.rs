@@ -42,10 +42,20 @@ arbitrary!(BarrierWaitResult,
 
 lazy_just!(Once, Once::new);
 
+/// Produces the leader `BarrierWaitResult` from a single-participant barrier.
 fn bwr_true() -> BarrierWaitResult {
     Barrier::new(1).wait()
 }
 
+/// Produces a `BarrierWaitResult` from a two-participant barrier.
+///
+/// Spawns a second thread so this thread's `wait` can return, then combines
+/// the two results into the non-leader outcome. If the thread cannot be
+/// spawned, it degrades to the single-participant leader result.
+#[allow(
+    clippy::single_call_fn,
+    reason = "spawn a second thread to produce the two-participant BarrierWaitResult case"
+)]
 fn bwr_false() -> BarrierWaitResult {
     let barrier = Arc::new(Barrier::new(2));
     let b2 = Arc::clone(&barrier);
@@ -130,6 +140,8 @@ arbitrary!([A: fmt::Debug] (SyncSender<A>, IntoIter<A>), SMapped<u16, Self>;
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         barrier => Barrier,
         barrier_wait_result => BarrierWaitResult,

@@ -7,7 +7,9 @@ use super::{
     utils::{Argument, strip_args},
 };
 
+/// Builds the params struct's `Arbitrary` impl (unboxed or boxed path).
 mod arbitrary;
+/// Assembles the strict-runner body that wraps the user's block.
 mod test_body;
 
 /// Generate the modified test function
@@ -20,6 +22,10 @@ mod test_body;
 ///
 ///  Currently, any attributes on parameters are ignored - in the future, we probably want to read
 ///  these for things like customizing strategies
+#[allow(
+    clippy::single_call_fn,
+    reason = "drive the struct, Arbitrary impl, and body generation into the final test fn"
+)]
 pub(super) fn generate(item_fn: ItemFn, options: Options) -> TokenStream {
     let (mut argless_fn, args) = strip_args(item_fn);
 
@@ -63,6 +69,10 @@ pub(super) fn generate(item_fn: ItemFn, options: Options) -> TokenStream {
 }
 
 /// Generate the inner struct that represents the arguments of the function
+#[allow(
+    clippy::single_call_fn,
+    reason = "the derived params struct storing one field per property-test argument"
+)]
 fn generate_struct(fn_name: &Ident, args: &[Argument]) -> TokenStream {
     let struct_name = struct_name(fn_name);
 
@@ -117,6 +127,11 @@ fn nth_field_name(args: &[Argument], index: usize) -> Ident {
     }
 }
 
+/// Build the `#[test]` attribute pushed onto the generated wrapper fn.
+#[allow(
+    clippy::single_call_fn,
+    reason = "the literal #[test] attribute appended to the generated wrapper fn"
+)]
 fn test_attr() -> Attribute {
     parse_quote! { #[test] }
 }
@@ -139,17 +154,17 @@ mod tests {
         let f: ItemFn = ensure_ok(parse_str(fn_def), "fixture fn parses")?;
         let (f, args) = strip_args(f);
         let tokens = generate_struct(&f.sig.ident, &args);
-        let s: ItemStruct =
+        let parsed_struct: ItemStruct =
             ensure_ok(parse2(tokens), "generated struct parses")?;
 
         ensure_eq(
-            &s.ident.to_string(),
+            &parsed_struct.ident.to_string(),
             &expected_name.to_owned(),
             "generated struct name matches",
         )?;
 
         let mut rendered_fields = Vec::new();
-        for field in s.fields {
+        for field in parsed_struct.fields {
             let name = ensure_some(field.ident, "generated fields are named")?;
             rendered_fields
                 .push(format!("{name}: {}", field.ty.to_token_stream()));

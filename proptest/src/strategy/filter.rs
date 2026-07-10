@@ -17,12 +17,22 @@ use crate::test_runner::*;
 /// See `Strategy::prop_filter()`.
 #[must_use = "strategies do nothing unless used"]
 pub struct Filter<S, F> {
+    /// The strategy or value tree whose values are being filtered.
     pub(super) source: S,
+    /// The reason recorded with the runner each time a value is rejected.
     pub(super) whence: Reason,
+    /// The predicate deciding acceptance, held behind an `Arc` so the wrapper
+    /// clones cheaply.
     pub(super) fun: Arc<F>,
 }
 
 impl<S, F> Filter<S, F> {
+    /// Wrap `source` so that only values accepted by `fun` are produced,
+    /// recording `whence` with the runner on each rejection.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "cache a Filter combinator's predicate and rejection reason behind an Arc"
+    )]
     pub(super) fn new(source: S, whence: Reason, fun: F) -> Self {
         Self {
             source,
@@ -33,7 +43,7 @@ impl<S, F> Filter<S, F> {
 }
 
 impl<S: fmt::Debug, F> fmt::Debug for Filter<S, F> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Filter")
             .field("source", &self.source)
             .field("whence", &self.whence)
@@ -73,6 +83,13 @@ impl<S: Strategy, F: Fn(&S::Value) -> bool> Strategy for Filter<S, F> {
 }
 
 impl<S: ValueTree, F: Fn(&S::Value) -> bool> Filter<S, F> {
+    /// After the source shrinks, `complicate()` it back until the predicate
+    /// accepts the current value again.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the source cannot be complicated back into an accepted
+    /// value, which would indicate a broken source `ValueTree`.
     fn ensure_acceptable(&mut self) {
         while !(self.fun)(&self.source.current()) {
             if !self.source.complicate() {
@@ -119,7 +136,7 @@ mod test {
 
     #[test]
     fn test_filter() -> Result<(), TestFailure> {
-        let input = (0..256).prop_filter("%3", |&v| 0 == v % 3);
+        let input = (0..256).prop_filter("%3", |&candidate| 0 == candidate % 3);
 
         for _ in 0..256 {
             let mut runner = TestRunner::default();
@@ -150,7 +167,7 @@ mod test {
     #[test]
     fn test_filter_sanity() {
         check_strategy_sanity(
-            (0..256).prop_filter("!%5", |&v| 0 != v % 5),
+            (0..256).prop_filter("!%5", |&candidate| 0 != candidate % 5),
             Some(CheckStrategySanityOptions {
                 // Due to internal rejection sampling, `simplify()` can
                 // converge back to what `complicate()` would do.

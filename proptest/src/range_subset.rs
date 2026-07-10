@@ -53,7 +53,7 @@ where
 
 /// Error returned by [`try_range_subset`] when the requested size range
 /// cannot select a subset of the index range.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RangeSubsetError {
     /// The requested size range is empty.
     EmptySizeRange(crate::collection::EmptySizeRange),
@@ -67,7 +67,7 @@ pub enum RangeSubsetError {
 }
 
 impl fmt::Display for RangeSubsetError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptySizeRange(inner) => inner.fmt(f),
             Self::TooLarge { size_end_incl, len } => write!(
@@ -83,6 +83,16 @@ impl core::error::Error for RangeSubsetError {}
 
 /// Fallible form of [`range_subset`]: returns a typed error instead of
 /// panicking when `size` is an empty range or exceeds the range length.
+///
+/// ## Errors
+///
+/// Returns `RangeSubsetError::EmptySizeRange` when `size` is a zero-length
+/// range, or `RangeSubsetError::TooLarge` when the inclusive maximum of
+/// `size` exceeds the number of elements in `range`.
+#[allow(
+    clippy::single_call_fn,
+    reason = "validate size and range bounds, then build the fallible RangeSubset strategy"
+)]
 pub fn try_range_subset<T>(
     range: Range<T>,
     size: impl Into<SizeRange>,
@@ -110,7 +120,10 @@ where
 /// This is created by the `range_subset` function in the same module.
 #[derive(Debug)]
 pub struct RangeSubset<T> {
+    /// Index range each generated subset is sampled from, without
+    /// replacement.
     range: Range<T>,
+    /// Bounds on how many indices a generated subset contains.
     size: SizeRange,
 }
 
@@ -155,8 +168,8 @@ where
             let jv = self.range.clone().nth(j).unwrap();
             let vj = *swaps.get(&jv).unwrap_or(&jv);
 
-            swaps.insert(iv, vj);
-            swaps.insert(jv, vi);
+            let _previous_i = swaps.insert(iv, vj);
+            let _previous_j = swaps.insert(jv, vi);
             values.push(vj);
         }
 
@@ -175,10 +188,15 @@ where
 /// `RangeSubsetValueTree` corresponding to `RangeSubset`.
 #[derive(Debug, Clone)]
 pub struct RangeSubsetValueTree<T> {
+    /// Sampled indices in the order the Fisher-Yates shuffle drew them.
     values: Vec<T>,
+    /// Which positions in `values` remain part of the current subset.
     included_values: VarBitSet,
+    /// Next position in `values` to try excluding while simplifying.
     shrink: usize,
+    /// Position excluded by the last `simplify`, restored by `complicate`.
     prev_shrink: Option<usize>,
+    /// Lower size bound; shrinking never drops below this many elements.
     min_size: usize,
 }
 
@@ -281,9 +299,9 @@ mod test {
             )?;
         }
 
-        for &v in value_counts.iter() {
+        for &index_count in value_counts.iter() {
             ensure(
-                (1024..1500).contains(&v),
+                (1024..1500).contains(&index_count),
                 "each index is chosen a plausible number of times",
             )?;
         }

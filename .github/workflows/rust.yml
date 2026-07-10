@@ -46,6 +46,9 @@ jobs:
         run: cd proptest && cargo build --verbose
       - name: Run tests
         run: cd proptest && cargo test --verbose
+      - name: Run tests with handle-panics
+        if: ${{ matrix.build == 'stable' }}
+        run: cd proptest && cargo test --verbose --features handle-panics
       - name: Run macro tests
         run: cd proptest-macro && cargo test --verbose
       - name: Run macro integration tests
@@ -64,6 +67,11 @@ jobs:
       - name: Build rng no-default-features
         if: ${{ matrix.build == 'nightly' }}
         run: cd proptest && cargo build --no-default-features --features "no_std alloc unstable hardware-rng"
+      - name: Build rng no-default-features with RDRAND backend
+        if: ${{ matrix.build == 'nightly' }}
+        env:
+          RUSTFLAGS: '--cfg getrandom_backend="rdrand"'
+        run: cd proptest && cargo build --no-default-features --features "no_std alloc unstable hardware-rng"
       - name: Run persistence tests
         if: ${{ matrix.build == 'nightly' }}
         run: cd proptest/test-persistence-location && ./run-tests.sh
@@ -77,5 +85,11 @@ jobs:
       - name: Clean and Run tests for derive with features enabled
         if: ${{ matrix.build == 'nightly' }}
         run: cd proptest-derive && cargo clean && cargo test --features boxed_union
+      - name: Run tests for derive internal
+        if: ${{ matrix.build == 'nightly' }}
+        run: cd proptest-derive-internal && cargo test
+      - name: Run tests for derive internal with features enabled
+        if: ${{ matrix.build == 'nightly' }}
+        run: cd proptest-derive-internal && cargo test --features boxed_union
       - name: Run state machine tests
         run: cd proptest-state-machine && cargo test --verbose

@@ -15,6 +15,18 @@
   implementations report failures with the `ensure*` helpers and `?`.
 - Because the generated tests run through the strict runner, they seed deterministically by default (`STRICT_TEST_SEED` selects the seed: unset or unparseable pins `0x5EED`, `random` opts into OS entropy, an integer pins that seed) and no longer write `proptest-regressions/` files; the shrunk minimal failing transition sequence is carried in the returned `TestFailure::PropertyFalsified` report instead.
 
+### New Additions
+
+- `SequentialValueTree` now implements `Debug`, rendering the shrink cursor (the transition count, the included/shrinkable bit-set counts, `max_ix`, and the current/last shrink operations) while omitting the non-`Debug` callback and generic value-tree fields.
+
+### Other Notes
+
+- The examples import `prop_state_machine` with a `use` item instead of `#[macro_use] extern crate proptest_state_machine;`, and the crate's one elided lifetime is now written explicitly (`Formatter<'_>`).
+- The default `StateMachineTest::teardown` implementation now drops its arguments explicitly (`drop(state); drop(ref_state);`), and the echo-server example's best-effort channel send discards its result via `drop(...)`; behavior is unchanged.
+- The echo-server example now reports the intentionally-wrong send path through
+  `SendStatus` checks and a one-second receive timeout instead of blocking
+  indefinitely when an echo is lost.
+
 ## 0.8.0
 
 - Added Send + Sync bounds to `strategy:Sequential` ([\#640](https://github.com/proptest-rs/proptest/pull/640))

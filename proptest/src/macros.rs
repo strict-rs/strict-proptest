@@ -10,6 +10,11 @@
 //! Macros for internal use to reduce boilerplate.
 
 // Pervasive internal sugar
+/// Defines a unit struct implementing `strategy::statics::MapFn`.
+///
+/// Wraps a named mapping-function body as a zero-sized `MapFn` type so it can
+/// parameterise a `statics::Map` without capturing a closure, keeping the
+/// resulting strategy `Clone`/`Copy`/`Debug`.
 macro_rules! mapfn {
     ($({#[$allmeta:meta]})* $(#[$meta:meta])* [$($vis:tt)*]
      fn $name:ident[$($gen:tt)*]($parm:ident: $input:ty) -> $output:ty {
@@ -28,6 +33,11 @@ macro_rules! mapfn {
     }
 }
 
+/// Emits the three `ValueTree` methods that forward to the wrapped tree held
+/// at tuple position `0`.
+///
+/// Used by newtype `ValueTree` wrappers whose only field is the inner tree, so
+/// `current`/`simplify`/`complicate` simply delegate to it.
 macro_rules! delegate_vt_0 {
     () => {
         fn current(&self) -> Self::Value {
@@ -44,6 +54,13 @@ macro_rules! delegate_vt_0 {
     };
 }
 
+/// Generates the `Strategy` + `ValueTree` newtype boilerplate for an opaque
+/// wrapper around an inner strategy.
+///
+/// Declares the strategy and value-tree structs, forwards `new_tree` to the
+/// inner strategy (mapping its tree into the wrapper), and delegates the
+/// value-tree methods via `delegate_vt_0!`. Used by `option`/`result`/
+/// `collection`/`sample`/`string` to hide their inner combinator types.
 macro_rules! opaque_strategy_wrapper {
     ($({#[$allmeta:meta]})*
      $(#[$smeta:meta])*
@@ -82,7 +99,11 @@ macro_rules! opaque_strategy_wrapper {
     }
 }
 
-// Example: unwrap_or!(result, err => handle_err(err));
+/// Unwraps a `Result`, evaluating a fallback expression on `Err`.
+///
+/// Binds the error to the given identifier for use in the fallback, e.g.
+/// `unwrap_or!(result, err => handle_err(err))`. Unlike `Result::unwrap_or`
+/// the fallback can reference the error and may diverge (`return`/`continue`).
 macro_rules! unwrap_or {
     ($unwrap: expr, $err: ident => $on_err: expr) => {
         match $unwrap {

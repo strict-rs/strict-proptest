@@ -11,21 +11,21 @@
 //! of arbitrary client with an echo server, implemented using `message-io`
 //! crate in the `system_under_test` module.
 
-#[macro_use]
-extern crate proptest_state_machine;
-
 use std::collections::{HashMap, HashSet};
 use std::thread;
+use std::time::Duration;
 
 use proptest::prelude::*;
 use proptest::strict::{TestFailure, TestResult};
 use proptest::test_runner::Config;
-use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
+use proptest_state_machine::{
+    ReferenceStateMachine, StateMachineTest, prop_state_machine,
+};
 use strict_test_support::{ensure, ensure_eq, ensure_ok, ensure_some};
 
 use system_under_test::{
-    ClientDialer, Msg, ServerDialer, Transport, init_client, init_server,
-    run_client, run_server,
+    ClientDialer, Msg, SendStatus, ServerDialer, Transport, init_client,
+    init_server, run_client, run_server,
 };
 
 // Setup the state machine test using the `prop_state_machine!` macro
@@ -81,20 +81,28 @@ struct RefState {
 /// The possible transitions of the state machine.
 #[derive(Clone, Debug)]
 enum Transition {
+    /// Start the echo server.
     StartServer,
+    /// Stop the echo server and disconnect all clients.
     StopServer,
+    /// Start the client with the given client ID.
     StartClient(ClientId),
+    /// Stop the client with the given client ID.
     StopClient(ClientId),
+    /// Send a message from the given client to the server.
     ClientMsg(ClientId, Msg),
 }
 
 /// The state of the concrete server and clients under test.
 #[derive(Default)]
 struct EchoServerTest {
+    /// The running server, if the model says it has been started.
     server: Option<TestServer>,
+    /// Running clients indexed by their model client IDs.
     clients: HashMap<ClientId, TestClient>,
 }
 
+/// Running server resources held by the concrete state machine.
 struct TestServer {
     /// A server dialer can be used to send message to clients and to shut-down
     /// the server.
@@ -103,16 +111,18 @@ struct TestServer {
     listener_handle: thread::JoinHandle<()>,
 }
 
+/// Running client resources held by the concrete state machine.
 struct TestClient {
     /// A client dialer can send messages to the server.
     dialer: ClientDialer,
     /// A handle of a thread that runs the client listener.
-    listener_handle: std::thread::JoinHandle<()>,
+    listener_handle: thread::JoinHandle<()>,
     /// Messages received by the listener of the server are forwarded to this
     /// receiver, to be checked by the test.
     msgs_recv: std::sync::mpsc::Receiver<Msg>,
 }
 
+/// Stable identifier assigned to a generated client.
 type ClientId = usize;
 
 impl ReferenceStateMachine for RefState {
@@ -173,10 +183,10 @@ impl ReferenceStateMachine for RefState {
                 state.clients = Default::default();
             }
             Transition::StartClient(id) => {
-                state.clients.insert(*id);
+                let _inserted = state.clients.insert(*id);
             }
             Transition::StopClient(id) => {
-                state.clients.remove(id);
+                let _removed = state.clients.remove(id);
             }
             Transition::ClientMsg(_id, _msg) => {
                 // Nothing to do in reference state.
@@ -209,7 +219,11 @@ impl ReferenceStateMachine for RefState {
     }
 }
 
-/// Generate an arbitrary MsgFromClient
+/// Generate an arbitrary `Msg` sent by a client.
+#[allow(
+    clippy::single_call_fn,
+    reason = "example strategy generating an arbitrary lowercase alphanumeric client message"
+)]
 fn arb_msg_from_client() -> impl Strategy<Value = Msg> {
     "[a-z0-9]{1,8}"
 }
@@ -299,23 +313,29 @@ impl StateMachineTest for EchoServerTest {
                 // that we can check the response the server.
                 let (msgs_send, msgs_recv) = std::sync::mpsc::channel();
 
-                let listener_handle = std::thread::spawn(move || {
+                let listener_handle = thread::spawn(move || {
                     run_client(listener, |msg| {
                         // The listener thread cannot propagate a TestFailure;
                         // a send error only means the receiver was dropped
                         // because the test case is already over.
-                        let _ = msgs_send.send(msg);
+                        drop(msgs_send.send(msg));
                     })
                 });
 
-                state.clients.insert(
-                    id,
-                    TestClient {
-                        dialer,
-                        listener_handle,
-                        msgs_recv,
-                    },
-                );
+                ensure(
+                    state
+                        .clients
+                        .insert(
+                            id,
+                            TestClient {
+                                dialer,
+                                listener_handle,
+                                msgs_recv,
+                            },
+                        )
+                        .is_none(),
+                    "starting a client creates a new concrete client",
+                )?;
             }
             Transition::StopClient(id) => {
                 // Remove the client
@@ -339,22 +359,25 @@ impl StateMachineTest for EchoServerTest {
 
                 // We use the broken implementation of msg_server, which should
                 // be discovered by the test.
-                system_under_test::msg_server_wrong(&mut client.dialer, &msg);
+                let send_status = system_under_test::msg_server_wrong(
+                    &mut client.dialer,
+                    &msg,
+                );
+                ensure(
+                    send_status == SendStatus::Sent,
+                    "client send reaches the network controller",
+                )?;
 
-                // NOTE: To fix the issue that gets found by the state machine,
-                // you can comment out the last statement with `pop_wrong` and
-                // uncomment this one to see the test pass:
+                // NOTE: To fix the issue found by the state machine, swap
+                // `msg_server_wrong` for `msg_server`; the wrong path now
+                // reports either a non-`Sent` status or a one-second timeout.
                 // system_under_test::msg_server(&mut client.dialer, &msg);
 
                 // Post-condition: The server must send a response back to the
                 // client
                 println!("Waiting for server response.");
-                println!(
-                    "WARN: Because we're using a blocking call here, this will \
-                    halt when the message gets lost when `msg_server_wrong` is used."
-                );
                 let recv_msg = ensure_ok(
-                    client.msgs_recv.recv(),
+                    client.msgs_recv.recv_timeout(Duration::from_secs(1)),
                     "the server sends a response back to the client",
                 )?;
                 ensure_eq(
@@ -368,9 +391,10 @@ impl StateMachineTest for EchoServerTest {
     }
 }
 
+/// Concrete socket-backed echo server used by the example state machine.
 mod system_under_test {
-    pub use message_io::network::Transport;
     use message_io::network::{Endpoint, NetEvent, ToRemoteAddr};
+    pub(crate) use message_io::network::{SendStatus, Transport};
     use message_io::node::{self, NodeEvent, NodeHandler, NodeListener};
 
     use std::net::{SocketAddr, ToSocketAddrs};
@@ -378,39 +402,59 @@ mod system_under_test {
     use std::sync::Arc;
     use std::sync::atomic::{self, AtomicBool};
 
+    /// Atomic ordering used for the client connection flag.
     const ATOMIC_ORDER: atomic::Ordering = atomic::Ordering::SeqCst;
 
     /// We're only using valid UTF-8 strings here for messages to avoid having
     /// to pull another dev-dependency for serialization.
-    pub type Msg = String;
+    pub(crate) type Msg = String;
 
-    pub struct ServerListener {
+    /// Listener-side resources for the running echo server.
+    pub(crate) struct ServerListener {
+        /// Event listener that receives server network events.
         pub listener: NodeListener<()>,
+        /// Node handler used to stop the server listener and send replies.
         pub handler: NodeHandler<()>,
     }
 
-    pub struct ServerDialer {
+    /// Dialer-side resources used by tests to address the running server.
+    pub(crate) struct ServerDialer {
+        /// Socket address chosen for the server listener.
         pub address: SocketAddr,
+        /// Node handler used to stop the server.
         pub handler: NodeHandler<()>,
     }
 
-    pub struct ClientListener {
+    /// Listener-side resources for one connected client.
+    pub(crate) struct ClientListener {
+        /// Local socket address assigned to the client.
         pub address: SocketAddr,
+        /// Event listener that receives client network events.
         pub listener: NodeListener<()>,
+        /// Server endpoint this client is connected to.
         pub server: Endpoint,
+        /// Node handler used to stop the client listener.
         pub handler: NodeHandler<()>,
         /// Server connection status, shared with the [`ClientDialer`].
         pub is_connected: Arc<AtomicBool>,
     }
 
-    pub struct ClientDialer {
+    /// Dialer-side resources used by tests to send client messages.
+    pub(crate) struct ClientDialer {
+        /// Server endpoint this client sends messages to.
         pub server: Endpoint,
+        /// Node handler used to send messages and stop the client.
         pub handler: NodeHandler<()>,
         /// Server connection status, shared with the [`ClientListener`].
         pub is_connected: Arc<AtomicBool>,
     }
 
-    pub fn init_server(
+    /// Bind an echo server listener and return the paired dialer resources.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "bind and listen the echo server socket over the message transport"
+    )]
+    pub(crate) fn init_server(
         transport: Transport,
         addr: impl ToSocketAddrs,
     ) -> std::io::Result<(ServerDialer, ServerListener)> {
@@ -429,7 +473,12 @@ mod system_under_test {
         ))
     }
 
-    pub fn run_server(listener: ServerListener) {
+    /// Run the server event loop, echoing every received message.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "spin the echo server's blocking accept-and-echo loop in the example"
+    )]
+    pub(crate) fn run_server(listener: ServerListener) {
         let ServerListener { listener, handler } = listener;
 
         listener.for_each(move |event| match event.network() {
@@ -442,7 +491,14 @@ mod system_under_test {
                 let message: Msg =
                     String::from_utf8(msg_bytes.to_vec()).unwrap();
                 println!("Server received a message \"{message}\".");
-                handler.network().send(endpoint, msg_bytes);
+                let status = handler.network().send(endpoint, msg_bytes);
+                if status != SendStatus::Sent {
+                    println!(
+                        "Server failed to echo message to {}: {:?}.",
+                        endpoint.addr(),
+                        status
+                    );
+                }
             }
             NetEvent::Disconnected(endpoint) => {
                 // Only connection oriented protocols will generate this event
@@ -451,7 +507,12 @@ mod system_under_test {
         });
     }
 
-    pub fn init_client(
+    /// Connect a client listener to the server endpoint.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "connect an example client socket to the echo server endpoint"
+    )]
+    pub(crate) fn init_client(
         transport: Transport,
         remote_addr: impl ToRemoteAddr,
     ) -> std::io::Result<(ClientListener, ClientDialer)> {
@@ -476,7 +537,15 @@ mod system_under_test {
         ))
     }
 
-    pub fn run_client(listener: ClientListener, mut on_msg: impl FnMut(Msg)) {
+    /// Run the client event loop and forward received messages to `on_msg`.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "the example client's blocking loop forwarding echoes back"
+    )]
+    pub(crate) fn run_client(
+        listener: ClientListener,
+        mut on_msg: impl FnMut(Msg),
+    ) {
         let ClientListener {
             address,
             server,
@@ -518,20 +587,31 @@ mod system_under_test {
 
     /// This function will lose messages when they are sent before the client
     /// connection is established.
-    pub fn msg_server_wrong(dialer: &mut ClientDialer, msg: &Msg) {
+    #[allow(
+        clippy::single_call_fn,
+        reason = "intentionally buggy transition handler that sends before the client connection is up"
+    )]
+    pub(crate) fn msg_server_wrong(
+        dialer: &mut ClientDialer,
+        msg: &Msg,
+    ) -> SendStatus {
         let output_data = msg.as_bytes();
 
-        dialer.handler.network().send(dialer.server, output_data);
+        dialer.handler.network().send(dialer.server, output_data)
     }
 
+    /// Send a message after the client connection has been established.
     #[allow(dead_code)]
-    pub fn msg_server(dialer: &mut ClientDialer, msg: &Msg) {
+    pub(crate) fn msg_server(
+        dialer: &mut ClientDialer,
+        msg: &Msg,
+    ) -> SendStatus {
         let output_data = msg.as_bytes();
 
         while !dialer.is_connected.load(ATOMIC_ORDER) {
             println!("Waiting for the server to be ready.");
         }
 
-        dialer.handler.network().send(dialer.server, output_data);
+        dialer.handler.network().send(dialer.server, output_data)
     }
 }

@@ -6,6 +6,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Coverage for the enum-variant `#[proptest(weight = ...)]` modifier and its
+//! `weight(...)` spelling.
+//!
+//! The derived enums set variant weights using both string-literal and
+//! integer-literal forms, and `asserting_arbitrary` checks each derived enum
+//! resolves its `Arbitrary` impl.
+
 use proptest::prelude::Arbitrary;
 use proptest_derive::Arbitrary;
 

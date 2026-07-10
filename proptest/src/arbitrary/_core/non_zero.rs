@@ -18,6 +18,12 @@ use core::num::{NonZeroI128, NonZeroU128};
 use crate::arbitrary::{Arbitrary, StrategyFor, any};
 use crate::strategy::{FilterMap, Strategy};
 
+/// Implements `Arbitrary` for a `NonZero` integer type over its primitive.
+///
+/// Generates the underlying primitive with `any::<$prim>()` and
+/// `prop_filter_map`s it through `TryFrom`, rejecting `0` with the message
+/// `"must be non zero"` (`Strategy = FilterMap<StrategyFor<$prim>,
+/// fn($prim) -> Option<Self>>`).
 macro_rules! non_zero_impl {
     ($nz:ty, $prim:ty) => {
         impl Arbitrary for $nz {

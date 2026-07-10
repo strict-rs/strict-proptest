@@ -44,6 +44,8 @@ lazy_just!(BorrowMutError, || {
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         cell => Cell<u8>,
         ref_cell => RefCell<u8>,

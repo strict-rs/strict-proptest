@@ -40,6 +40,7 @@ Compile-pass fixtures (`pass/`), all with result-returning bodies:
 - `with_params.rs` — the `config = proptest::test_runner::Config { cases: 10, .. }` attribute option (routed through `ensure_property_with_config`), against both non-trailing-comma and trailing-comma argument lists.
 - `custom_strategy.rs` — a `#[strategy = "[0-9]{1,8}"]` regex override on an argument.
 - `custom_proptest_path.rs` — `extern crate proptest as aliased_proptest;` + `proptest_path = ::aliased_proptest`, with the return type spelled through the alias — proves the generated code reaches the strict module through the configured path, never a hard-coded `::proptest`.
+- `prop_oneof_general_arm.rs` — an eleven-alternative `prop_oneof!` (the vec-backed general arm, whose expansion names `$crate::std_facade::vec!`) built and driven from `main()`: it samples the union deterministically and checks every alternative is generated, then runs the strategy through `ensure_property` — pinning that the facade macro path resolves from an external crate.
 
 Compile-fail fixtures (`fail/`), each pinning a diagnostic in its `.stderr`:
 

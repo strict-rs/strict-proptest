@@ -12,6 +12,8 @@ use crate::std_facade::fmt;
 use crate::strategy::{NewTree, Strategy, ValueTree};
 use crate::test_runner::TestRunner;
 
+/// Emit the `ValueTree::simplify`/`complicate` methods for a value tree that
+/// never shrinks, both returning `false`.
 macro_rules! noshrink {
     () => {
         fn simplify(&mut self) -> bool {
@@ -114,7 +116,7 @@ impl<T, F: Clone + Fn() -> T> Clone for LazyJust<T, F> {
 }
 
 impl<T, F: Fn() -> T> fmt::Debug for LazyJust<T, F> {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("LazyJust")
             .field("function", &"<function>")
             .finish()

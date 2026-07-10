@@ -17,7 +17,7 @@
 //! characters, and `range()` and `ranges()` to select characters from
 //! inclusive ranges.
 
-use crate::std_facade::Cow;
+use crate::std_facade::{Cow, vec};
 use core::ops::RangeInclusive;
 
 use rand::{Rng, RngExt};
@@ -90,6 +90,13 @@ pub const DEFAULT_PREFERRED_RANGES: &[CharRange] = &[
 /// particular characters anyway. `ranges` is usually derived from some
 /// external property, and the fact that a range is small often means it is
 /// more interesting.
+///
+/// # Panics
+///
+/// Panics if the chosen code point is not a valid `char`. The selection logic
+/// only ever composes code points from characters that are already valid, so
+/// this is an internal invariant check rather than something reachable through
+/// any combination of arguments.
 pub fn select_char(
     rnd: &mut impl Rng,
     special: &[char],
@@ -100,6 +107,12 @@ pub fn select_char(
     ::core::char::from_u32(base + offset).expect("bad character selected")
 }
 
+/// Chooses a character as `(range base, offset within range)`, applying the
+/// same special/preferred/range biases documented on `select_char`.
+///
+/// Returning the decomposition rather than the finished `char` lets
+/// `CharStrategy` pick a convenient shrink target on the same side of the
+/// range base.
 fn select_range_index(
     rnd: &mut impl Rng,
     special: &[char],
@@ -109,8 +122,10 @@ fn select_range_index(
     fn in_range(ranges: &[CharRange], ch: char) -> Option<(u32, u32)> {
         ranges
             .iter()
-            .find(|r| ch >= *r.start() && ch <= *r.end())
-            .map(|r| (*r.start() as u32, ch as u32 - *r.start() as u32))
+            .find(|range| ch >= *range.start() && ch <= *range.end())
+            .map(|range| {
+                (*range.start() as u32, ch as u32 - *range.start() as u32)
+            })
     }
 
     // An empty `ranges` list cannot generate anything; degrade to the
@@ -122,7 +137,7 @@ fn select_range_index(
     if !special.is_empty() && rnd.random() {
         let picked = special
             .get(rnd.random_range(0..special.len()))
-            .and_then(|&s| in_range(ranges, s));
+            .and_then(|&special_char| in_range(ranges, special_char));
         if let Some(ret) = picked {
             return ret;
         }
@@ -183,8 +198,11 @@ fn select_range_index(
 #[derive(Debug, Clone)]
 #[must_use = "strategies do nothing unless used"]
 pub struct CharStrategy<'a> {
+    /// Characters given a biased chance of selection (see `select_char`).
     special: Cow<'a, [char]>,
+    /// Ranges sampled preferentially before falling back to `ranges`.
     preferred: Cow<'a, [CharRange]>,
+    /// The complete set of ranges any generated character must fall within.
     ranges: Cow<'a, [CharRange]>,
 }
 
@@ -193,6 +211,10 @@ impl<'a> CharStrategy<'a> {
     /// function underlying `select_char()`.
     ///
     /// All arguments as per `select_char()`.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "assemble a CharStrategy from explicit special, preferred, and full range pools"
+    )]
     pub fn new(
         special: Cow<'a, [char]>,
         preferred: Cow<'a, [CharRange]>,
@@ -219,10 +241,15 @@ impl<'a> CharStrategy<'a> {
     }
 }
 
+/// The single range spanning every `char`, backing `any()`.
 const WHOLE_RANGE: &[CharRange] = &[RangeInclusive::new('\x00', char::MAX)];
 
 /// Creates a `CharStrategy` which picks from literally any character, with the
 /// default biases.
+#[allow(
+    clippy::single_call_fn,
+    reason = "the whole-Unicode CharStrategy with default biases that backs char::any"
+)]
 pub fn any() -> CharStrategy<'static> {
     CharStrategy {
         special: Cow::Borrowed(DEFAULT_SPECIAL_CHARS),
@@ -243,7 +270,11 @@ pub fn range(start: char, end: char) -> CharStrategy<'static> {
 
 /// Creates a `CharStrategy` which selects characters within the given ranges,
 /// all inclusive, using the default biases.
-pub fn ranges(ranges: Cow<[CharRange]>) -> CharStrategy {
+#[allow(
+    clippy::single_call_fn,
+    reason = "a CharStrategy over caller-supplied ranges using the default selection biases"
+)]
+pub fn ranges(ranges: Cow<'_, [CharRange]>) -> CharStrategy<'_> {
     CharStrategy {
         special: Cow::Borrowed(DEFAULT_SPECIAL_CHARS),
         preferred: Cow::Borrowed(DEFAULT_PREFERRED_RANGES),
@@ -254,10 +285,11 @@ pub fn ranges(ranges: Cow<[CharRange]>) -> CharStrategy {
 /// The `ValueTree` corresponding to `CharStrategy`.
 #[derive(Debug, Clone, Copy)]
 pub struct CharValueTree {
+    /// Binary-search shrinker over the character's `u32` code point.
     value: num::u32::BinarySearch,
 }
 
-impl<'a> Strategy for CharStrategy<'a> {
+impl Strategy for CharStrategy<'_> {
     type Tree = CharValueTree;
     type Value = char;
 
@@ -292,6 +324,10 @@ impl<'a> Strategy for CharStrategy<'a> {
 }
 
 impl CharValueTree {
+    /// Advances the shrinker off any `u32` that is not a valid `char`.
+    ///
+    /// A simplify/complicate step can land the code point in the surrogate
+    /// gap; this complicates until `current()` is representable again.
     fn reposition(&mut self) {
         while ::core::char::from_u32(self.value.current()).is_none() {
             if !self.value.complicate() {
@@ -460,7 +496,7 @@ mod test {
     #[test]
     fn select_char_degrades_to_ascii_a_on_empty_ranges()
     -> Result<(), TestFailure> {
-        let mut runner = crate::test_runner::TestRunner::deterministic();
+        let mut runner = TestRunner::deterministic();
         let selected = select_char(runner.rng(), &['x'], &[], &[]);
         ensure(
             'a' == selected,

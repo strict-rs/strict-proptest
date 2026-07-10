@@ -27,11 +27,19 @@ lazy_just!(
     JoinPathsError, jpe
 );
 
+/// Produces a `JoinPathsError` by asking `join_paths` to join a single entry
+/// containing the platform's forbidden path-separator character.
 #[cfg(not(target_os = "windows"))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "forge a JoinPathsError by joining a single entry with the platform's illegal separator"
+)]
 fn jpe() -> JoinPathsError {
     join_paths(once(":")).unwrap_err()
 }
 
+/// Produces a `JoinPathsError` by asking `join_paths` to join a single entry
+/// containing the platform's forbidden path-separator character.
 #[cfg(target_os = "windows")]
 fn jpe() -> JoinPathsError {
     join_paths(once("\"")).unwrap_err()
@@ -39,15 +47,19 @@ fn jpe() -> JoinPathsError {
 
 // Algorithm from: https://stackoverflow.com/questions/47749164
 #[cfg(any(target_os = "windows", test))]
-fn make_utf16_invalid(buf: &mut [u16], p: usize) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "corrupt one code unit of a UTF-16 buffer to build an invalid-Unicode OsString source"
+)]
+fn make_utf16_invalid(buf: &mut [u16], pos: usize) {
     // Verify that length is non-empty.
     // An empty string is always valid UTF-16.
     assert!(!buf.is_empty());
 
     // If first elem or previous entry is not a leading surrogate.
-    let gen_trail = 0 == p || 0xd800 != (buf[p - 1] & 0xfc00);
+    let gen_trail = 0 == pos || 0xd800 != (buf[pos - 1] & 0xfc00);
     // If last element or succeeding entry is not a traililng surrogate.
-    let gen_lead = p == buf.len() - 1 || 0xdc00 != (buf[p + 1] & 0xfc00);
+    let gen_lead = pos == buf.len() - 1 || 0xdc00 != (buf[pos + 1] & 0xfc00);
     let (force_bits_mask, force_bits_value) = if gen_trail {
         if gen_lead {
             // Trailing or leading surrogate.
@@ -58,22 +70,26 @@ fn make_utf16_invalid(buf: &mut [u16], p: usize) {
         }
     } else {
         // Leading surrogate.
-        // Note that `gen_lead` and `gen_trail` could both be false here if `p`
+        // Note that `gen_lead` and `gen_trail` could both be false here if `pos`
         // lies exactly between a leading and a trailing surrogate. In this
         // case, it doesn't matter what we do because the UTF-16 will be
         // invalid regardless, so just always force a leading surrogate.
         (0xfc00, 0xd800)
     };
     debug_assert_eq!(0, (force_bits_value & !force_bits_mask));
-    buf[p] = (buf[p] & !force_bits_mask) | force_bits_value;
+    buf[pos] = (buf[pos] & !force_bits_mask) | force_bits_value;
 }
 
+/// `Arbitrary` impl for `std::env::VarError`.
+///
+/// Kept in its own module (excluded on `wasm32`) so the platform-specific
+/// machinery for fabricating a non-Unicode `OsString` stays contained.
 #[cfg(not(target_arch = "wasm32"))]
 mod var_error {
     use super::*;
 
     /// Generates the set of `WTF-16 \ UTF-16` and makes
-    /// an `OsString` that is not a valid String from it.
+    /// an `OsString` that is not a valid `String` from it.
     #[cfg(target_os = "windows")]
     fn osstring_invalid_string() -> impl Strategy<Value = OsString> {
         use std::os::windows::ffi::OsStringExt;
@@ -90,7 +106,16 @@ mod var_error {
         })
     }
 
+    /// Generates an `OsString` that is not a valid `String`.
+    ///
+    /// Wraps non-UTF-8 bytes (from `not_utf8_bytes`) with
+    /// `OsStringExt::from_vec`, so converting the result into a `String`
+    /// always fails; this feeds `VarError::NotUnicode`.
     #[cfg(not(target_os = "windows"))]
+    #[allow(
+        clippy::single_call_fn,
+        reason = "wrap non-UTF-8 bytes into an OsString so into_string always errors on non-Windows targets"
+    )]
     fn osstring_invalid_string() -> impl Strategy<Value = OsString> {
         use crate::arbitrary::_std::string::not_utf8_bytes;
         use std::os::unix::ffi::OsStringExt;
@@ -137,8 +162,8 @@ mod test {
             &([num::u16::ANY; 3], 0usize..3),
             "make_utf16_invalid handles every position in a 3-element buffer",
             config,
-            |(mut buf, p)| {
-                make_utf16_invalid(&mut buf, p);
+            |(mut buf, pos)| {
+                make_utf16_invalid(&mut buf, pos);
                 Ok(())
             },
         )

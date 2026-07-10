@@ -6,29 +6,33 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use syn::{self, BinOp as B, Expr as E, Lit as L, UnOp as U};
+use syn::{self, BinOp, Expr, Lit, UnOp};
 
-/// Adapted from https://docs.rs/syn/0.14.2/src/syn/lit.rs.html#943 to accept
+/// Adapted from <https://docs.rs/syn/0.14.2/src/syn/lit.rs.html#943> to accept
 /// u128.
-fn parse_lit_int(mut s: &str) -> Option<u128> {
+#[allow(
+    clippy::single_call_fn,
+    reason = "read the digit string of an integer literal into a u128 magnitude"
+)]
+fn parse_lit_int(mut digits: &str) -> Option<u128> {
     /// Get the byte at offset idx, or a default of `b'\0'` if we're looking
     /// past the end of the input buffer.
-    pub fn byte<S: AsRef<[u8]> + ?Sized>(s: &S, idx: usize) -> u8 {
-        let s = s.as_ref();
-        if idx < s.len() { s[idx] } else { 0 }
+    pub(crate) fn byte<S: AsRef<[u8]> + ?Sized>(source: &S, idx: usize) -> u8 {
+        let bytes = source.as_ref();
+        if idx < bytes.len() { bytes[idx] } else { 0 }
     }
 
-    let base = match (byte(s, 0), byte(s, 1)) {
+    let base = match (byte(digits, 0), byte(digits, 1)) {
         (b'0', b'x') => {
-            s = &s[2..];
+            digits = &digits[2..];
             16
         }
         (b'0', b'o') => {
-            s = &s[2..];
+            digits = &digits[2..];
             8
         }
         (b'0', b'b') => {
-            s = &s[2..];
+            digits = &digits[2..];
             2
         }
         (b'0'..=b'9', _) => 10,
@@ -37,13 +41,13 @@ fn parse_lit_int(mut s: &str) -> Option<u128> {
 
     let mut magnitude = 0u128;
     loop {
-        let b = byte(s, 0);
-        let digit = match b {
-            b'0'..=b'9' => u128::from(b - b'0'),
-            b'a'..=b'f' if base > 10 => 10 + u128::from(b - b'a'),
-            b'A'..=b'F' if base > 10 => 10 + u128::from(b - b'A'),
+        let current_byte = byte(digits, 0);
+        let digit = match current_byte {
+            b'0'..=b'9' => u128::from(current_byte - b'0'),
+            b'a'..=b'f' if base > 10 => 10 + u128::from(current_byte - b'a'),
+            b'A'..=b'F' if base > 10 => 10 + u128::from(current_byte - b'A'),
             b'_' => {
-                s = &s[1..];
+                digits = &digits[1..];
                 continue;
             }
             // NOTE: Looking at a floating point literal, we don't want to
@@ -58,20 +62,24 @@ fn parse_lit_int(mut s: &str) -> Option<u128> {
         }
 
         magnitude = magnitude.checked_mul(base)?.checked_add(digit)?;
-        s = &s[1..];
+        digits = &digits[1..];
     }
 
     Some(magnitude)
 }
 
 /// Parse a suffix of an integer literal.
+#[allow(
+    clippy::single_call_fn,
+    reason = "detect which numeric type suffix an integer literal string carries"
+)]
 fn parse_suffix(lit: &str) -> Option<&'static str> {
     [
         "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64",
         "u128", "usize",
     ]
     .iter()
-    .find(|s| lit.ends_with(*s))
+    .find(|suffix| lit.ends_with(*suffix))
     .copied()
 }
 
@@ -104,49 +112,73 @@ fn eval_str_int(lit: &str) -> Option<u128> {
 }
 
 /// Interprets an integer literal.
+#[allow(
+    clippy::single_call_fn,
+    reason = "reduce a syn LitInt token to its constant u128 value"
+)]
 fn eval_lit_int(lit: &syn::LitInt) -> Option<u128> {
     let lit = lit.to_string();
     eval_str_int(&lit)
 }
 
 /// Interprets a verbatim literal.
+#[allow(
+    clippy::single_call_fn,
+    reason = "resolve a verbatim proc-macro2 literal to a constant u128"
+)]
 fn eval_lit_verbatim(lit: &proc_macro2::Literal) -> Option<u128> {
     let lit = lit.to_string();
     eval_str_int(&lit)
 }
 
 /// Interprets a literal.
+#[allow(
+    clippy::single_call_fn,
+    reason = "dispatch a literal expression to the int, byte, or verbatim evaluator"
+)]
 fn eval_lit(lit: &syn::ExprLit) -> Option<u128> {
     match &lit.lit {
-        L::Int(lit) => eval_lit_int(lit),
-        L::Byte(lit) => Some(u128::from(lit.value())),
-        L::Verbatim(lit) => eval_lit_verbatim(lit),
+        Lit::Int(lit) => eval_lit_int(lit),
+        Lit::Byte(lit) => Some(u128::from(lit.value())),
+        Lit::Verbatim(lit) => eval_lit_verbatim(lit),
         _ => None,
     }
 }
 
 /// Interprets a binary operator on two expressions.
+#[allow(
+    clippy::single_call_fn,
+    reason = "evaluate a checked binary arithmetic or bitwise node"
+)]
 fn eval_binary(bin: &syn::ExprBinary) -> Option<u128> {
-    let l = eval_expr(&bin.left)?;
-    let r = eval_expr(&bin.right)?;
+    let lhs = eval_expr(&bin.left)?;
+    let rhs = eval_expr(&bin.right)?;
     Some(match bin.op {
-        B::Add(_) => l.checked_add(r)?,
-        B::Sub(_) => l.checked_sub(r)?,
-        B::Mul(_) => l.checked_mul(r)?,
-        B::Div(_) => l.checked_div(r)?,
-        B::Rem(_) => l.checked_rem(r)?,
-        B::BitXor(_) => l ^ r,
-        B::BitAnd(_) => l & r,
-        B::BitOr(_) => l | r,
-        B::Shl(_) if r <= u128::from(u32::MAX) => l.checked_shl(r as u32)?,
-        B::Shr(_) if r <= u128::from(u32::MAX) => l.checked_shr(r as u32)?,
+        BinOp::Add(_) => lhs.checked_add(rhs)?,
+        BinOp::Sub(_) => lhs.checked_sub(rhs)?,
+        BinOp::Mul(_) => lhs.checked_mul(rhs)?,
+        BinOp::Div(_) => lhs.checked_div(rhs)?,
+        BinOp::Rem(_) => lhs.checked_rem(rhs)?,
+        BinOp::BitXor(_) => lhs ^ rhs,
+        BinOp::BitAnd(_) => lhs & rhs,
+        BinOp::BitOr(_) => lhs | rhs,
+        BinOp::Shl(_) if rhs <= u128::from(u32::MAX) => {
+            lhs.checked_shl(rhs as u32)?
+        }
+        BinOp::Shr(_) if rhs <= u128::from(u32::MAX) => {
+            lhs.checked_shr(rhs as u32)?
+        }
         _ => return None,
     })
 }
 
 /// Interprets unary operator on an expression.
+#[allow(
+    clippy::single_call_fn,
+    reason = "apply the bitwise-not unary operator in the const interpreter"
+)]
 fn eval_unary(expr: &syn::ExprUnary) -> Option<u128> {
-    if let U::Not(_) = expr.op {
+    if let UnOp::Not(_) = expr.op {
         Some(!eval_expr(&expr.expr)?)
     } else {
         None
@@ -154,13 +186,13 @@ fn eval_unary(expr: &syn::ExprUnary) -> Option<u128> {
 }
 
 /// A **very** simple CTFE interpreter for some basic arithmetic:
-pub fn eval_expr(expr: &E) -> Option<u128> {
+pub(crate) fn eval_expr(expr: &Expr) -> Option<u128> {
     match expr {
-        E::Lit(expr) => eval_lit(expr),
-        E::Binary(expr) => eval_binary(expr),
-        E::Unary(expr) => eval_unary(expr),
-        E::Paren(expr) => eval_expr(&expr.expr),
-        E::Group(expr) => eval_expr(&expr.expr),
+        Expr::Lit(expr) => eval_lit(expr),
+        Expr::Binary(expr) => eval_binary(expr),
+        Expr::Unary(expr) => eval_unary(expr),
+        Expr::Paren(expr) => eval_expr(&expr.expr),
+        Expr::Group(expr) => eval_expr(&expr.expr),
         _ => None,
     }
 }

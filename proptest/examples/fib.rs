@@ -7,13 +7,24 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Demonstrates the `fork` and `timeout` features on a deliberately
+//! exponential `fib`.
+//!
+//! Backs the Proptest Book's `forking` chapter. The `test_fib` property runs
+//! `assert!(fib(n) >= n)` over arbitrary `u64`, where large `n` runs far too
+//! long, overflows the stack, or overflows integer arithmetic; `fork`
+//! isolates each case in a subprocess and `timeout` bounds it, so the run
+//! survives the crashes and still shrinks. Fails by design.
+
 // This #[cfg] is only here so that CI can test building proptest with the
 // timeout feature disabled. You do not need it in your code.
+/// Timeout-enabled Fibonacci example module.
 #[cfg(feature = "timeout")]
 mod fib {
     use proptest::prelude::*;
 
     // The worst possible way to calculate Fibonacci numbers
+    /// Calculate `fib(n)` recursively with deliberately exponential work.
     fn fib(n: u64) -> u64 {
         if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
     }
@@ -36,7 +47,12 @@ mod fib {
     }
 
     // This is just here so that main can call it
-    pub fn do_test_fib() {
+    /// Run the generated `test_fib` property from `main`.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "lets the fib example's main() call the generated proptest test function directly"
+    )]
+    pub(crate) fn do_test_fib() {
         test_fib();
     }
 }

@@ -9,6 +9,10 @@ use super::utils::is_strategy;
 /// Many checks are deferred to rustc (e.g. rustc already errors if you make a test function
 /// unsafe, so we just transparently pass unsafe through to the generated function and let rustc
 /// emit the error)
+#[allow(
+    clippy::single_call_fn,
+    reason = "run the self, attribute, and return-type checks on one annotated fn"
+)]
 pub(super) fn validate(f: &mut ItemFn) -> Result<(), TokenStream> {
     all_args_non_self(f)?;
     validate_parameter_attrs(f)?;
@@ -30,6 +34,10 @@ const UNIT_RETURN_ERROR: &str = "strict property tests must return `Result<(), T
 /// actionable diagnostic instead. Like the rest of this module the check is
 /// purely syntactic: a type alias that resolves to `()` is not caught here
 /// and is left to rustc's type error.
+#[allow(
+    clippy::single_call_fn,
+    reason = "reject a property test signature that returns unit instead of TestResult"
+)]
 fn returns_strict_result(f: &ItemFn) -> Result<(), TokenStream> {
     match &f.sig.output {
         ReturnType::Default => err(&f.sig.ident, UNIT_RETURN_ERROR),
@@ -42,6 +50,15 @@ fn returns_strict_result(f: &ItemFn) -> Result<(), TokenStream> {
     }
 }
 
+/// Reject any `self` receiver on the annotated fn.
+///
+/// Property-test functions are free functions, so a receiver (`self`,
+/// `&self`, `self: T`, …) is always an error; this short-circuits on the
+/// first one found.
+#[allow(
+    clippy::single_call_fn,
+    reason = "reject any self receiver on the annotated property test function"
+)]
 fn all_args_non_self(f: &mut ItemFn) -> Result<(), TokenStream> {
     let first_self_arg = f
         .sig
@@ -56,6 +73,10 @@ fn all_args_non_self(f: &mut ItemFn) -> Result<(), TokenStream> {
 }
 
 /// Make sure we only have `#[strategy = <expr>]` attributes on function parameters
+#[allow(
+    clippy::single_call_fn,
+    reason = "reject parameter attributes other than a single well-formed strategy override"
+)]
 fn validate_parameter_attrs(f: &mut ItemFn) -> Result<(), TokenStream> {
     let mut error = quote::quote! {};
 
@@ -65,7 +86,7 @@ fn validate_parameter_attrs(f: &mut ItemFn) -> Result<(), TokenStream> {
         };
 
         // add error for any non-`strategy` error or inner attributes (i.e. `#![...]` )
-        for attr in pat_ty.attrs.iter().filter(|a| !is_strategy(a)) {
+        for attr in pat_ty.attrs.iter().filter(|attr| !is_strategy(attr)) {
             error.extend(quote_spanned! {
                 attr.span() => compile_error!("only `#[strategy = <expr>]` attributes are allowed here");
             });
@@ -81,6 +102,10 @@ fn validate_parameter_attrs(f: &mut ItemFn) -> Result<(), TokenStream> {
 /// parameter — a parameter has exactly one generation strategy — diagnosing
 /// duplicates and malformed shapes. Malformed attributes are retained so
 /// later stages still see them.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keep the first well-formed strategy attribute and flag any duplicates"
+)]
 fn retain_single_strategy_attr(pat_ty: &mut PatType, error: &mut TokenStream) {
     let mut first_strategy_seen = false;
     let mut final_attrs = Vec::with_capacity(pat_ty.attrs.len());
@@ -118,8 +143,8 @@ fn retain_single_strategy_attr(pat_ty: &mut PatType, error: &mut TokenStream) {
 /// whole macro output, and `compile_error!(...)` without one is malformed in
 /// item position, which would bury the real diagnostic under a delimiter
 /// error.
-fn err(span: impl Spanned, s: &str) -> Result<(), TokenStream> {
-    Err(quote_spanned! { span.span() => compile_error!(#s); })
+fn err(span: impl Spanned, message: &str) -> Result<(), TokenStream> {
+    Err(quote_spanned! { span.span() => compile_error!(#message); })
 }
 
 #[cfg(test)]
@@ -173,7 +198,7 @@ mod tests {
 
     #[test]
     fn validate_accepts_result_returning_fn() -> Result<(), TestFailure> {
-        let mut valid: syn::ItemFn = parse_quote! {
+        let mut valid: ItemFn = parse_quote! {
             fn foo(x: i32) -> proptest::strict::TestResult {
                 Ok(())
             }
@@ -183,7 +208,7 @@ mod tests {
             "a TestResult-returning fn is accepted",
         )?;
 
-        let mut spelled_out: syn::ItemFn = parse_quote! {
+        let mut spelled_out: ItemFn = parse_quote! {
             fn foo(x: i32) -> Result<(), TestFailure> {
                 Ok(())
             }
@@ -197,7 +222,7 @@ mod tests {
     /// Check one unit-returning fixture: validate must reject it with a
     /// `compile_error` naming the strict return type.
     fn ensure_unit_fixture_rejected(
-        mut fixture: syn::ItemFn,
+        mut fixture: ItemFn,
         rejection_context: &'static str,
     ) -> Result<(), TestFailure> {
         let error =

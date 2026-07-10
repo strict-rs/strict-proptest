@@ -10,8 +10,6 @@
 //! Arbitrary implementations for `std::io`.
 
 use crate::std_facade::String;
-#[cfg(test)]
-use crate::std_facade::Vec;
 use std::io::ErrorKind::*;
 use std::io::*;
 
@@ -22,6 +20,12 @@ use crate::strategy::*;
 // TODO: IntoInnerError
 // Consider: std::io::Initializer
 
+/// Implements `Arbitrary` (and the matching `lift1!`) for a buffered
+/// reader/writer wrapper.
+///
+/// Given the wrapper type and its inner `Read`/`Write` bound, it generates an
+/// arbitrary inner value plus an optional capacity, calling `with_capacity`
+/// when a capacity is drawn and `new` otherwise.
 macro_rules! buffer {
     ($type: ident, $bound: path) => {
         arbitrary!(
@@ -58,10 +62,10 @@ buffer!(LineWriter, Write);
 arbitrary!(
     [A: Read + Arbitrary, B: Read + Arbitrary] Chain<A, B>,
     SMapped<(A, B), Self>, product_type![A::Parameters, B::Parameters];
-    args => static_map(arbitrary_with(args), |(a, b)| a.chain(b))
+    args => static_map(arbitrary_with(args), |(first, second)| first.chain(second))
 );
 
-wrap_ctor!(Cursor);
+std_wrap_ctor_default!(Cursor);
 
 lazy_just!(
       Empty, empty
@@ -75,25 +79,25 @@ wrap_ctor!([BufRead] Lines, BufRead::lines);
 
 arbitrary!(Repeat, SMapped<u8, Self>; static_map(any::<u8>(), repeat));
 
-arbitrary!(
-    [A: BufRead + Arbitrary] Split<A>, SMapped<(A, u8), Self>, A::Parameters;
+arbitrary!([A: BufRead + Arbitrary] Split<A>,
+    SMapped<(A, u8), Self>, A::Parameters;
     args => static_map(
         arbitrary_with(product_pack![args, Default::default()]),
-        |(a, b)| a.split(b)
+        |(reader, byte)| reader.split(byte)
     )
 );
 lift1!(['static + BufRead] Split<A>;
-    base => (base, any::<u8>()).prop_map(|(a, b)| a.split(b)));
+    base => (base, any::<u8>()).prop_map(|(reader, byte)| reader.split(byte)));
 
-arbitrary!(
-    [A: Read + Arbitrary] Take<A>, SMapped<(A, u64), Self>, A::Parameters;
+arbitrary!([A: Read + Arbitrary] Take<A>,
+    SMapped<(A, u64), Self>, A::Parameters;
     args => static_map(
         arbitrary_with(product_pack![args, Default::default()]),
-        |(a, b)| a.take(b)
+        |(reader, limit)| reader.take(limit)
     )
 );
 lift1!(['static + Read] Take<A>;
-    base => (base, any::<u64>()).prop_map(|(a, b)| a.take(b)));
+    base => (base, any::<u64>()).prop_map(|(reader, limit)| reader.take(limit)));
 
 arbitrary!(ErrorKind, Union<Just<Self>>;
     Union::new(
@@ -134,13 +138,16 @@ arbitrary!(
 );
 
 arbitrary!(Error, SMapped<(ErrorKind, Option<String>), Self>;
-    static_map(arbitrary(), |(k, os)|
-        if let Some(s) = os { Error::new(k, s) } else { k.into() }
+    static_map(arbitrary(), |(kind, os)|
+        if let Some(message) = os { Error::new(kind, message) } else { kind.into() }
     )
 );
 
 #[cfg(test)]
 mod test {
+    use crate::std_facade::Vec;
+
+    use super::*;
 
     no_panic_test!(
         buf_reader  => BufReader<Repeat>,

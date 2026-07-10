@@ -17,7 +17,7 @@ use crate::num;
 use crate::strategy::statics::{self, static_map};
 
 arbitrary!(Duration, SMapped<(u64, u32), Self>;
-    static_map(any::<(u64, u32)>(), |(a, b)| Duration::new(a, b))
+    static_map(any::<(u64, u32)>(), |(secs, nanos)| Duration::new(secs, nanos))
 );
 
 // Instant::now() "never" returns the same Instant, so no shrinking may occur!
@@ -42,6 +42,8 @@ arbitrary!(
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         duration => Duration,
         instant  => Instant,

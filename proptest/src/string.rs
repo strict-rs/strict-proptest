@@ -10,7 +10,7 @@
 //! Strategies for generating strings and byte strings from regular
 //! expressions.
 
-use crate::std_facade::{Box, Cow, String, ToOwned, Vec};
+use crate::std_facade::{Box, Cow, String, ToOwned, Vec, vec};
 use core::fmt;
 use core::ops::RangeInclusive;
 
@@ -81,9 +81,16 @@ impl From<ParseError> for Error {
     }
 }
 
+/// Internal counterpart to the public `Error`, used while walking a regex
+/// HIR.
+///
+/// It boxes the large `regex_syntax` parse error so intermediate `Result`s
+/// stay small, then converts into `Error` at the module boundary.
 #[derive(Debug)]
 enum InternalError {
+    /// The regex was not syntactically valid; wraps the boxed parse error.
     RegexSyntax(Box<ParseError>),
+    /// The regex parsed but uses a construct proptest cannot generate.
     UnsupportedRegex(&'static str),
 }
 
@@ -117,6 +124,14 @@ opaque_strategy_wrapper! {
         (Box<dyn ValueTree<Value = T>>) -> T;
 }
 
+impl<T: fmt::Debug> fmt::Debug for RegexGeneratorValueTree<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The wrapped `Box<dyn ValueTree>` has no `Debug`, so omit the field.
+        f.debug_struct("RegexGeneratorValueTree")
+            .finish_non_exhaustive()
+    }
+}
+
 impl Strategy for str {
     type Tree = RegexGeneratorValueTree<String>;
     type Value = String;
@@ -126,7 +141,11 @@ impl Strategy for str {
     }
 }
 
+/// Result of building a public regex strategy: the strategy, or a public
+/// `Error` explaining why the regex was rejected.
 type ParseResult<T> = Result<RegexGeneratorStrategy<T>, Error>;
+/// Like `ParseResult`, but carrying the crate-internal `InternalError` used
+/// while the regex HIR is being walked.
 type InternalParseResult<T> = Result<RegexGeneratorStrategy<T>, InternalError>;
 
 #[doc(hidden)]
@@ -165,6 +184,12 @@ impl StrategyFromRegex for Vec<u8> {
 ///
 /// If you don't need error handling and aren't limited by setup time, it is
 /// also possible to directly use a `&str` as a strategy with the same effect.
+///
+/// # Errors
+///
+/// Returns `Error::RegexSyntax` if `regex` is not valid regex syntax, or
+/// `Error::UnsupportedRegex` if it parses but uses a construct proptest
+/// cannot generate (for example an anchor or look-around).
 #[expect(
     clippy::result_large_err,
     reason = "preserve the public Error::RegexSyntax(ParseError) API"
@@ -173,12 +198,24 @@ pub fn string_regex(regex: &str) -> ParseResult<String> {
     string_regex_inner(regex).map_err(Error::from)
 }
 
+/// Parse `regex` into an HIR and build the string strategy from it,
+/// reporting failures as the crate-internal `InternalError`.
+#[allow(
+    clippy::single_call_fn,
+    reason = "parse a regex into an HIR and build the string strategy behind string_regex"
+)]
 fn string_regex_inner(regex: &str) -> InternalParseResult<String> {
     let hir = ParserBuilder::new().build().parse(regex)?;
     string_regex_parsed_inner(&hir)
 }
 
 /// Like `string_regex()`, but allows providing a pre-parsed expression.
+///
+/// # Errors
+///
+/// Returns `Error::UnsupportedRegex` if `expr` uses a construct proptest
+/// cannot generate, such as an anchor or look-around. A pre-parsed `expr`
+/// cannot carry a syntax error, so `Error::RegexSyntax` is never returned.
 #[expect(
     clippy::result_large_err,
     reason = "preserve the public Error::RegexSyntax(ParseError) API"
@@ -187,13 +224,16 @@ pub fn string_regex_parsed(expr: &Hir) -> ParseResult<String> {
     string_regex_parsed_inner(expr).map_err(Error::from)
 }
 
+/// Build a `String` strategy from an already-parsed regex HIR by generating
+/// the matching bytes and decoding them as UTF-8.
 fn string_regex_parsed_inner(expr: &Hir) -> InternalParseResult<String> {
     bytes_regex_parsed_inner(expr)
-        .map(|v| {
-            v.prop_map(|bytes| {
-                String::from_utf8(bytes).expect("non-utf8 string")
-            })
-            .sboxed()
+        .map(|bytes_strategy| {
+            bytes_strategy
+                .prop_map(|bytes| {
+                    String::from_utf8(bytes).expect("non-utf8 string")
+                })
+                .sboxed()
         })
         .map(RegexGeneratorStrategy)
 }
@@ -208,20 +248,43 @@ fn string_regex_parsed_inner(expr: &Hir) -> InternalParseResult<String> {
 /// will generate newline characters (byte value `0x0A`).  See the
 /// [`regex` crate's documentation](https://docs.rs/regex/*/regex/#opt-out-of-unicode-support)
 /// for more information.
+///
+/// # Errors
+///
+/// Returns `Error::RegexSyntax` if `regex` is not valid regex syntax, or
+/// `Error::UnsupportedRegex` if it parses but uses a construct proptest
+/// cannot generate (for example an anchor or look-around).
 #[expect(
     clippy::result_large_err,
     reason = "preserve the public Error::RegexSyntax(ParseError) API"
+)]
+#[allow(
+    clippy::single_call_fn,
+    reason = "public entry point converting a byte-regex source into the crate's typed ParseResult"
 )]
 pub fn bytes_regex(regex: &str) -> ParseResult<Vec<u8>> {
     bytes_regex_inner(regex).map_err(Error::from)
 }
 
+/// Parse `regex` into an HIR (with UTF-8 requirements relaxed so byte
+/// classes are allowed) and build the byte-string strategy from it,
+/// reporting failures as the crate-internal `InternalError`.
+#[allow(
+    clippy::single_call_fn,
+    reason = "parse a byte-regex source with UTF-8 relaxed and build the byte-string strategy"
+)]
 fn bytes_regex_inner(regex: &str) -> InternalParseResult<Vec<u8>> {
     let hir = ParserBuilder::new().utf8(false).build().parse(regex)?;
     bytes_regex_parsed_inner(&hir)
 }
 
 /// Like `bytes_regex()`, but allows providing a pre-parsed expression.
+///
+/// # Errors
+///
+/// Returns `Error::UnsupportedRegex` if `expr` uses a construct proptest
+/// cannot generate, such as an anchor or look-around. A pre-parsed `expr`
+/// cannot carry a syntax error, so `Error::RegexSyntax` is never returned.
 #[expect(
     clippy::result_large_err,
     reason = "preserve the public Error::RegexSyntax(ParseError) API"
@@ -230,6 +293,9 @@ pub fn bytes_regex_parsed(expr: &Hir) -> ParseResult<Vec<u8>> {
     bytes_regex_parsed_inner(expr).map_err(Error::from)
 }
 
+/// Recursively translate a regex HIR node into a boxed byte-string
+/// strategy, threading the crate-internal `InternalError` for unsupported
+/// constructs.
 fn bytes_regex_parsed_inner(expr: &Hir) -> InternalParseResult<Vec<u8>> {
     match expr.kind() {
         Empty => Ok(Just(vec![]).sboxed()),
@@ -241,8 +307,9 @@ fn bytes_regex_parsed_inner(expr: &Hir) -> InternalParseResult<Vec<u8>> {
                 unicode_class_strategy(class).prop_map(to_bytes).sboxed()
             }
             hir::Class::Bytes(class) => {
-                let subs = class.iter().map(|r| r.start()..=r.end());
-                Union::new(subs).prop_map(|b| vec![b]).sboxed()
+                let subs =
+                    class.iter().map(|range| range.start()..=range.end());
+                Union::new(subs).prop_map(|byte| vec![byte]).sboxed()
             }
         }),
 
@@ -252,7 +319,9 @@ fn bytes_regex_parsed_inner(expr: &Hir) -> InternalParseResult<Vec<u8>> {
                 .sboxed())
         }
 
-        Capture(capture) => bytes_regex_parsed_inner(&capture.sub).map(|v| v.0),
+        Capture(capture) => {
+            bytes_regex_parsed_inner(&capture.sub).map(|captured| captured.0)
+        }
 
         Concat(subs) => {
             let mut subs = ConcatIter {
@@ -289,6 +358,15 @@ fn bytes_regex_parsed_inner(expr: &Hir) -> InternalParseResult<Vec<u8>> {
     .map(RegexGeneratorStrategy)
 }
 
+/// Build a `char` strategy covering a Unicode character class.
+///
+/// The dot-without-newline class (`\x00-\x09` plus `\x0B-\u{10FFFF}`) is
+/// special-cased onto weighted ranges that lift the bias away from the tiny
+/// control-character span; any other class maps straight to its ranges.
+#[allow(
+    clippy::single_call_fn,
+    reason = "map a regex HIR Unicode class onto a CharStrategy, special-casing the dot-without-newline class"
+)]
 fn unicode_class_strategy(
     class: &hir::ClassUnicode,
 ) -> char::CharStrategy<'static> {
@@ -313,16 +391,33 @@ fn unicode_class_strategy(
 
     char::ranges(match class.ranges() {
         [x, y] if dotnnl(x, y) || dotnnl(y, x) => Cow::Borrowed(NONL_RANGES),
-        _ => Cow::Owned(class.iter().map(|r| r.start()..=r.end()).collect()),
+        _ => Cow::Owned(
+            class
+                .iter()
+                .map(|range| range.start()..=range.end())
+                .collect(),
+        ),
     })
 }
 
+/// Iterator over the children of a regex concatenation that coalesces
+/// adjacent literals into a single node before yielding non-literal
+/// children.
+///
+/// Fusing runs of literals keeps the generated strategy shallow instead of
+/// concatenating one strategy per literal byte.
 struct ConcatIter<'a, I> {
+    /// Bytes of the literal run accumulated so far, flushed as one node.
     buf: Vec<u8>,
+    /// Remaining children of the concatenation still to be visited.
     iter: I,
+    /// A non-literal child held back to yield once the pending literal run
+    /// has been flushed.
     next: Option<&'a Hir>,
 }
 
+/// Take the accumulated literal bytes and yield them as a single `Just`
+/// byte-string strategy, emptying the buffer.
 fn flush_lit_buf<I>(
     it: &mut ConcatIter<'_, I>,
 ) -> Option<InternalParseResult<Vec<u8>>> {
@@ -367,6 +462,15 @@ impl<'a, I: Iterator<Item = &'a Hir>> Iterator for ConcatIter<'a, I> {
     }
 }
 
+/// Translate a regex repetition's `{min,max}` bounds into a `SizeRange`,
+/// capping unbounded repeats at a generation-friendly limit.
+///
+/// Unbounded (`*`, `+`, `{n,}`) repeats become finite ranges so generation
+/// terminates; the two `u32::MAX` corner cases are rejected as unsupported.
+#[allow(
+    clippy::single_call_fn,
+    reason = "translate a regex repetition's min and max bounds into a generation-bounded SizeRange"
+)]
 fn to_range(rep: &Repetition) -> Result<SizeRange, InternalError> {
     Ok(match (rep.min, rep.max) {
         // Zero or one
@@ -399,11 +503,17 @@ fn to_range(rep: &Repetition) -> Result<SizeRange, InternalError> {
     })
 }
 
+/// Encode a single `char` into its UTF-8 byte sequence.
+#[allow(
+    clippy::single_call_fn,
+    reason = "encode one generated char into its UTF-8 byte sequence for the byte-regex strategy"
+)]
 fn to_bytes(khar: char) -> Vec<u8> {
     let mut buf = [0u8; 4];
     khar.encode_utf8(&mut buf).as_bytes().to_owned()
 }
 
+/// Build an `Err` reporting a regex construct proptest cannot generate.
 fn unsupported<T>(error: &'static str) -> Result<T, InternalError> {
     Err(InternalError::UnsupportedRegex(error))
 }
@@ -411,13 +521,33 @@ fn unsupported<T>(error: &'static str) -> Result<T, InternalError> {
 #[cfg(test)]
 mod test {
     use std::collections::HashSet;
+    use std::format;
 
     use regex::Regex;
     use regex::bytes::Regex as BytesRegex;
 
-    use strict_test_support::{TestFailure, ensure, ensure_ok, ensure_some};
+    use strict_test_support::{
+        TestFailure, ensure, ensure_contains, ensure_ok, ensure_some,
+    };
 
     use super::*;
+
+    #[test]
+    fn regex_generator_value_tree_is_debug() -> Result<(), TestFailure> {
+        let strategy =
+            ensure_ok(string_regex("[a-z]+"), "the pattern is supported")?;
+        let mut runner = TestRunner::deterministic();
+        let value_tree = ensure_some(
+            strategy.new_tree(&mut runner).ok(),
+            "the string strategy builds a value tree",
+        )?;
+        let rendered = format!("{value_tree:?}");
+        ensure_contains(
+            &rendered,
+            "RegexGeneratorValueTree",
+            "the debug rendering names the value-tree type",
+        )
+    }
 
     fn do_test(
         pattern: &str,
@@ -472,15 +602,15 @@ mod test {
             )?;
 
             loop {
-                let s = value.current();
-                let ok = if let Some(matsch) = rx.find(&s) {
-                    0 == matsch.start() && s.len() == matsch.end()
+                let produced = value.current();
+                let ok = if let Some(matsch) = rx.find(&produced) {
+                    0 == matsch.start() && produced.len() == matsch.end()
                 } else {
                     false
                 };
                 ensure(ok, "every generated string matches the pattern")?;
 
-                generated.insert(s);
+                let _was_new = generated.insert(produced);
 
                 if !value.simplify() {
                     break;
@@ -490,6 +620,10 @@ mod test {
         Ok(generated)
     }
 
+    #[allow(
+        clippy::single_call_fn,
+        reason = "test-only helper collecting every byte string a byte-regex strategy generates while shrinking"
+    )]
     fn generate_byte_values_matching_regex(
         pattern: &str,
         iterations: usize,
@@ -510,15 +644,15 @@ mod test {
             )?;
 
             loop {
-                let s = value.current();
-                let ok = if let Some(matsch) = rx.find(&s) {
-                    0 == matsch.start() && s.len() == matsch.end()
+                let produced = value.current();
+                let ok = if let Some(matsch) = rx.find(&produced) {
+                    0 == matsch.start() && produced.len() == matsch.end()
                 } else {
                     false
                 };
                 ensure(ok, "every generated byte string matches the pattern")?;
 
-                generated.insert(s);
+                let _was_new = generated.insert(produced);
 
                 if !value.simplify() {
                     break;
@@ -531,11 +665,8 @@ mod test {
     #[test]
     fn test_case_insensitive_produces_all_available_values()
     -> Result<(), TestFailure> {
-        let mut expected: HashSet<String> = HashSet::new();
-        expected.insert("a".into());
-        expected.insert("b".into());
-        expected.insert("A".into());
-        expected.insert("B".into());
+        let expected: HashSet<String> =
+            ["a", "b", "A", "B"].into_iter().map(String::from).collect();
         ensure(
             generate_values_matching_regex("(?i:a|B)", 64)? == expected,
             "a case-insensitive alternation generates every casing",
@@ -636,6 +767,10 @@ mod test {
         )
     }
 
+    #[allow(
+        clippy::single_call_fn,
+        reason = "test-only assertion that the regex strategy type stays Send and Sync"
+    )]
     fn ensure_send_and_sync<T: Send + Sync>(_: T) {}
 
     #[test]
@@ -678,9 +813,9 @@ mod test {
                 )?;
                 // No more than 1000 simplify steps to keep test time down
                 for _ in 0..1000 {
-                    let s = val.current();
+                    let produced = val.current();
                     ensure(
-                        rx.is_match(&s),
+                        rx.is_match(&produced),
                         "every produced string matches the source pattern",
                     )?;
 

@@ -329,7 +329,7 @@ macro_rules! prop_assume {
 macro_rules! prop_oneof {
     ($($item:expr),+ $(,)?) => {
         $crate::prop_oneof![
-            $(1 => $item),*
+            $(1 => $item),+
         ]
     };
 
@@ -487,8 +487,8 @@ macro_rules! prop_oneof {
     }};
 
     ($($weight:expr => $item:expr),+ $(,)?) => {
-        $crate::strategy::Union::new_weighted(vec![
-            $(($weight, $crate::strategy::Strategy::boxed($item))),*
+        $crate::strategy::Union::new_weighted($crate::std_facade::vec![
+            $(($weight, $crate::strategy::Strategy::boxed($item))),+
         ])
     };
 }
@@ -634,9 +634,9 @@ macro_rules! prop_compose {
         $vis
         $($($modi)*)? fn $name $params
                  -> impl $crate::strategy::Strategy<Value = $return_type> {
-            let strat = $crate::proptest_helper!(@_WRAP ($($strategy)*));
+            let strat = $crate::proptest_helper!(@_WRAP ($($strategy)+));
             $crate::strategy::Strategy::prop_map(strat,
-                move |$crate::proptest_helper!(@_WRAPPAT ($($var),*))| $body)
+                move |$crate::proptest_helper!(@_WRAPPAT ($($var),+))| $body)
         }
     };
 
@@ -652,13 +652,13 @@ macro_rules! prop_compose {
         $vis
         $($($modi)*)? fn $name $params
                  -> impl $crate::strategy::Strategy<Value = $return_type> {
-            let strat = $crate::proptest_helper!(@_WRAP ($($strategy)*));
+            let strat = $crate::proptest_helper!(@_WRAP ($($strategy)+));
             let strat = $crate::strategy::Strategy::prop_flat_map(
                 strat,
-                move |$crate::proptest_helper!(@_WRAPPAT ($($var),*))|
-                $crate::proptest_helper!(@_WRAP ($($strategy2)*)));
+                move |$crate::proptest_helper!(@_WRAPPAT ($($var),+))|
+                $crate::proptest_helper!(@_WRAP ($($strategy2)+)));
             $crate::strategy::Strategy::prop_map(strat,
-                move |$crate::proptest_helper!(@_WRAPPAT ($($var2),*))| $body)
+                move |$crate::proptest_helper!(@_WRAPPAT ($($var2),+))| $body)
         }
     };
 
@@ -682,8 +682,8 @@ macro_rules! prop_compose {
     ($(#[$meta:meta])*
      $vis:vis
      $([$($modi:tt)*])? fn $name:ident $params:tt
-     ($($arg:tt)+ $(,)?)
-     ($($arg2:tt)+ $(,)?)
+     ($($arg:tt)+)
+     ($($arg2:tt)+)
        -> $return_type:ty $body:block) =>
     {
         #[must_use = "strategies do nothing unless used"]
@@ -691,13 +691,13 @@ macro_rules! prop_compose {
         $vis
         $($($modi)*)? fn $name $params
                  -> impl $crate::strategy::Strategy<Value = $return_type> {
-            let strat = $crate::proptest_helper!(@_WRAP ($($strategy)*));
+            let strat = $crate::proptest_helper!(@_EXT _STRAT ($($arg)+));
             let strat = $crate::strategy::Strategy::prop_flat_map(
                 strat,
                 move |$crate::proptest_helper!(@_EXT _PAT ($($arg)+))|
-                $crate::proptest_helper!(@_EXT _STRAT ($($arg2)*)));
+                $crate::proptest_helper!(@_EXT _STRAT ($($arg2)+)));
             $crate::strategy::Strategy::prop_map(strat,
-                move |$crate::proptest_helper!(@_EXT _PAT ($($arg2)*))| $body)
+                move |$crate::proptest_helper!(@_EXT _PAT ($($arg2)+))| $body)
         }
     };
 }
@@ -967,40 +967,40 @@ macro_rules! proptest_helper {
     (@_BODY $config:ident ($($parm:pat in $strategy:expr),+) [$($mod:tt)*] $body:expr) => {{
         $config.source_file = Some(file!());
         let mut runner = $crate::test_runner::TestRunner::new($config);
-        let names = $crate::proptest_helper!(@_WRAPSTR ($($parm),*));
+        let names = $crate::proptest_helper!(@_WRAPSTR ($($parm),+));
         match runner.run(
             &$crate::strategy::Strategy::prop_map(
-                $crate::proptest_helper!(@_WRAP ($($strategy)*)),
+                $crate::proptest_helper!(@_WRAP ($($strategy)+)),
                 |values| $crate::sugar::NamedArguments(names, values)),
             $($mod)* |$crate::sugar::NamedArguments(
-                _, $crate::proptest_helper!(@_WRAPPAT ($($parm),*)))|
+                _, $crate::proptest_helper!(@_WRAPPAT ($($parm),+)))|
             {
                 let (): () = $body;
                 ::core::result::Result::Ok(())
             })
         {
             ::core::result::Result::Ok(()) => (),
-            ::core::result::Result::Err(e) => ::core::panic!("{}\n{}", e, runner),
+            ::core::result::Result::Err(error) => ::core::panic!("{}\n{}", error, runner),
         }
     }};
     // build a property testing block that when executed, executes the full property test.
     (@_BODY2 $config:ident ($($arg:tt)+) [$($mod:tt)*] $body:expr) => {{
         $config.source_file = Some(::core::file!());
         let mut runner = $crate::test_runner::TestRunner::new($config);
-        let names = $crate::proptest_helper!(@_EXT _STR ($($arg)*));
+        let names = $crate::proptest_helper!(@_EXT _STR ($($arg)+));
         match runner.run(
             &$crate::strategy::Strategy::prop_map(
-                $crate::proptest_helper!(@_EXT _STRAT ($($arg)*)),
+                $crate::proptest_helper!(@_EXT _STRAT ($($arg)+)),
                 |values| $crate::sugar::NamedArguments(names, values)),
             $($mod)* |$crate::sugar::NamedArguments(
-                _, $crate::proptest_helper!(@_EXT _PAT ($($arg)*)))|
+                _, $crate::proptest_helper!(@_EXT _PAT ($($arg)+)))|
             {
                 let (): () = $body;
                 ::core::result::Result::Ok(())
             })
         {
             ::core::result::Result::Ok(()) => (),
-            ::core::result::Result::Err(e) => ::core::panic!("{}\n{}", e, runner),
+            ::core::result::Result::Err(error) => ::core::panic!("{}\n{}", error, runner),
         }
     }};
 
@@ -1076,7 +1076,7 @@ macro_rules! proptest_helper {
 pub struct NamedArguments<N, V>(#[doc(hidden)] pub N, #[doc(hidden)] pub V);
 
 impl<V: fmt::Debug> fmt::Debug for NamedArguments<&'static str, V> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} = ", self.0)?;
         self.1.fmt(f)
     }
@@ -1090,7 +1090,7 @@ macro_rules! named_arguments_tuple {
               $($argv : 'a),*
         {
             #[allow(unused_assignments)]
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let mut first = true;
                 $(
                     if !first {
@@ -1109,7 +1109,7 @@ macro_rules! named_arguments_tuple {
         where $(for<'a> NamedArguments<$argn, &'a $argv> : fmt::Debug),*
         {
             #[allow(unused_assignments)]
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let mut first = true;
                 $(
                     if !first {
@@ -1166,34 +1166,36 @@ pub fn force_no_fork(_: &mut crate::test_runner::Config) {}
 
 #[cfg(test)]
 mod test {
+    use std::println;
+
     use crate::strategy::Just;
 
     prop_compose! {
         /// These are docs!
         #[allow(dead_code)]
-        fn two_ints(relative: i32)(a in 0..relative, b in relative..)
+        fn two_ints(relative: i32)(low in 0..relative, high in relative..)
                    -> (i32, i32) {
-            (a, b)
+            (low, high)
         }
     }
 
     prop_compose! {
         /// These are docs!
         #[allow(dead_code)]
-        pub fn two_ints_pub(relative: i32)(a in 0..relative, b in relative..)
+        pub(super) fn two_ints_pub(relative: i32)(low in 0..relative, high in relative..)
                            -> (i32, i32) {
-            (a, b)
+            (low, high)
         }
     }
 
     prop_compose! {
         /// These are docs!
         #[allow(dead_code, improper_ctypes_definitions)]
-        pub [extern "C"] fn two_ints_pub_with_attrs
-            (relative: i32)(a in 0..relative, b in relative..)
+        pub(super) [extern "C"] fn two_ints_pub_with_attrs
+            (relative: i32)(low in 0..relative, high in relative..)
             -> (i32, i32)
         {
-            (a, b)
+            (low, high)
         }
     }
 
@@ -1204,24 +1206,24 @@ mod test {
         // code contains local variables. `extern "C"` is accepted, even though
         // the result is useless since the return type isn't C-compatible.
         #[allow(dead_code, improper_ctypes_definitions)]
-        [extern "C"] fn with_modifier(relative: i32)(a in 0..relative) -> i32 {
-            a
+        [extern "C"] fn with_modifier(relative: i32)(sample in 0..relative) -> i32 {
+            sample
         }
     }
 
     prop_compose! {
         #[allow(dead_code)]
-        fn a_less_than_b()(b in 0..1000)(a in 0..b, b in Just(b))
+        fn a_less_than_b()(greater in 0..1000)(lesser in 0..greater, greater in Just(greater))
                         -> (i32, i32) {
-            (a, b)
+            (lesser, greater)
         }
     }
 
     proptest! {
         #[test]
-        fn test_something(a in 0u32..42u32, b in 1u32..10u32) {
-            prop_assume!(a != 41 || b != 9);
-            assert!(a + b < 50);
+        fn test_something(first in 0u32..42u32, second in 1u32..10u32) {
+            prop_assume!(first != 41 || second != 9);
+            assert!(first + second < 50);
         }
     }
 
@@ -1250,47 +1252,47 @@ mod test {
 
         proptest! {
             #[test]
-            fn test_1_arg(a in Just(0)) { }
+            fn test_1_arg(first in Just(0)) { }
             #[test]
-            fn test_2_arg(a in Just(0), b in Just(0)) { }
+            fn test_2_arg(first in Just(0), second in Just(0)) { }
             #[test]
-            fn test_3_arg(a in Just(0), b in Just(0), c in Just(0)) { }
+            fn test_3_arg(first in Just(0), second in Just(0), third in Just(0)) { }
             #[test]
-            fn test_4_arg(a in Just(0), b in Just(0), c in Just(0),
-                          d in Just(0)) { }
+            fn test_4_arg(first in Just(0), second in Just(0), third in Just(0),
+                          fourth in Just(0)) { }
             #[test]
-            fn test_5_arg(a in Just(0), b in Just(0), c in Just(0),
-                          d in Just(0), e in Just(0)) { }
+            fn test_5_arg(first in Just(0), second in Just(0), third in Just(0),
+                          fourth in Just(0), fifth in Just(0)) { }
             #[test]
-            fn test_6_arg(a in Just(0), b in Just(0), c in Just(0),
-                          d in Just(0), e in Just(0), f in Just(0)) { }
+            fn test_6_arg(first in Just(0), second in Just(0), third in Just(0),
+                          fourth in Just(0), fifth in Just(0), f in Just(0)) { }
             #[test]
-            fn test_7_arg(a in Just(0), b in Just(0), c in Just(0),
-                          d in Just(0), e in Just(0), f in Just(0),
-                          g in Just(0)) { }
+            fn test_7_arg(first in Just(0), second in Just(0), third in Just(0),
+                          fourth in Just(0), fifth in Just(0), f in Just(0),
+                          seventh in Just(0)) { }
             #[test]
-            fn test_8_arg(a in Just(0), b in Just(0), c in Just(0),
-                          d in Just(0), e in Just(0), f in Just(0),
-                          g in Just(0), h in Just(0)) { }
+            fn test_8_arg(first in Just(0), second in Just(0), third in Just(0),
+                          fourth in Just(0), fifth in Just(0), f in Just(0),
+                          seventh in Just(0), eighth in Just(0)) { }
             #[test]
-            fn test_9_arg(a in Just(0), b in Just(0), c in Just(0),
-                          d in Just(0), e in Just(0), f in Just(0),
-                          g in Just(0), h in Just(0), i in Just(0)) { }
+            fn test_9_arg(first in Just(0), second in Just(0), third in Just(0),
+                          fourth in Just(0), fifth in Just(0), f in Just(0),
+                          seventh in Just(0), eighth in Just(0), i in Just(0)) { }
             #[test]
-            fn test_a_arg(a in Just(0), b in Just(0), c in Just(0),
-                          d in Just(0), e in Just(0), f in Just(0),
-                          g in Just(0), h in Just(0), i in Just(0),
+            fn test_a_arg(first in Just(0), second in Just(0), third in Just(0),
+                          fourth in Just(0), fifth in Just(0), f in Just(0),
+                          seventh in Just(0), eighth in Just(0), i in Just(0),
                           j in Just(0)) { }
             #[test]
-            fn test_b_arg(a in Just(0), b in Just(0), c in Just(0),
-                          d in Just(0), e in Just(0), f in Just(0),
-                          g in Just(0), h in Just(0), i in Just(0),
-                          j in Just(0), k in Just(0)) { }
+            fn test_b_arg(first in Just(0), second in Just(0), third in Just(0),
+                          fourth in Just(0), fifth in Just(0), f in Just(0),
+                          seventh in Just(0), eighth in Just(0), i in Just(0),
+                          j in Just(0), eleventh in Just(0)) { }
             #[test]
-            fn test_c_arg(a in Just(0), b in Just(0), c in Just(0),
-                          d in Just(0), e in Just(0), f in Just(0),
-                          g in Just(0), h in Just(0), i in Just(0),
-                          j in Just(0), k in Just(0), l in Just(0)) { }
+            fn test_c_arg(first in Just(0), second in Just(0), third in Just(0),
+                          fourth in Just(0), fifth in Just(0), f in Just(0),
+                          seventh in Just(0), eighth in Just(0), i in Just(0),
+                          j in Just(0), eleventh in Just(0), twelfth in Just(0)) { }
         }
     }
 
@@ -1347,9 +1349,9 @@ mod test {
 
     #[test]
     fn oneof_all_counts() {
-        use crate::strategy::{Just as J, Strategy, TupleUnion, Union};
+        use crate::strategy::{Just, Strategy, TupleUnion, Union};
 
-        fn expect_count(n: usize, s: impl Strategy<Value = i32>) {
+        fn expect_count(n: usize, strategy: impl Strategy<Value = i32>) {
             use crate::strategy::*;
             use crate::test_runner::*;
             use std::collections::HashSet;
@@ -1357,115 +1359,124 @@ mod test {
             let mut runner = TestRunner::default();
             let mut seen = HashSet::new();
             for _ in 0..1024 {
-                seen.insert(s.new_tree(&mut runner).unwrap().current());
+                let _was_new = seen
+                    .insert(strategy.new_tree(&mut runner).unwrap().current());
             }
 
             assert_eq!(n, seen.len());
         }
 
-        fn assert_static<T>(v: TupleUnion<T>) -> TupleUnion<T> {
-            v
+        fn assert_static<T>(union: TupleUnion<T>) -> TupleUnion<T> {
+            union
         }
-        fn assert_dynamic<T: Strategy>(v: Union<T>) -> Union<T> {
-            v
+        fn assert_dynamic<T: Strategy>(union: Union<T>) -> Union<T> {
+            union
         }
 
-        expect_count(1, prop_oneof![J(0i32)]);
-        expect_count(2, assert_static(prop_oneof![J(0i32), J(1i32),]));
-        expect_count(3, assert_static(prop_oneof![J(0i32), J(1i32), J(2i32),]));
+        expect_count(1, prop_oneof![Just(0i32)]);
+        expect_count(2, assert_static(prop_oneof![Just(0i32), Just(1i32),]));
+        expect_count(
+            3,
+            assert_static(prop_oneof![Just(0i32), Just(1i32), Just(2i32),]),
+        );
         expect_count(
             4,
-            assert_static(prop_oneof![J(0i32), J(1i32), J(2i32), J(3i32),]),
+            assert_static(prop_oneof![
+                Just(0i32),
+                Just(1i32),
+                Just(2i32),
+                Just(3i32),
+            ]),
         );
         expect_count(
             5,
             assert_static(prop_oneof![
-                J(0i32),
-                J(1i32),
-                J(2i32),
-                J(3i32),
-                J(4i32),
+                Just(0i32),
+                Just(1i32),
+                Just(2i32),
+                Just(3i32),
+                Just(4i32),
             ]),
         );
         expect_count(
             6,
             assert_static(prop_oneof![
-                J(0i32),
-                J(1i32),
-                J(2i32),
-                J(3i32),
-                J(4i32),
-                J(5i32),
+                Just(0i32),
+                Just(1i32),
+                Just(2i32),
+                Just(3i32),
+                Just(4i32),
+                Just(5i32),
             ]),
         );
         expect_count(
             7,
             assert_static(prop_oneof![
-                J(0i32),
-                J(1i32),
-                J(2i32),
-                J(3i32),
-                J(4i32),
-                J(5i32),
-                J(6i32),
+                Just(0i32),
+                Just(1i32),
+                Just(2i32),
+                Just(3i32),
+                Just(4i32),
+                Just(5i32),
+                Just(6i32),
             ]),
         );
         expect_count(
             8,
             assert_static(prop_oneof![
-                J(0i32),
-                J(1i32),
-                J(2i32),
-                J(3i32),
-                J(4i32),
-                J(5i32),
-                J(6i32),
-                J(7i32),
+                Just(0i32),
+                Just(1i32),
+                Just(2i32),
+                Just(3i32),
+                Just(4i32),
+                Just(5i32),
+                Just(6i32),
+                Just(7i32),
             ]),
         );
         expect_count(
             9,
             assert_static(prop_oneof![
-                J(0i32),
-                J(1i32),
-                J(2i32),
-                J(3i32),
-                J(4i32),
-                J(5i32),
-                J(6i32),
-                J(7i32),
-                J(8i32),
+                Just(0i32),
+                Just(1i32),
+                Just(2i32),
+                Just(3i32),
+                Just(4i32),
+                Just(5i32),
+                Just(6i32),
+                Just(7i32),
+                Just(8i32),
             ]),
         );
         expect_count(
             10,
             assert_static(prop_oneof![
-                J(0i32),
-                J(1i32),
-                J(2i32),
-                J(3i32),
-                J(4i32),
-                J(5i32),
-                J(6i32),
-                J(7i32),
-                J(8i32),
-                J(9i32),
+                Just(0i32),
+                Just(1i32),
+                Just(2i32),
+                Just(3i32),
+                Just(4i32),
+                Just(5i32),
+                Just(6i32),
+                Just(7i32),
+                Just(8i32),
+                Just(9i32),
             ]),
         );
         expect_count(
             11,
             assert_dynamic(prop_oneof![
-                J(0i32),
-                J(1i32),
-                J(2i32),
-                J(3i32),
-                J(4i32),
-                J(5i32),
-                J(6i32),
-                J(7i32),
-                J(8i32),
-                J(9i32),
-                J(10i32),
+                Just(0i32),
+                Just(1i32),
+                Just(2i32),
+                Just(3i32),
+                Just(4i32),
+                Just(5i32),
+                Just(6i32),
+                Just(7i32),
+                Just(8i32),
+                Just(9i32),
+                Just(10i32),
             ]),
         );
     }
@@ -1493,8 +1504,8 @@ mod another_test {
     // Ensure that we can access the `[pub]` composed function above.
     #[allow(dead_code)]
     fn can_access_pub_compose() {
-        let _ = sugar::test::two_ints_pub(42);
-        let _ = sugar::test::two_ints_pub_with_attrs(42);
+        drop(sugar::test::two_ints_pub(42));
+        drop(sugar::test::two_ints_pub_with_attrs(42));
     }
 }
 
@@ -1503,17 +1514,17 @@ mod ownership_tests {
     #[cfg(feature = "std")]
     proptest! {
         #[test]
-        fn accept_ref_arg(ref s in "[0-9]") {
+        fn accept_ref_arg(ref digit in "[0-9]") {
             use crate::std_facade::String;
             fn assert_string(_s: &String) {}
-            assert_string(s);
+            assert_string(digit);
         }
 
         #[test]
-        fn accept_move_arg(s in "[0-9]") {
+        fn accept_move_arg(digit in "[0-9]") {
             use crate::std_facade::String;
             fn assert_string(_s: String) {}
-            assert_string(s);
+            assert_string(digit);
         }
     }
 
@@ -1536,6 +1547,8 @@ mod ownership_tests {
 
 #[cfg(test)]
 mod closure_tests {
+    use std::println;
+
     #[test]
     fn test_simple() {
         let x = 420;
@@ -1622,24 +1635,24 @@ mod any_tests {
         #[test]
         fn test_something
             (
-                a: bool,
-                b in 25u8..,
-                c in 25u8..,
+                flag: bool,
+                first in 25u8..,
+                second in 25u8..,
                 _d: (),
                 mut _e: (),
                 ref _f: (),
                 ref mut _g: (),
                 [_, _]: [(); 2],
             ) {
-            assert!(matches!(a, true | false));
-            assert!(b as usize + c as usize >= 50);
+            assert!(matches!(flag, true | false));
+            assert!(first as usize + second as usize >= 50);
         }
     }
 
     // Test that the macro accepts some of the inputs we expect it to:
     #[test]
     fn proptest_ext_test() {
-        struct Y(pub u8);
+        struct Wrapper(pub u8);
 
         let _ = proptest_helper!(@_EXT _STRAT( _ : u8 ));
         let _ = proptest_helper!(@_EXT _STRAT( x : u8 ));
@@ -1647,14 +1660,15 @@ mod any_tests {
         let _ = proptest_helper!(@_EXT _STRAT( mut x : u8 ));
         let _ = proptest_helper!(@_EXT _STRAT( ref mut x : u8 ));
         let _ = proptest_helper!(@_EXT _STRAT( [_, _] : u8 ));
-        let _ = proptest_helper!(@_EXT _STRAT( (&mut Y(x)) : u8 ));
+        let _ = proptest_helper!(@_EXT _STRAT( (&mut Wrapper(x)) : u8 ));
         let _ = proptest_helper!(@_EXT _STRAT( x in 1..2 ));
 
         let proptest_helper!(@_EXT _PAT( _ : u8 )) = 1;
         let proptest_helper!(@_EXT _PAT( _x : u8 )) = 1;
         let proptest_helper!(@_EXT _PAT( mut _x : u8 )) = 1;
         let proptest_helper!(@_EXT _PAT( [_, _] : u8 )) = [1, 2];
-        let proptest_helper!(@_EXT _PAT( (&mut Y(_x)) : u8 )) = &mut &Y(1);
+        let proptest_helper!(@_EXT _PAT( (&mut Wrapper(_x)) : u8 )) =
+            &mut &Wrapper(1);
         let proptest_helper!(@_EXT _PAT( _x in 1..2 )) = 1;
         let matched_ref = match Some(1) {
             Some(proptest_helper!(@_EXT _PAT( ref _x : u8 ))) => 1,
@@ -1667,5 +1681,119 @@ mod any_tests {
             None => 0,
         };
         assert_eq!(matched_ref_mut, 1);
+    }
+}
+
+// Behavioural coverage for the `macro_rules!` hygiene above: the general
+// `prop_oneof!` arm that builds a dynamic `Union::new_weighted` and the
+// two-closure-list `prop_compose!` rule that routes typed argument lists
+// through the `@_EXT` machinery. Both transcribers were realigned from `*`
+// to `+`, and the two-list `prop_compose!` rule additionally had an unbound
+// `$strategy` metavariable replaced with the intended `@_EXT _STRAT` call, so
+// this module drives each form end to end through the strict runner: a
+// regression surfaces as a returned `TestFailure`, never a panic.
+#[cfg(test)]
+#[cfg(feature = "strict-test")]
+mod macro_hygiene {
+    use std::string::ToString as _;
+
+    use strict_test_support::{ensure, ensure_contains, ensure_some};
+
+    use crate::strategy::{Just, Strategy};
+    use crate::strict::{TestResult, ensure_property};
+
+    // Eleven arms with no trailing comma drives the general `prop_oneof!`
+    // arm whose transcriber previously repeated `$weight`/`$item` under
+    // `,*`; it expands to a dynamic `Union::new_weighted`. The arms carry
+    // distinct values so a dropped arm would show up as a missing sample.
+    fn eleven_way_union() -> impl Strategy<Value = i32> {
+        // Unsuffixed literals infer to `i32` from the return type.
+        prop_oneof![
+            Just(0),
+            Just(1),
+            Just(2),
+            Just(3),
+            Just(4),
+            Just(5),
+            Just(6),
+            Just(7),
+            Just(8),
+            Just(9),
+            Just(10)
+        ]
+    }
+
+    #[test]
+    fn prop_oneof_dynamic_union_stays_within_its_arms() -> TestResult {
+        ensure_property(
+            &eleven_way_union(),
+            "every sample comes from one of the eleven arms",
+            |sample| ensure((0..=10).contains(&sample), "sample in 0..=10"),
+        )
+    }
+
+    #[test]
+    fn prop_oneof_dynamic_union_reports_a_falsified_bound() -> TestResult {
+        let failure = ensure_some(
+            ensure_property(
+                &eleven_way_union(),
+                "no sample reaches the eleventh arm",
+                |sample| ensure(sample < 10, "sample below ten"),
+            )
+            .err(),
+            "the eleventh arm must falsify the below-ten property",
+        )?;
+        ensure_contains(
+            &failure.to_string(),
+            "property falsified",
+            "the falsification surfaces through the strict runner",
+        )
+    }
+
+    // `prop_compose!` with two closure lists where the first list uses the
+    // `name: type` form routes through the `$($arg:tt)+`/`$($arg2:tt)+`
+    // rule — the arm that previously transcribed the unbound `$strategy`
+    // metavariable. The first stage draws a ceiling via `any::<u8>()`; the
+    // second stage draws a value bounded by that ceiling and threads the
+    // ceiling back out so the body can return both.
+    prop_compose! {
+        fn ceiling_then_bounded()
+            (ceiling: u8)
+            (drawn in 0_u8..=ceiling, ceiling_kept in Just(ceiling))
+            -> (u8, u8)
+        {
+            (drawn, ceiling_kept)
+        }
+    }
+
+    #[test]
+    fn prop_compose_typed_two_stage_bounds_hold() -> TestResult {
+        ensure_property(
+            &ceiling_then_bounded(),
+            "the second-stage draw never exceeds the first-stage ceiling",
+            |(drawn, ceiling)| {
+                ensure(drawn <= ceiling, "draw within the drawn ceiling")
+            },
+        )
+    }
+
+    #[test]
+    fn prop_compose_typed_two_stage_reports_falsification() -> TestResult {
+        let failure = ensure_some(
+            ensure_property(
+                &ceiling_then_bounded(),
+                "the second draw never equals the ceiling",
+                |(drawn, ceiling)| {
+                    ensure(drawn != ceiling, "draw differs from the ceiling")
+                },
+            )
+            .err(),
+            "a draw equal to the ceiling must falsify the property",
+        )?;
+        ensure_contains(
+            &failure.to_string(),
+            "property falsified",
+            "the falsification surfaces through the strict runner",
+        )
     }
 }

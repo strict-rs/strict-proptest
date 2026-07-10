@@ -45,12 +45,12 @@ arbitrary!(Ipv6Addr,
 );
 
 arbitrary!(SocketAddrV4, SMapped<(Ipv4Addr, u16), Self>;
-    static_map(any::<(Ipv4Addr, u16)>(), |(a, b)| Self::new(a, b))
+    static_map(any::<(Ipv4Addr, u16)>(), |(ip, port)| Self::new(ip, port))
 );
 
 arbitrary!(SocketAddrV6, SMapped<(Ipv6Addr, u16, u32, u32), Self>;
     static_map(any::<(Ipv6Addr, u16, u32, u32)>(),
-        |(a, b, c, d)| Self::new(a, b, c, d))
+        |(ip, port, flowinfo, scope_id)| Self::new(ip, port, flowinfo, scope_id))
 );
 
 arbitrary!(IpAddr,
@@ -99,6 +99,8 @@ arbitrary!(Ipv6MulticastScope,
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         addr_parse_error => AddrParseError,
         ipv4_addr => Ipv4Addr,

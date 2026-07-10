@@ -17,6 +17,8 @@ use std::vec::Vec;
 
 use crate::test_runner::{Seed, TestCaseError, TestCaseResult};
 
+/// The magic first line every fork replay file must start with; its
+/// presence lets `parse_from` reject a swapped-in file it did not write.
 const SENTINEL: &str = "proptest-forkfile";
 
 /// A "replay" of a `TestRunner` invocation.
@@ -50,7 +52,7 @@ pub(crate) struct Replay {
 
 impl Replay {
     /// If `other` is longer than `self`, add the extra elements to `self`.
-    pub fn merge(&mut self, other: &Replay) {
+    pub(super) fn merge(&mut self, other: &Replay) {
         if other.steps.len() > self.steps.len() {
             let sl = self.steps.len();
             self.steps
@@ -71,6 +73,10 @@ pub(crate) enum ReplayFileStatus {
 }
 
 /// Open the file in the usual read+append+create mode.
+#[allow(
+    clippy::single_call_fn,
+    reason = "open the fork replay file in the append-create-without-truncate mode the log format needs"
+)]
 pub(crate) fn open_file(path: impl AsRef<Path>) -> io::Result<fs::File> {
     fs::OpenOptions::new()
         .read(true)
@@ -80,6 +86,8 @@ pub(crate) fn open_file(path: impl AsRef<Path>) -> io::Result<fs::File> {
         .open(path)
 }
 
+/// Encode one case outcome as its single replay-log character: `+`
+/// pass, `-` fail, `!` reject.
 fn step_to_char(step: &TestCaseResult) -> char {
     match *step {
         Ok(_) => '+',
@@ -96,19 +104,37 @@ pub(crate) fn append(
     write!(file, "{}", step_to_char(step))
 }
 
+/// Read one line required by the replay header, returning `false` on EOF.
+fn read_required_line(
+    reader: &mut impl BufRead,
+    line: &mut String,
+) -> io::Result<bool> {
+    line.clear();
+    let bytes = reader.read_line(line)?;
+    Ok(bytes != 0)
+}
+
 /// Append a no-op step to the given output.
+#[allow(
+    clippy::single_call_fn,
+    reason = "append a no-op ping character marking that the fork child is still alive"
+)]
 pub(crate) fn ping(mut file: impl Write) -> io::Result<()> {
     write!(file, " ")
 }
 
 /// Append a termination mark to the given output.
+#[allow(
+    clippy::single_call_fn,
+    reason = "append the termination marker closing out a fork replay log"
+)]
 pub(crate) fn terminate(mut file: impl Write) -> io::Result<()> {
     write!(file, ".")
 }
 
 impl Replay {
     /// Write the full state of this `Replay` to the given output.
-    pub fn init_file(&self, mut file: impl Write) -> io::Result<()> {
+    pub(super) fn init_file(&self, mut file: impl Write) -> io::Result<()> {
         writeln!(file, "{}", SENTINEL)?;
         writeln!(file, "{}", self.seed.to_persistence())?;
 
@@ -123,17 +149,17 @@ impl Replay {
     }
 
     /// Mark the replay as complete in the file.
-    pub fn complete(mut file: impl Write) -> io::Result<()> {
+    pub(super) fn complete(mut file: impl Write) -> io::Result<()> {
         write!(file, ".")
     }
 
     /// Parse a `Replay` out of the given file.
     ///
     /// The reader is implicitly seeked to the beginning before reading.
-    pub fn parse_from(
+    pub(super) fn parse_from(
         mut file: impl Read + Seek,
     ) -> io::Result<ReplayFileStatus> {
-        file.seek(io::SeekFrom::Start(0))?;
+        file.rewind()?;
 
         let mut reader = io::BufReader::new(&mut file);
         let mut line = String::new();
@@ -150,20 +176,23 @@ impl Replay {
         // There are still some possible symlink attacks that can work by
         // tricking us into reading, but those are non-destructive things like
         // interfering with a FIFO or Unix socket.
-        reader.read_line(&mut line)?;
+        if !read_required_line(&mut reader, &mut line)? {
+            return Ok(ReplayFileStatus::Corrupt);
+        }
         if SENTINEL != line.trim() {
             return Ok(ReplayFileStatus::Corrupt);
         }
 
-        line.clear();
-        reader.read_line(&mut line)?;
+        if !read_required_line(&mut reader, &mut line)? {
+            return Ok(ReplayFileStatus::Corrupt);
+        }
         let seed = match Seed::from_persistence(&line) {
             Some(seed) => seed,
             None => return Ok(ReplayFileStatus::Corrupt),
         };
 
         line.clear();
-        reader.read_line(&mut line)?;
+        let _step_bytes = reader.read_line(&mut line)?;
 
         let mut steps = Vec::new();
         for ch in line.chars() {
@@ -186,5 +215,148 @@ impl Replay {
         }
 
         Ok(ReplayFileStatus::InProgress(Replay { seed, steps }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_ok};
+
+    use super::*;
+
+    fn sample_seed() -> Seed {
+        Seed::XorShift([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+    }
+
+    fn parse_bytes(bytes: &[u8]) -> io::Result<ReplayFileStatus> {
+        Replay::parse_from(Cursor::new(bytes.to_vec()))
+    }
+
+    #[test]
+    fn valid_empty_replay_is_in_progress() -> Result<(), TestFailure> {
+        let seed = sample_seed();
+        let replay = Replay {
+            seed: seed.clone(),
+            steps: Vec::new(),
+        };
+        let mut bytes = Vec::new();
+
+        ensure_ok(
+            replay.init_file(&mut bytes),
+            "replay initialization writes the header",
+        )?;
+
+        match ensure_ok(parse_bytes(&bytes), "the replay parses")? {
+            ReplayFileStatus::InProgress(parsed) => {
+                ensure(seed == parsed.seed, "the replay seed round-trips")?;
+                ensure(
+                    parsed.steps.is_empty(),
+                    "an empty step line remains an in-progress replay",
+                )
+            }
+            ReplayFileStatus::Terminated(_) => {
+                ensure(false, "empty replay is not terminated")
+            }
+            ReplayFileStatus::Corrupt => ensure(false, "empty replay is valid"),
+        }
+    }
+
+    #[test]
+    fn valid_replay_with_terminator_is_terminated() -> Result<(), TestFailure> {
+        let seed = sample_seed();
+        let mut bytes = Vec::new();
+        ensure_ok(
+            Replay {
+                seed: seed.clone(),
+                steps: Vec::new(),
+            }
+            .init_file(&mut bytes),
+            "replay initialization writes the header",
+        )?;
+        bytes.extend_from_slice(b"+-!.");
+
+        match ensure_ok(parse_bytes(&bytes), "the terminated replay parses")? {
+            ReplayFileStatus::Terminated(parsed) => {
+                ensure(
+                    seed == parsed.seed,
+                    "the terminated replay seed round-trips",
+                )?;
+                ensure_eq(
+                    &3,
+                    &parsed.steps.len(),
+                    "the parser stores pass, fail, and reject before the terminator",
+                )?;
+                ensure(parsed.steps[0].is_ok(), "the first step is a pass")?;
+                ensure(
+                    matches!(parsed.steps[1], Err(TestCaseError::Fail(_))),
+                    "the second step is a failure",
+                )?;
+                ensure(
+                    matches!(parsed.steps[2], Err(TestCaseError::Reject(_))),
+                    "the third step is a rejection",
+                )
+            }
+            ReplayFileStatus::InProgress(_) => {
+                ensure(false, "terminated replay is not in progress")
+            }
+            ReplayFileStatus::Corrupt => {
+                ensure(false, "terminated replay is valid")
+            }
+        }
+    }
+
+    #[test]
+    fn wrong_sentinel_is_corrupt() -> Result<(), TestFailure> {
+        ensure(
+            matches!(
+                ensure_ok(
+                    parse_bytes(b"not-proptest\nxs 1 2 3 4\n"),
+                    "the replay parser runs"
+                )?,
+                ReplayFileStatus::Corrupt
+            ),
+            "a replay without the sentinel is corrupt",
+        )
+    }
+
+    #[test]
+    fn missing_seed_is_corrupt() -> Result<(), TestFailure> {
+        let mut replay_bytes = SENTINEL.as_bytes().to_vec();
+        replay_bytes.push(b'\n');
+
+        ensure(
+            matches!(
+                ensure_ok(
+                    parse_bytes(&replay_bytes),
+                    "the replay parser runs"
+                )?,
+                ReplayFileStatus::Corrupt
+            ),
+            "a replay without a seed line is corrupt",
+        )
+    }
+
+    #[test]
+    fn invalid_step_character_is_corrupt() -> Result<(), TestFailure> {
+        let mut bytes = Vec::new();
+        ensure_ok(
+            Replay {
+                seed: sample_seed(),
+                steps: Vec::new(),
+            }
+            .init_file(&mut bytes),
+            "replay initialization writes the header",
+        )?;
+        bytes.push(b'x');
+
+        ensure(
+            matches!(
+                ensure_ok(parse_bytes(&bytes), "the replay parser runs")?,
+                ReplayFileStatus::Corrupt
+            ),
+            "an unknown replay step character is corrupt",
+        )
     }
 }

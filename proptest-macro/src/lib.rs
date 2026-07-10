@@ -8,11 +8,15 @@
 
 use proc_macro::TokenStream;
 
+/// The parse / validate / options / codegen pipeline that rewrites an
+/// annotated function into the generated strict property test.
 mod property_test;
 
-/// The `property_test` procedural macro simplifies the creation of property-based tests
-/// using the `proptest` crate. This macro provides a more concise syntax for writing tests
-/// that automatically generate test cases based on properties.
+/// The `property_test` procedural macro simplifies the creation of
+/// property-based tests using the `proptest` crate.
+///
+/// This macro provides a more concise syntax for writing tests that
+/// automatically generate test cases based on properties.
 ///
 /// The annotated function must return `proptest::strict::TestResult`
 /// (`Result<(), TestFailure>`); a unit (`()`) body is rejected at compile
@@ -114,6 +118,10 @@ mod property_test;
 /// function returning `proptest::strict::TestResult` and running through
 /// `proptest::strict::ensure_property` is, however, part of the documented contract.
 #[proc_macro_attribute]
+#[allow(
+    clippy::single_call_fn,
+    reason = "proc_macro_attribute entry point that bridges proc_macro tokens into the internal pipeline"
+)]
 pub fn property_test(
     attr: TokenStream,
     annotated_fn: TokenStream,

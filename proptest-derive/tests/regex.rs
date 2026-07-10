@@ -6,6 +6,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Compile-and-run coverage for the `#[proptest(regex = ...)]` field
+//! attribute.
+//!
+//! Derives `Arbitrary` for structs and enum variants whose `String`,
+//! `Vec<u8>`, and custom `StrategyFromRegex` fields carry a `regex`
+//! modifier in every spelling (`= "..."`, `(...)`, a `fn` path, and raw
+//! strings), some combined with `filter`. Each generated field is checked
+//! to match the regex it was given.
+
 use proptest::prelude::{Arbitrary, BoxedStrategy, Strategy, any};
 use proptest::strict::{TestResult, ensure_property};
 use proptest::string::StrategyFromRegex;
@@ -28,7 +37,7 @@ struct T0 {
     baz: String,
     #[proptest(regex = "(a|b)+")]
     quux: Vec<u8>,
-    #[proptest(regex("[abc]+"), filter("|c| c.len() < 4"))]
+    #[proptest(regex("[abc]+"), filter("|bytes| bytes.len() < 4"))]
     wibble: Vec<u8>,
     #[proptest(regex(mk_regex))]
     wobble: Vec<u8>,
@@ -40,7 +49,7 @@ struct T1(
     #[proptest(regex("b+"))] String,
     #[proptest(regex(mk_regex))] String,
     #[proptest(regex = "(a|b)+")] Vec<u8>,
-    #[proptest(regex("[abc]+"), filter("|c| c.len() < 4"))] Vec<u8>,
+    #[proptest(regex("[abc]+"), filter("|bytes| bytes.len() < 4"))] Vec<u8>,
     #[proptest(regex(mk_regex))] Vec<u8>,
 );
 
@@ -50,7 +59,7 @@ struct T1r(
     #[proptest(regex(r"b+"))] String,
     #[proptest(regex(mk_regex))] String,
     #[proptest(regex = r"(a|b)+")] Vec<u8>,
-    #[proptest(regex(r"[abc]+"), filter("|c| c.len() < 4"))] Vec<u8>,
+    #[proptest(regex(r"[abc]+"), filter("|bytes| bytes.len() < 4"))] Vec<u8>,
     #[proptest(regex(mk_regex))] Vec<u8>,
 );
 
@@ -67,7 +76,7 @@ enum T2 {
         baz: String,
         #[proptest(regex = "(a|b)+")]
         quux: Vec<u8>,
-        #[proptest(regex("[abc]+"), filter("|c| c.len() < 4"))]
+        #[proptest(regex("[abc]+"), filter("|bytes| bytes.len() < 4"))]
         wibble: Vec<u8>,
         #[proptest(regex(mk_regex))]
         wobble: Vec<u8>,
@@ -81,7 +90,7 @@ enum T3 {
         #[proptest(regex("b+"))] String,
         #[proptest(regex(mk_regex))] String,
         #[proptest(regex = "(a|b)+")] Vec<u8>,
-        #[proptest(regex("[abc]+"), filter("|c| c.len() < 4"))] Vec<u8>,
+        #[proptest(regex("[abc]+"), filter("|bytes| bytes.len() < 4"))] Vec<u8>,
         #[proptest(regex(mk_regex))] Vec<u8>,
     ),
 }
@@ -106,7 +115,7 @@ struct T4(#[proptest(regex = "a+")] NewString);
 fn ensure_aplus(x0: String) -> TestResult {
     ensure(x0.chars().count() > 0, "the a+ string is non-empty")?;
     ensure(
-        x0.chars().all(|c: char| c == 'a'),
+        x0.chars().all(|letter: char| letter == 'a'),
         "the a+ string is all a's",
     )
 }
@@ -123,7 +132,7 @@ fn ensure_adherence(
 
     ensure(x1.chars().count() > 0, "the b+ string is non-empty")?;
     ensure(
-        x1.chars().all(|c: char| c == 'b'),
+        x1.chars().all(|letter: char| letter == 'b'),
         "the b+ string is all b's",
     )?;
 
@@ -133,7 +142,7 @@ fn ensure_adherence(
 
     ensure(!y0.is_empty(), "the (a|b)+ bytes are non-empty")?;
     ensure(
-        y0.iter().all(|c: &u8| b"ab".contains(c)),
+        y0.iter().all(|byte: &u8| b"ab".contains(byte)),
         "the (a|b)+ bytes stay in the alphabet",
     )?;
 
@@ -142,7 +151,7 @@ fn ensure_adherence(
         "the filtered [abc]+ bytes keep the length filter",
     )?;
     ensure(
-        y1.iter().all(|c: &u8| b"abc".contains(c)),
+        y1.iter().all(|byte: &u8| b"abc".contains(byte)),
         "the [abc]+ bytes stay in the alphabet",
     )?;
 
@@ -158,7 +167,7 @@ fn t0_adhering_to_regex() -> TestResult {
     ensure_property(
         &any::<T0>(),
         "named struct regex fields adhere to their regexes",
-        |v| {
+        |sample| {
             let T0 {
                 foo: x0,
                 bar: x1,
@@ -166,7 +175,7 @@ fn t0_adhering_to_regex() -> TestResult {
                 quux: y0,
                 wibble: y1,
                 wobble: y2,
-            } = v;
+            } = sample;
             ensure_adherence(x0, x1, x2, y0, y1, y2)
         },
     )
@@ -177,8 +186,8 @@ fn t1_adhering_to_regex() -> TestResult {
     ensure_property(
         &any::<T1>(),
         "tuple struct regex fields adhere to their regexes",
-        |v| {
-            let T1(x0, x1, x2, y0, y1, y2) = v;
+        |sample| {
+            let T1(x0, x1, x2, y0, y1, y2) = sample;
             ensure_adherence(x0, x1, x2, y0, y1, y2)
         },
     )
@@ -189,8 +198,8 @@ fn t1_r_adhering_to_regex() -> TestResult {
     ensure_property(
         &any::<T1r>(),
         "raw-string regex fields adhere to their regexes",
-        |v| {
-            let T1r(x0, x1, x2, y0, y1, y2) = v;
+        |sample| {
+            let T1r(x0, x1, x2, y0, y1, y2) = sample;
             ensure_adherence(x0, x1, x2, y0, y1, y2)
         },
     )
@@ -201,7 +210,7 @@ fn t2_adhering_to_regex() -> TestResult {
     ensure_property(
         &any::<T2>(),
         "struct-variant regex fields adhere to their regexes",
-        |v| {
+        |sample| {
             let T2::V0 {
                 foo: x0,
                 bar: x1,
@@ -209,7 +218,7 @@ fn t2_adhering_to_regex() -> TestResult {
                 quux: y0,
                 wibble: y1,
                 wobble: y2,
-            } = v;
+            } = sample;
             ensure_adherence(x0, x1, x2, y0, y1, y2)
         },
     )
@@ -220,8 +229,8 @@ fn t3_adhering_to_regex() -> TestResult {
     ensure_property(
         &any::<T3>(),
         "tuple-variant regex fields adhere to their regexes",
-        |v| {
-            let T3::V0(x0, x1, x2, y0, y1, y2) = v;
+        |sample| {
+            let T3::V0(x0, x1, x2, y0, y1, y2) = sample;
             ensure_adherence(x0, x1, x2, y0, y1, y2)
         },
     )
@@ -232,7 +241,7 @@ fn t4_adhering_to_regex() -> TestResult {
     ensure_property(
         &any::<T4>(),
         "a custom StrategyFromRegex type adheres to its regex",
-        |v| ensure_aplus((v.0).0),
+        |sample| ensure_aplus((sample.0).0),
     )
 }
 

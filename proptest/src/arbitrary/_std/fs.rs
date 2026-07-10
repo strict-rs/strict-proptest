@@ -16,15 +16,46 @@ use crate::strategy::statics::static_map;
 
 // TODO: other parts (figure out workable semantics).
 
+fn configured_dir_builder(recursive: bool) -> DirBuilder {
+    let mut db = DirBuilder::new();
+    let _builder = db.recursive(recursive);
+    db
+}
+
 arbitrary!(DirBuilder, SMapped<bool, Self>; {
-    static_map(any::<bool>(), |recursive| {
-        let mut db = DirBuilder::new();
-        db.recursive(recursive);
-        db
-    })
+    static_map(any::<bool>(), configured_dir_builder)
 });
 
 #[cfg(test)]
 mod test {
+    use strict_test_support::{TempDir, TestFailure, ensure, ensure_ok};
+
+    use super::*;
+
     no_panic_test!(dir_builder => DirBuilder);
+
+    #[test]
+    fn recursive_dir_builder_creates_missing_parents() -> Result<(), TestFailure>
+    {
+        let dir = TempDir::new("dir-builder-recursive")?;
+        let nested = dir.child("parent").join("child");
+
+        ensure_ok(
+            configured_dir_builder(true).create(&nested),
+            "recursive DirBuilder creates missing parents",
+        )?;
+        ensure(nested.is_dir(), "the nested directory exists")
+    }
+
+    #[test]
+    fn non_recursive_dir_builder_rejects_missing_parents()
+    -> Result<(), TestFailure> {
+        let dir = TempDir::new("dir-builder-non-recursive")?;
+        let nested = dir.child("other").join("child");
+
+        ensure(
+            configured_dir_builder(false).create(&nested).is_err(),
+            "non-recursive DirBuilder rejects a missing parent",
+        )
+    }
 }

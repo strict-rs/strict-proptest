@@ -21,16 +21,22 @@ use crate::strategy::{Map, Strategy};
 // Trait and impls
 //==============================================================================
 
+/// The `Arbitrary` trait, its `any`/`any_with` entry points, and the
+/// `StrategyFor`/`ParamsFor` associated-type aliases.
 mod traits;
 
 #[macro_use]
 pub mod functor;
 
+/// Impl-writing helper macros (`arbitrary!`, `wrap_ctor!`, `wrap_from!`,
+/// `lazy_just!`) and the `no_panic_test!` test helper.
 #[macro_use]
 mod macros;
 
 mod arrays;
 mod primitives;
+/// `Arbitrary` impls for the `sample::Index` and `sample::Selector`
+/// deferred-selection helpers.
 mod sample;
 mod tuples;
 
@@ -48,6 +54,9 @@ pub use self::traits::*;
 // SMapped + Mapped aliases to make documentation clearer.
 //==============================================================================
 
+/// A `pub(crate)` mapped-strategy alias like `SMapped`, but over an arbitrary
+/// source strategy `S` rather than `StrategyFor<I>`. Names the `statics::Map`
+/// type the impl macros produce so rustdoc stays readable.
 pub(crate) type SFnPtrMap<S, O> =
     statics::Map<S, fn(<S as Strategy>::Value) -> O>;
 

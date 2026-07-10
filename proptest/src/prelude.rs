@@ -32,9 +32,10 @@ pub use crate::{
 pub use rand::rand_core::RngCore;
 pub use rand::{Rng, RngExt};
 
-/// Re-exports the entire public API of proptest so that an import of `prelude`
-/// allows simply writing, for example, `prop::num::i32::ANY` rather than
-/// `proptest::num::i32::ANY` plus a separate `use proptest;`.
+/// Re-exports the entire public API of proptest under the name `prop`.
+///
+/// This lets an import of `prelude` write, for example, `prop::num::i32::ANY`
+/// rather than `proptest::num::i32::ANY` plus a separate `use proptest;`.
 pub mod prop {
     pub use crate::arbitrary;
     pub use crate::array;

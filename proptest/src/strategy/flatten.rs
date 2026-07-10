@@ -20,11 +20,17 @@ use crate::test_runner::*;
 #[derive(Debug, Clone, Copy)]
 #[must_use = "strategies do nothing unless used"]
 pub struct Flatten<S> {
+    /// The strategy whose generated values are themselves strategies to be
+    /// flattened.
     source: S,
 }
 
 impl<S: Strategy> Flatten<S> {
     /// Wrap `source` to flatten it.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "wrap a strategy-producing source so prop_flat_map can flatten its output"
+    )]
     pub fn new(source: S) -> Self {
         Flatten { source }
     }
@@ -48,10 +54,14 @@ pub struct FlattenValueTree<S: ValueTree>
 where
     S::Value: Strategy,
 {
+    /// The outer, strategy-producing value tree; shrinking it selects a
+    /// different inner strategy to draw from.
     meta: Fuse<S>,
+    /// The value tree derived from the currently chosen inner strategy, and the
+    /// one `current()` actually reads.
     current: Fuse<<S::Value as Strategy>::Tree>,
-    // The final value to produce after successive calls to complicate() on the
-    // underlying objects return false.
+    /// The value to fall back to once successive `complicate()` calls on the
+    /// underlying trees have all returned `false`.
     final_complication: Option<Fuse<<S::Value as Strategy>::Tree>>,
     // When `simplify()` or `complicate()` causes a new `Strategy` to be
     // chosen, we need to find a new failing input for that case. To do this,
@@ -63,7 +73,11 @@ where
     // This does unfortunately depart from the direct interpretation of
     // simplify/complicate as binary search, but is still easier to think about
     // than other implementations of higher-order strategies.
+    /// A private clone of the runner used to regenerate inner value trees when
+    /// shrinking switches to a new inner strategy.
     runner: TestRunner,
+    /// How many more times `complicate()` may regenerate the inner tree while
+    /// hunting for a new failing input; seeded from `Config::cases`.
     complicate_regen_remaining: u32,
 }
 
@@ -90,7 +104,7 @@ where
     S: fmt::Debug,
     <S::Value as Strategy>::Tree: fmt::Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FlattenValueTree")
             .field("meta", &self.meta)
             .field("current", &self.current)
@@ -107,6 +121,16 @@ impl<S: ValueTree> FlattenValueTree<S>
 where
     S::Value: Strategy,
 {
+    /// Build the flattened value tree from the outer tree `meta`, generating
+    /// the first inner tree from its current value.
+    ///
+    /// # Errors
+    ///
+    /// Returns the failure `Reason` if generating that first inner tree fails.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "grow the flattened value tree from the outer value's first inner tree"
+    )]
     fn new(runner: &mut TestRunner, meta: S) -> Result<Self, Reason> {
         let current = meta.current().new_tree(runner)?;
         Ok(FlattenValueTree {
@@ -143,14 +167,15 @@ where
             true
         } else if !self.meta.simplify() {
             false
-        } else if let Ok(v) = self.meta.current().new_tree(&mut self.runner) {
-            // Shift current into final_complication and `v` into
+        } else if let Ok(tree) = self.meta.current().new_tree(&mut self.runner)
+        {
+            // Shift current into final_complication and `tree` into
             // `current`. We also need to prevent that value from
             // complicating beyond the current point in the future
             // since we're going to return `true` from `simplify()`
             // ourselves.
             self.current.disallow_complicate();
-            self.final_complication = Some(Fuse::new(v));
+            self.final_complication = Some(Fuse::new(tree));
             mem::swap(
                 self.final_complication.as_mut().unwrap(),
                 &mut self.current,
@@ -173,8 +198,8 @@ where
         if self.complicate_regen_remaining > 0 {
             self.complicate_regen_remaining -= 1;
 
-            if let Ok(v) = self.meta.current().new_tree(&mut self.runner) {
-                self.current = Fuse::new(v);
+            if let Ok(tree) = self.meta.current().new_tree(&mut self.runner) {
+                self.current = Fuse::new(tree);
                 return true;
             }
         }
@@ -184,15 +209,15 @@ where
         }
 
         if self.meta.complicate()
-            && let Ok(v) = self.meta.current().new_tree(&mut self.runner)
+            && let Ok(tree) = self.meta.current().new_tree(&mut self.runner)
         {
             self.complicate_regen_remaining = self.runner.config().cases;
-            self.current = Fuse::new(v);
+            self.current = Fuse::new(tree);
             return true;
         }
 
-        if let Some(v) = self.final_complication.take() {
-            self.current = v;
+        if let Some(tree) = self.final_complication.take() {
+            self.current = tree;
             true
         } else {
             false
@@ -224,12 +249,15 @@ where
 ///
 /// See `Strategy::prop_ind_flat_map2()` for more details.
 pub struct IndFlattenMap<S, F> {
+    /// The strategy generating the input value passed through in slot 0.
     pub(super) source: S,
+    /// The closure deriving the slot-1 strategy from that input, held behind
+    /// an `Arc` so the wrapper clones cheaply.
     pub(super) fun: Arc<F>,
 }
 
 impl<S: fmt::Debug, F> fmt::Debug for IndFlattenMap<S, F> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IndFlattenMap")
             .field("source", &self.source)
             .field("fun", &"<function>")
@@ -275,7 +303,8 @@ mod test {
         // Pick random integer A, then random integer B which is ±5 of A and
         // assert that B <= A if A > 10000. Shrinking should always converge to
         // A=10001, B=10002.
-        let input = (0..65536).prop_flat_map(|a| (Just(a), (a - 5..a + 5)));
+        let input = (0..65536)
+            .prop_flat_map(|first| (Just(first), (first - 5..first + 5)));
 
         let mut failures = 0;
         let mut runner = TestRunner::new_with_rng(
@@ -290,8 +319,8 @@ mod test {
                 input.new_tree(&mut runner).ok(),
                 "flat_map strategy generates a value tree",
             )?;
-            let result = runner.run_one(case, |(a, b)| {
-                if a <= 10000 || b <= a {
+            let result = runner.run_one(case, |(first, second)| {
+                if first <= 10000 || second <= first {
                     Ok(())
                 } else {
                     Err(TestCaseError::fail("fail"))
@@ -300,10 +329,10 @@ mod test {
 
             match result {
                 Ok(_) => {}
-                Err(TestError::Fail(_, v)) => {
+                Err(TestError::Fail(_, falsified)) => {
                     failures += 1;
                     ensure(
-                        (10001, 10002) == v,
+                        (10001, 10002) == falsified,
                         "shrinking converges to the minimal dependent pair",
                     )?;
                 }
@@ -320,7 +349,8 @@ mod test {
     #[test]
     fn test_flat_map_sanity() {
         check_strategy_sanity(
-            (0..65536).prop_flat_map(|a| (Just(a), (a - 5..a + 5))),
+            (0..65536)
+                .prop_flat_map(|first| (Just(first), (first - 5..first + 5))),
             None,
         );
     }
@@ -350,7 +380,7 @@ mod test {
             input.new_tree(&mut runner).ok(),
             "nested flat_map strategy generates a value tree",
         )?;
-        let _ = runner.run_one(case, |_| {
+        let outcome = runner.run_one(case, |_| {
             // Only the first run fails, all others succeed
             if pass.fetch_or(true, Ordering::SeqCst) {
                 Ok(())
@@ -358,13 +388,19 @@ mod test {
                 Err(TestCaseError::fail("first case fails by design"))
             }
         });
-        Ok(())
+        ensure(
+            outcome.is_err(),
+            "the deliberately-failing first case makes the bounded regen \
+             search terminate with a failure",
+        )
     }
 
     #[test]
     fn test_ind_flat_map_sanity() {
         check_strategy_sanity(
-            (0..65536).prop_ind_flat_map(|a| (Just(a), (a - 5..a + 5))),
+            (0..65536).prop_ind_flat_map(|first| {
+                (Just(first), (first - 5..first + 5))
+            }),
             None,
         );
     }
@@ -372,7 +408,7 @@ mod test {
     #[test]
     fn test_ind_flat_map2_sanity() {
         check_strategy_sanity(
-            (0..65536).prop_ind_flat_map2(|a| a - 5..a + 5),
+            (0..65536).prop_ind_flat_map2(|first| first - 5..first + 5),
             None,
         );
     }

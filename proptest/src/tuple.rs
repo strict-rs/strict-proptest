@@ -18,8 +18,13 @@ use crate::test_runner::*;
 /// Common `ValueTree` implementation for all tuple strategies.
 #[derive(Clone, Copy, Debug)]
 pub struct TupleValueTree<T> {
+    /// The tuple of element `ValueTree`s being shrunk together.
     tree: T,
+    /// Index of the element currently being simplified, advancing left to
+    /// right as earlier elements stop shrinking.
     shrinker: u32,
+    /// Element touched by the last `simplify`, so `complicate` can revisit
+    /// it; `None` before any simplification.
     prev_shrinker: Option<u32>,
 }
 
@@ -37,6 +42,10 @@ impl<T> TupleValueTree<T> {
     }
 }
 
+/// Implement `Strategy` and `ValueTree` for a tuple of a given arity.
+///
+/// Each invocation lists the tuple's field indices and type parameters; the
+/// generated `TupleValueTree` shrinks the elements left to right.
 macro_rules! tuple {
     ($($fld:tt : $typ:ident),*) => {
         impl<$($typ : Strategy),*> Strategy for ($($typ,)*) {
@@ -135,8 +144,8 @@ mod test {
 
     #[test]
     fn shrinks_fully_ltr() -> Result<(), TestFailure> {
-        fn pass(a: (i32, i32)) -> bool {
-            a.0 * a.1 <= 9
+        fn pass(pair: (i32, i32)) -> bool {
+            pair.0 * pair.1 <= 9
         }
 
         let input = (0..32, 0..32);

@@ -1,0 +1,31 @@
+[package]
+name = "proptest-derive-internal"
+version = "0.8.0"
+authors = ["Mazdak Farrokhzad <twingoow@gmail.com>"]
+license.workspace = true
+readme = "README.md"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+documentation = "https://proptest-rs.github.io/proptest/proptest-derive/index.html"
+keywords = ["derive", "arbitrary", "proptest", "testing", "quickcheck"]
+categories.workspace = true
+description = """
+Implementation detail of proptest-derive; do not depend on this crate directly.
+"""
+homepage = "https://proptest-rs.github.io/proptest/proptest-derive/index.html"
+
+[lints]
+workspace = true
+
+[dependencies]
+proc-macro2 = { workspace = true }
+syn = { workspace = true, features = ["visit", "extra-traits", "full"] }
+quote = { workspace = true }
+
+[dev-dependencies]
+strict-test-support = { workspace = true }
+
+[features]
+# Don't generate TupleUnion structs in #[derive(Arbitrary)] code
+boxed_union = []

@@ -12,10 +12,12 @@ use core::fmt::Debug;
 use std::borrow::{Cow, ToOwned};
 use std::boxed::Box;
 use std::env;
+use std::format;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::string::{String, ToString};
+use std::vec;
 use std::vec::Vec;
 
 use self::FileFailurePersistence::*;
@@ -83,11 +85,12 @@ impl FailurePersistence for FileFailurePersistence {
         &self,
         source_file: Option<&'static str>,
     ) -> Vec<PersistedSeed> {
-        let source =
-            source_file.and_then(|s| absolutize_source_file(Path::new(s)));
-        let p = self.resolve(source.as_deref());
+        let source = source_file.and_then(|source_path| {
+            absolutize_source_file(Path::new(source_path))
+        });
+        let resolved = self.resolve(source.as_deref());
 
-        let path: Option<&PathBuf> = p.as_ref();
+        let path: Option<&PathBuf> = resolved.as_ref();
         let result: io::Result<Vec<PersistedSeed>> = path.map_or_else(
             || Ok(vec![]),
             |path| {
@@ -129,11 +132,11 @@ impl FailurePersistence for FileFailurePersistence {
             let line = seed_line(&seed, shrunken_value);
 
             match write_seed_data_to_file(&path, line.as_bytes()) {
-                Err(e) => {
+                Err(error) => {
                     diagnostics::emit(
                         RunnerDiagnostic::PersistenceAppendFailed {
                             path,
-                            error: e,
+                            error,
                         },
                     );
                 }
@@ -183,6 +186,17 @@ fn absolutize_source_file<'a>(source: &'a Path) -> Option<Cow<'a, Path>> {
     absolutize_source_file_with_cwd(env::current_dir, source)
 }
 
+/// `absolutize_source_file` with the cwd lookup injected, so tests can
+/// drive the Windows-style upward walk deterministically.
+///
+/// An absolute `source` is returned borrowed unchanged. A relative one
+/// is joined onto the working directory, popping parents until the join
+/// names an existing file; emits a diagnostic and returns `None` if the
+/// walk is exhausted or the cwd cannot be read.
+#[allow(
+    clippy::single_call_fn,
+    reason = "absolutize a relative source path by walking cwd upward with an injectable getcwd for tests"
+)]
 fn absolutize_source_file_with_cwd<'a>(
     getcwd: impl FnOnce() -> io::Result<PathBuf>,
     source: &'a Path,
@@ -219,10 +233,10 @@ fn absolutize_source_file_with_cwd<'a>(
                 }
             },
 
-            Err(e) => {
+            Err(error) => {
                 diagnostics::emit(RunnerDiagnostic::CwdUnresolvable {
                     source: source.to_path_buf(),
-                    error: e,
+                    error,
                 });
                 None
             }
@@ -230,6 +244,16 @@ fn absolutize_source_file_with_cwd<'a>(
     }
 }
 
+/// Parse one persistence-file line into a `PersistedSeed`, or `None`.
+///
+/// Everything from the first `#` is a comment and dropped; a blank
+/// remainder yields `None`, and a non-blank remainder that fails to
+/// parse emits a warning (naming `path` and the 1-based `lineno + 1`)
+/// before being skipped.
+#[allow(
+    clippy::single_call_fn,
+    reason = "parse one persistence-file line into a PersistedSeed, warning on unparsable lines"
+)]
 fn parse_seed_line(
     line: String,
     path: &Path,
@@ -257,6 +281,10 @@ fn parse_seed_line(
 /// Render one persistence record: the seed, a `#` comment carrying the
 /// minimized value's `Debug` (newlines flattened to spaces so the record
 /// stays a single line), and the trailing newline.
+#[allow(
+    clippy::single_call_fn,
+    reason = "render one persistence record as the seed plus a single-line shrunk-value comment"
+)]
 fn seed_line(seed: &PersistedSeed, shrunken_value: &dyn Debug) -> String {
     let comment = format!(" # shrinks to {:?}", shrunken_value)
         .replace(['\n', '\r'], " ");
@@ -286,6 +314,10 @@ const FILE_HEADER: &str = "\
 /// a single `write_all` of one or two whole lines on an append-mode
 /// handle, and the read side skips torn or foreign trailing lines, so
 /// concurrent appends need no further serialization.
+#[allow(
+    clippy::single_call_fn,
+    reason = "atomically claim or append the persistence file, writing the header on first creation"
+)]
 fn write_seed_data_to_file(dst: &Path, seed_data: &[u8]) -> io::Result<bool> {
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
@@ -304,18 +336,22 @@ fn write_seed_data_to_file(dst: &Path, seed_data: &[u8]) -> io::Result<bool> {
             out.write_all(&record)?;
             Ok(true)
         }
-        Err(e) if io::ErrorKind::AlreadyExists == e.kind() => {
+        Err(error) if io::ErrorKind::AlreadyExists == error.kind() => {
             let mut out = fs::OpenOptions::new().append(true).open(dst)?;
             out.write_all(seed_data)?;
             Ok(false)
         }
-        Err(e) => Err(e),
+        Err(error) => Err(error),
     }
 }
 
 /// Walk upward from a source file to the directory that contains the crate
 /// root (`lib.rs` or `main.rs`) — the anchor `SourceParallel` mirrors its
 /// sibling tree against. `None` when no crate root exists above the file.
+#[allow(
+    clippy::single_call_fn,
+    reason = "walk upward from a source file to the crate root the SourceParallel layout mirrors"
+)]
 fn crate_root_dir_above(source_path: &Path) -> Option<PathBuf> {
     let mut dir = source_path.to_path_buf();
     while dir.pop() {
@@ -330,6 +366,10 @@ fn crate_root_dir_above(source_path: &Path) -> Option<PathBuf> {
 /// relative path into the `sibling` directory beside the crate root, with
 /// the extension changed to `.txt`; fall back to `WithSource` when no crate
 /// root is found above the source file.
+#[allow(
+    clippy::single_call_fn,
+    reason = "compute the SourceParallel persistence path, falling back to WithSource without a crate root"
+)]
 fn resolve_source_parallel(
     sibling: &'static str,
     source_path: &Cow<'_, Path>,
@@ -348,8 +388,14 @@ fn resolve_source_parallel(
     let _ = result.pop();
     result.push(sibling);
     result.push(&suffix);
-    result.set_extension("txt");
-    Some(result)
+    Some(set_extension_best_effort(result, "txt"))
+}
+
+/// Change a path extension when the path shape supports it, otherwise keep the
+/// path unchanged.
+fn set_extension_best_effort(mut path: PathBuf, extension: &str) -> PathBuf {
+    let _changed = path.set_extension(extension);
+    path
 }
 
 impl FileFailurePersistence {
@@ -374,11 +420,10 @@ impl FileFailurePersistence {
             },
 
             WithSource(extension) => match source {
-                Some(source_path) => {
-                    let mut result = Cow::into_owned(source_path);
-                    result.set_extension(extension);
-                    Some(result)
-                }
+                Some(source_path) => Some(set_extension_best_effort(
+                    Cow::into_owned(source_path),
+                    extension,
+                )),
 
                 None => {
                     diagnostics::emit(RunnerDiagnostic::WithSourceSourceless);
@@ -461,6 +506,12 @@ mod tests {
             Ok(())
         }
         absolute_path_case()?;
+        #[cfg(unix)]
+        ensure(
+            WithSource("ext").resolve(Some(Path::new("/")))
+                == Some(Path::new("/").to_owned()),
+            "WithSource leaves a filename-free root path unchanged",
+        )?;
         ensure(
             WithSource("ext").resolve(None).is_none(),
             "WithSource resolves no path without a source",
@@ -542,7 +593,7 @@ mod tests {
         path: &Path,
     ) -> Result<Vec<PersistedSeed>, TestFailure> {
         let contents = ensure_ok(
-            std::fs::read_to_string(path),
+            fs::read_to_string(path),
             "the persistence file is readable",
         )?;
         Ok(contents
@@ -589,7 +640,7 @@ mod tests {
         ensure(!appended, "the second save appends to the existing file")?;
 
         let contents = ensure_ok(
-            std::fs::read_to_string(&path),
+            fs::read_to_string(&path),
             "the persistence file is readable",
         )?;
         ensure(
@@ -609,7 +660,7 @@ mod tests {
         let dir = TempDir::new("persistence-existing")?;
         let path = dir.child("regressions.txt");
         ensure_ok(
-            std::fs::write(&path, ""),
+            fs::write(&path, ""),
             "pre-creating the persistence file succeeds",
         )?;
 
@@ -624,7 +675,7 @@ mod tests {
         ensure(!created, "a pre-existing file is not treated as new")?;
 
         let contents = ensure_ok(
-            std::fs::read_to_string(&path),
+            fs::read_to_string(&path),
             "the persistence file is readable",
         )?;
         ensure(
@@ -641,17 +692,18 @@ mod tests {
         let path = dir.child("regressions.txt");
 
         let seed = sample_seed("xs 13 14 15 16")?;
-        ensure_ok(
+        let created = ensure_ok(
             write_seed_data_to_file(
                 &path,
                 seed_line(&seed, &"value").as_bytes(),
             ),
             "the initial save succeeds",
         )?;
+        ensure(created, "the initial save creates the file")?;
         // Simulate a torn concurrent append: a trailing half-record with
         // no terminating newline.
         ensure_ok(
-            std::fs::OpenOptions::new()
+            fs::OpenOptions::new()
                 .append(true)
                 .open(&path)
                 .and_then(|mut f| f.write_all(b"cc deadbe")),

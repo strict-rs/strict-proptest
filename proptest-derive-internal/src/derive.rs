@@ -8,9 +8,8 @@
 
 //! Provides actual deriving logic for the crate.
 
-use proc_macro2::{Span, TokenStream};
-use syn::spanned::Spanned;
-use syn::{DeriveInput, Expr, Field, Ident, Path, Type, Variant};
+use proc_macro2::TokenStream;
+use syn::{DeriveInput, Expr, Field, Ident, Path, Type, Variant, parse_quote};
 
 use crate::ast::*;
 use crate::attr::{self, ParamsMode, ParsedAttributes, StratMode};
@@ -23,7 +22,23 @@ use crate::void::IsUninhabited;
 // API
 //==============================================================================
 
-pub fn impl_proptest_arbitrary(ast: DeriveInput) -> TokenStream {
+/// Derive an `Arbitrary` impl for the parsed input — the crate's core entry
+/// point, called from the `#[proc_macro_derive]` shim in `lib.rs`.
+///
+/// The derivation runs against an error `Context`. On success the generated
+/// tokens are returned; if any diagnostics were recorded, a `compile_error!`
+/// is emitted in their place so the downstream crate fails to compile.
+///
+/// # Panics
+///
+/// Panics with an "internal error" message if the derivation aborts with a
+/// `Fatal` result without having recorded any diagnostic — that combination
+/// is always a bug in this crate.
+#[allow(
+    clippy::single_call_fn,
+    reason = "crate entry point running the derive pipeline and collapsing recorded diagnostics"
+)]
+pub(crate) fn impl_proptest_arbitrary(ast: DeriveInput) -> TokenStream {
     let mut ctx = Context::default();
     let result = derive_proptest_arbitrary(&mut ctx, ast);
     match (result, ctx.check()) {
@@ -40,17 +55,28 @@ pub fn impl_proptest_arbitrary(ast: DeriveInput) -> TokenStream {
 /// Simplified version of `DeriveInput` from syn letting us be generic over
 /// the body.
 struct DeriveData<B> {
+    /// The name of the type `Arbitrary` is being derived for.
     ident: Ident,
+    /// The type's own parsed `#[proptest(..)]` attributes.
     attrs: ParsedAttributes,
+    /// Tracks which generic parameters need an `Arbitrary` / `Debug` bound.
     tracker: UseTracker,
+    /// The struct fields or enum variants, kept generic so structs and enums
+    /// share this container.
     body: B,
 }
 
+/// The pieces of a kept (non-skipped, inhabited) enum variant: its relative
+/// weight, name, fields, and parsed attributes.
 type VariantParts = (u32, Ident, Vec<Field>, ParsedAttributes);
 
 /// Entry point for deriving `Arbitrary`.
+#[allow(
+    clippy::single_call_fn,
+    reason = "dispatch DeriveInput data to either the struct or the enum derive path"
+)]
 fn derive_proptest_arbitrary(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     ast: DeriveInput,
 ) -> DeriveResult<TokenStream> {
     use syn::Data::*;
@@ -94,10 +120,10 @@ fn derive_proptest_arbitrary(
     }?;
 
     // Linearise the IR into Rust code:
-    let q = the_impl.into_tokens(ctx)?;
+    let expansion = the_impl.into_tokens(ctx)?;
 
     // We're done!
-    Ok(q)
+    Ok(expansion)
 }
 
 //==============================================================================
@@ -105,8 +131,12 @@ fn derive_proptest_arbitrary(
 //==============================================================================
 
 /// Entry point for deriving `Arbitrary` for `struct`s.
+#[allow(
+    clippy::single_call_fn,
+    reason = "assemble the Arbitrary impl parts for a struct definition"
+)]
 fn derive_struct(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     mut ast: DeriveData<Vec<Field>>,
 ) -> DeriveResult<Impl> {
     // Deny attributes that are only for enum variants:
@@ -200,7 +230,7 @@ fn add_top_params(
 /// Deriving for a list of fields (product type) on
 /// which `params` or `no_params` was set directly.
 fn derive_product_has_params(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     ut: &mut UseTracker,
     item_kind: &str,
     closure: MapClosure,
@@ -222,10 +252,8 @@ fn derive_product_has_params(
             error::if_specified_params(ctx, &attrs, item_kind);
 
             // Determine the strategy for this field and add it to acc.
-            let span = field.span();
             let ty = field.ty.clone();
-            let pair =
-                product_handle_default_params(ut, ty, span, attrs.strategy);
+            let pair = product_handle_default_params(ut, ty, attrs.strategy);
             let pair = pair_filter(attrs.filter, field.ty, pair);
             Ok(acc.add(pair))
         })
@@ -236,7 +264,6 @@ fn derive_product_has_params(
 fn product_handle_default_params(
     ut: &mut UseTracker,
     ty: Type,
-    span: Span,
     strategy: StratMode,
 ) -> StratPair {
     match strategy {
@@ -250,7 +277,7 @@ fn product_handle_default_params(
         // Use Arbitrary for the given type and mark the type as used:
         StratMode::Arbitrary => {
             ty.mark_uses(ut);
-            pair_any(ty, span)
+            pair_any(ty)
         }
     }
 }
@@ -258,7 +285,7 @@ fn product_handle_default_params(
 /// Deriving for a list of fields (product type) on
 /// which `params` or `no_params` was NOT set directly.
 fn derive_product_no_params(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     ut: &mut UseTracker,
     fields: Vec<Field>,
     item_kind: &str,
@@ -273,7 +300,6 @@ fn derive_product_no_params(
         // Deny attributes that are only for enum variants:
         error::if_enum_attrs_present(ctx, &attrs, item_kind);
 
-        let span = field.span();
         let ty = field.ty;
 
         let strat = pair_filter(
@@ -294,12 +320,12 @@ fn derive_product_no_params(
 
                         // We use the Parameters type of the field's type.
                         let pref = acc.add_param(arbitrary_param(&ty));
-                        pair_any_with(ty, pref, span)
+                        pair_any_with(ty, pref)
                     }
                 },
                 // no_params set on the field:
                 ParamsMode::Default => {
-                    product_handle_default_params(ut, ty, span, attrs.strategy)
+                    product_handle_default_params(ut, ty, attrs.strategy)
                 }
                 // params(<type>) set on the field:
                 ParamsMode::Specified(params_ty) => {
@@ -356,8 +382,12 @@ fn extract_nparam<C>(
 //==============================================================================
 
 /// Entry point for deriving `Arbitrary` for `enum`s.
+#[allow(
+    clippy::single_call_fn,
+    reason = "branch enum derivation between the params-aware and no-params strategies"
+)]
 fn derive_enum(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     mut ast: DeriveData<Vec<Variant>>,
 ) -> DeriveResult<Impl> {
     // An enum can't be skipped, ensure it hasn't been:
@@ -396,8 +426,12 @@ fn derive_enum(
 }
 
 /// Deriving for a enum on which `params` or `no_params` was NOT set directly.
+#[allow(
+    clippy::single_call_fn,
+    reason = "no-container-params branch that unions an enum's variant strategies"
+)]
 fn derive_enum_no_params(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     ut: &mut UseTracker,
     _self: &Ident,
     variants: Vec<Variant>,
@@ -431,7 +465,7 @@ fn derive_enum_no_params(
 }
 
 /// Ensure that there's at least one generatable variant for a union.
-fn ensure_union_has_strategies<C>(ctx: Ctx, strats: &StratAcc<C>) {
+fn ensure_union_has_strategies<C>(ctx: Ctx<'_>, strats: &StratAcc<C>) {
     if strats.is_empty() {
         // We didn't accumulate any strategies,
         // so we can't construct any variant.
@@ -441,8 +475,12 @@ fn ensure_union_has_strategies<C>(ctx: Ctx, strats: &StratAcc<C>) {
 
 /// Derive for a variant which has fields and where the
 /// variant or its fields may specify `params` or `no_params`.
+#[allow(
+    clippy::single_call_fn,
+    reason = "derive one non-unit variant's strategy pair across every params mode"
+)]
 fn derive_variant_with_fields<C>(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     ut: &mut UseTracker,
     v_path: Path,
     attrs: ParsedAttributes,
@@ -518,8 +556,12 @@ fn derive_variant_with_fields<C>(
 
 /// Derive for a variant on which params were not set and on which no explicit
 /// strategy was set (or where it doesn't make sense...) and which has fields.
+#[allow(
+    clippy::single_call_fn,
+    reason = "prop_map a variant's fields when it declares no explicit strategy"
+)]
 fn variant_no_explicit_strategy<C>(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     ut: &mut UseTracker,
     v_path: Path,
     fields: Vec<Field>,
@@ -548,7 +590,7 @@ fn variant_no_explicit_strategy<C>(
 
 /// Determine strategy using "Default" semantics for a variant.
 fn variant_handle_default_params(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     ut: &mut UseTracker,
     v_path: Path,
     attrs: ParsedAttributes,
@@ -587,7 +629,10 @@ fn variant_handle_default_params(
 }
 
 /// Ensures that there are no proptest attributes on any of the fields.
-fn deny_all_attrs_on_fields(ctx: Ctx, fields: Vec<Field>) -> DeriveResult<()> {
+fn deny_all_attrs_on_fields(
+    ctx: Ctx<'_>,
+    fields: Vec<Field>,
+) -> DeriveResult<()> {
     fields.into_iter().try_for_each(|field| {
         let f_attr = attr::parse_attributes(ctx, &field.attrs)?;
         error::if_anything_specified(ctx, &f_attr, error::ENUM_VARIANT_FIELD);
@@ -597,8 +642,12 @@ fn deny_all_attrs_on_fields(ctx: Ctx, fields: Vec<Field>) -> DeriveResult<()> {
 
 /// Derive for a variant which has fields and where the
 /// variant or its fields may NOT specify `params` or `no_params`.
+#[allow(
+    clippy::single_call_fn,
+    reason = "container-params branch that unions an enum's variant strategies"
+)]
 fn derive_enum_has_params(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     ut: &mut UseTracker,
     _self: &Ident,
     variants: Vec<Variant>,
@@ -636,7 +685,7 @@ fn derive_enum_has_params(
 
 /// Filters out uninhabited and variants that we've been ordered to skip.
 fn keep_inhabited_variant(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     _self: &Ident,
     variant: Variant,
 ) -> DeriveResult<Option<VariantParts>> {
@@ -670,7 +719,7 @@ fn keep_inhabited_variant(
 
 /// Ensures that no other attributes than skip are present.
 fn ensure_has_only_skip_attr(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     attrs: &ParsedAttributes,
     item_kind: &str,
 ) {
@@ -693,7 +742,7 @@ fn ensure_has_only_skip_attr(
 
 /// Deal with a unit variant.
 fn pair_unit_variant(
-    ctx: Ctx,
+    ctx: Ctx<'_>,
     attrs: &ParsedAttributes,
     v_path: Path,
 ) -> StratPair {
@@ -753,7 +802,7 @@ impl PartsAcc<(u32, Ctor)> {
     /// Finishes off the accumulator by returning the parts needed for
     /// deriving. The resultant strategy is one that randomly picks
     /// one of the parts based on the relative weights in the `u32`.
-    fn finish(self, ctx: Ctx) -> ImplParts {
+    fn finish(self, ctx: Ctx<'_>) -> ImplParts {
         let (params, count) = self.params.consume();
         let (strat, ctor) = self.strats.finish(ctx);
         (params, strat, extract_all(ctor, count, FromReg::Top))
@@ -772,6 +821,10 @@ struct ParamAcc {
 
 impl ParamAcc {
     /// Returns an empty accumulator.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "the empty ParamAcc accumulator that seeds Parameters folding"
+    )]
     fn empty() -> Self {
         Self {
             types: Params::empty(),
@@ -847,13 +900,13 @@ impl StratAcc<(u32, Ctor)> {
     /// Finishes off the accumulator by returning a union of the
     /// strategies where the resultant strategy randomly picks
     /// one of the summands based on the relative weights provided.
-    fn finish(self, ctx: Ctx) -> StratPair {
+    fn finish(self, ctx: Ctx<'_>) -> StratPair {
         // Check that the weight sum <= u32::MAX
         if self
             .ctors
             .iter()
-            .map(|&(w, _)| w)
-            .try_fold(0u32, |acc, w| acc.checked_add(w))
+            .map(|&(weight, _)| weight)
+            .try_fold(0u32, |acc, weight| acc.checked_add(weight))
             .is_none()
         {
             error::weight_overflowing(ctx)

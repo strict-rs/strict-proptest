@@ -9,6 +9,18 @@
 
 //! Arbitrary implementations for libstd.
 
+macro_rules! std_arbitrary_with_params {
+    ($typ: ty, $strat: ty, $params: ty; $args: ident => $logic: expr) => {
+        arbitrary!([] $typ, $strat, $params; $args => $logic);
+    };
+}
+
+macro_rules! std_wrap_ctor_default {
+    ($wrap: ident) => {
+        wrap_ctor!($wrap, $wrap::new);
+    };
+}
+
 mod env;
 mod ffi;
 mod fs;

@@ -22,12 +22,20 @@ multiplex_alloc! {
     core::char::decode_utf16, std::char::decode_utf16
 }
 
+/// Upper bound on the length of the `Vec<u16>` fed to `decode_utf16`, capping
+/// generated `DecodeUtf16` inputs at `u16::MAX` code units.
 const VEC_MAX: usize = u16::MAX as usize;
 
 use crate::arbitrary::*;
 use crate::strategy::statics::static_map;
 use crate::strategy::*;
 
+/// Implements `Arbitrary` for a `char`-iterator type produced by a `char`
+/// method.
+///
+/// Draws an arbitrary `char` via `any::<char>()` and maps it through `$mapper`
+/// (e.g. `char::escape_debug`) with `static_map`, giving
+/// `Strategy = SMapped<char, Self>`.
 macro_rules! impl_wrap_char {
     ($type: ty, $mapper: expr) => {
         arbitrary!($type, SMapped<char, Self>;
@@ -56,7 +64,7 @@ arbitrary!(ParseCharError, IndFlatten<Mapped<bool, Just<Self>>>;
 #[cfg(feature = "unstable")]
 arbitrary!(CharTryFromError; {
     use core::convert::TryFrom;
-    char::try_from(0xD800 as u32).unwrap_err()
+    char::try_from(0xD800_u32).unwrap_err()
 });
 
 arbitrary!(DecodeUtf16Error, SFnPtrMap<Range<u16>, Self>;
@@ -66,6 +74,8 @@ arbitrary!(DecodeUtf16Error, SFnPtrMap<Range<u16>, Self>;
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         escape_debug => EscapeDebug,
         escape_default => EscapeDefault,

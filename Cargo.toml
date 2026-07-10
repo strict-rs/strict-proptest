@@ -2,6 +2,7 @@
 members = [
     "proptest",
     "proptest-derive",
+    "proptest-derive-internal",
     "proptest-state-machine",
     "proptest-macro",
 ]
@@ -21,14 +22,16 @@ rust-version = "1.96"
 # Internal deps
 proptest = { version = "1.11.0", path = "proptest" }
 proptest-macro = { version = "0.5.0", path = "proptest-macro" }
+proptest-derive-internal = { version = "0.8.0", path = "proptest-derive-internal" }
 
 # External deps
-bit-set = "0.8.0"
-bit-vec = "0.8.0"
+bit-set = "0.11.0"
+bit-vec = "0.10.0"
 bitflags = "2.13"
 compiletest_rs = "0.11"
 convert_case = "0.11"
 criterion = "0.8"
+getrandom = { version = "0.4.3", default-features = false }
 insta = "1"
 message-io = { version = "0.19.0", default-features = false }
 num-traits = { version = "0.2.19", default-features = false }
@@ -37,14 +40,13 @@ quote = "1.0"
 rand = { version = "0.10", default-features = false }
 rand_chacha = { version = "0.10", default-features = false }
 rand_xorshift = "0.5"
-regex = "1.12"
+regex = "1.13"
 regex-syntax = "0.8"
 rusty-fork = { version = "0.3.1", default-features = false }
 tempfile = "3.27"
 unarray = "0.1.4"
-x86 = "0.52.0"
 
-# strict-* ecosystem deps, keep even if unused
+# strict-* ecosystem deps (comment out if unused, do not remove)
 agents-md = { version = "0.1.0", git = "ssh://git@github.com/earthlings-dev/agents-md-rs.git", branch = "main" }
 bpaf = { git = "ssh://git@github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10", default-features = false }
 strict-xtask-core = { version = "0.1.0", git = "ssh://git@github.com/earthlings-dev/strict-xtask-core-rs.git", branch = "main" }
@@ -67,15 +69,51 @@ anstyle = "1"
 snapbox = { version = "1.2", default-features = false, features = ["diff"] }
 parking_lot = "0.12"
 
-# patches, keep even if unused
+[patch.crates-io]
+
+# strict-proptest (comment out if unused, do not remove)
+# proptest = { version = "1.11.0", git = "ssh://git@github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
+# proptest-macro = { version = "0.5.0", git = "ssh://git@github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
+# proptest-state-machine = { version = "0.8", git = "ssh://git@github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
+# proptest-derive = { version = "0.8", git = "ssh://git@github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
+
+# strict-trybuild (comment out if unused, do not remove)
+# trybuild = { git = "ssh://git@github.com/strict-rs/strict-trybuild.git", branch = "strict", version = "1" }
+
+# strict-bpaf (comment out if unused, do not remove)
+# bpaf = { git = "ssh://git@github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10" }
+# bpaf_derive = { git = "ssh://git@github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10.0" }
+# bpaf_cauwugo = { git = "ssh://git@github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10.0" }
+
+# strict-tracing (comment out if unused, do not remove)
+tracing = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.44" }
+# tracing-appender = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.5" }
+# tracing-attributes = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.31" }
+tracing-core = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.36" }
+# tracing-error = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.1" }
+# tracing-flame = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.0" }
+# tracing-futures = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.5" }
+# tracing-journald = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.3.2" }
+# tracing-log = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.0" }
+# tracing-mock = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.0-beta.3" }
+# tracing-serde = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.0" }
+# tracing-subscriber = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.3.23" }
+# tracing-test = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.0" }
+# tracing-tower = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.0" }
+
+# patches (comment out if unused, do not remove)
 [patch."ssh://git@github.com/strict-rs/strict-proptest.git"]
 proptest = { version = "1", path = "proptest" }
 proptest-macro = { version = "0.5", path = "proptest-macro" }
 
-# patches, keep even if unused
+# patches (comment out if unused, do not remove)
 [patch."https://github.com/estrict-rs/strict-proptest.git"]
 proptest = { version = "1", path = "proptest" }
 proptest-macro = { version = "0.5", path = "proptest-macro" }
+
+[workspace.metadata.config.layout]
+schema-version = "0.1.0"
+kind = "flat"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Lint policy — rustc

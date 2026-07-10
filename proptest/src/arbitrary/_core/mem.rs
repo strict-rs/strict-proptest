@@ -26,17 +26,18 @@ lift1!(['static] Discriminant<A>;
 // Not supported at the moment since the user won't be able to call
 // https://doc.rust-lang.org/nightly/std/mem/union.ManuallyDrop.html#method.drop
 // in any case so the use case is not great for this.
-//wrap_ctor!(ManuallyDrop);
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     #[derive(Copy, Clone, Debug)]
     struct DummyStruct;
     arbitrary!(DummyStruct; DummyStruct);
 
     no_panic_test!(
         //manually_drop       => ManuallyDrop<u8>, // Trivial destructor.
-        discriminant_struct => Discriminant<super::DummyStruct>,
+        discriminant_struct => Discriminant<DummyStruct>,
         discriminant_enum   => Discriminant<::std::num::FpCategory>
     );
 }

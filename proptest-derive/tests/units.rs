@@ -6,6 +6,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Compile-and-run coverage for `#[derive(Arbitrary)]` on degenerate
+//! empty shapes.
+//!
+//! Derives `Arbitrary` for the unit struct `T0;`, the field-less structs
+//! `T1 {}` and `T2()`, and enums whose sole variant is a unit, empty
+//! tuple (`V0()`), or empty struct (`V2 {}`) form. Each impl must resolve
+//! even though there is nothing to generate.
+
 use proptest::prelude::Arbitrary;
 use proptest_derive::Arbitrary;
 

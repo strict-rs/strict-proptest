@@ -6,6 +6,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Compile-and-run coverage for the passing side of the derive's
+//! uninhabited-field detection.
+//!
+//! Exercises `#[derive(Arbitrary)]` on types whose fields are the never
+//! type `!`, arrays `[!; N]` with const-expression lengths, and
+//! uninhabited types hidden behind a `macro_rules!` call or an
+//! associated-type projection that the derive cannot inspect. Generation
+//! must drop uninhabited enum variants (leaving only the inhabited one)
+//! while still emitting a working `Arbitrary` impl.
+
 #![feature(never_type)]
 
 use proptest::prelude::{Arbitrary, any};
@@ -82,8 +92,8 @@ enum UsePrj0 {
 
 impl UsePrj0 {
     fn projection(self) -> <! as Fun>::Prj {
-        let Self::V0(value) = self;
-        value
+        let Self::V0(payload) = self;
+        payload
     }
 }
 
@@ -94,8 +104,8 @@ enum UsePrj1 {
 
 impl UsePrj1 {
     fn projection(self) -> <(!, usize, !) as Fun>::Prj {
-        let Self::V0(value) = self;
-        value
+        let Self::V0(payload) = self;
+        payload
     }
 }
 

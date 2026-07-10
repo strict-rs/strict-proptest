@@ -46,6 +46,10 @@ impl Probability {
     /// # Panics
     ///
     /// Panics if the probability is outside interval `[0.0, 1.0]`.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "validate a raw f64 in the 0.0..=1.0 range into a Probability newtype"
+    )]
     pub fn new(prob: f64) -> Self {
         assert!((0.0..=1.0).contains(&prob));
         Probability(prob)
@@ -82,8 +86,8 @@ impl From<f64> for Probability {
 }
 
 impl From<Probability> for f64 {
-    fn from(p: Probability) -> Self {
-        p.0
+    fn from(probability: Probability) -> Self {
+        probability.0
     }
 }
 
@@ -96,11 +100,15 @@ pub struct Probability(f64);
 //==============================================================================
 
 mapfn! {
-    [] fn WrapSome[<T : fmt::Debug>](t: T) -> Option<T> {
-        Some(t)
+    [] fn WrapSome[<T : fmt::Debug>](inner: T) -> Option<T> {
+        Some(inner)
     }
 }
 
+/// Strategy (and its own `ValueTree`) that always produces `None`.
+///
+/// It forms the `None` arm of the `TupleUnion` behind `OptionStrategy` and
+/// carries no inner value, so it never simplifies or complicates.
 #[must_use = "strategies do nothing unless used"]
 struct NoneStrategy<T>(PhantomData<T>);
 impl<T> Clone for NoneStrategy<T> {
@@ -110,7 +118,7 @@ impl<T> Clone for NoneStrategy<T> {
 }
 impl<T> Copy for NoneStrategy<T> {}
 impl<T> fmt::Debug for NoneStrategy<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "NoneStrategy")
     }
 }
@@ -159,7 +167,7 @@ opaque_strategy_wrapper! {
 // exactly this, but for some reason it adds a `T::Value : Debug` constraint as
 // well.
 impl<T: Strategy + fmt::Debug> fmt::Debug for OptionStrategy<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "OptionStrategy({:?})", self.0)
     }
 }
@@ -177,7 +185,7 @@ impl<T: Strategy> fmt::Debug for OptionValueTree<T>
 where
     T::Tree: fmt::Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "OptionValueTree({:?})", self.0)
     }
 }
@@ -188,8 +196,8 @@ where
 /// `Some` values shrink to `None`.
 ///
 /// `Some` and `None` are each chosen with 50% probability.
-pub fn of<T: Strategy>(t: T) -> OptionStrategy<T> {
-    weighted(Probability::default(), t)
+pub fn of<T: Strategy>(strategy: T) -> OptionStrategy<T> {
+    weighted(Probability::default(), strategy)
 }
 
 /// Return a strategy producing `Optional` values wrapping values from the
@@ -201,14 +209,14 @@ pub fn of<T: Strategy>(t: T) -> OptionStrategy<T> {
 /// must be between 0.0 and 1.0, both exclusive.
 pub fn weighted<T: Strategy>(
     probability_of_some: impl Into<Probability>,
-    t: T,
+    strategy: T,
 ) -> OptionStrategy<T> {
     let prob = probability_of_some.into().into();
     let (weight_some, weight_none) = float_to_weight(prob);
 
     OptionStrategy(TupleUnion::new((
         (weight_none, Arc::new(NoneStrategy(PhantomData))),
-        (weight_some, Arc::new(statics::Map::new(t, WrapSome))),
+        (weight_some, Arc::new(statics::Map::new(strategy, WrapSome))),
     )))
 }
 
@@ -219,13 +227,13 @@ mod test {
     use super::*;
 
     fn count_some_of_1000(
-        s: OptionStrategy<Just<i32>>,
+        strategy: OptionStrategy<Just<i32>>,
     ) -> Result<u32, TestFailure> {
         let mut runner = TestRunner::deterministic();
         let mut count = 0;
         for _ in 0..1000 {
             count += ensure_some(
-                s.new_tree(&mut runner).ok(),
+                strategy.new_tree(&mut runner).ok(),
                 "option strategy generates a value tree",
             )?
             .current()

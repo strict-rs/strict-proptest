@@ -2,6 +2,10 @@ use super::*;
 use quote::quote_spanned;
 
 /// Generate the arbitrary impl for the struct
+#[allow(
+    clippy::single_call_fn,
+    reason = "select between the unboxed and boxed Arbitrary impl based on strategy overrides"
+)]
 pub(super) fn gen_arbitrary_impl(
     fn_name: &Ident,
     args: &[Argument],
@@ -14,12 +18,24 @@ pub(super) fn gen_arbitrary_impl(
     }
 }
 
+/// Generate the unboxed `Arbitrary` impl when no argument overrides its
+/// strategy.
+///
+/// Boxing is avoidable here because the argument types are written out in the
+/// function signature, so the associated `Strategy` type can be named
+/// directly as a `Map` over `StrategyFor<(..)>`. When a custom strategy is
+/// present the return type of its expression is unknown, which is why
+/// `custom_strategies` falls back to `BoxedStrategy<Self>` instead.
 // we can avoid boxing strategies if there are no custom strategies, since we have types written
 // out in function args
 //
 // If there are custom strategies, we can't write the type, because we're only provided the
 // expression for the strategy (e.g. `#[strategy = my_custom_strategy()]` doesn't tell us the
 // return type of `my_custom_strategy`). In these cases, we just use `BoxedStrategy<Self>`
+#[allow(
+    clippy::single_call_fn,
+    reason = "emit the unboxed Arbitrary impl when every argument uses its default strategy"
+)]
 fn no_custom_strategies(
     fn_name: &Ident,
     args: &[Argument],
@@ -52,6 +68,13 @@ fn no_custom_strategies(
     arbitrary_shared(fn_name, strategy_type, strategy_expr, options)
 }
 
+/// Generate the boxed `Arbitrary` impl when at least one argument carries a
+/// `#[strategy = <expr>]` override.
+///
+/// The override supplies a strategy expression but not its return type, so
+/// the associated `Strategy` type is erased to `BoxedStrategy<Self>`. The
+/// value tuples each argument's override (or `any::<Ty>()` for the rest) and
+/// finishes with `.prop_map(...).boxed()`.
 // if we have `fn foo(#[strategy = x] a: i32, b: i32) {}`, we want to generate something like this:
 // ```ignore
 // impl Arbitrary for FooArgs {
@@ -63,25 +86,30 @@ fn no_custom_strategies(
 //   }
 // }
 // ```
+#[allow(
+    clippy::single_call_fn,
+    reason = "emit the boxed Arbitrary impl when an argument overrides its default strategy"
+)]
 fn custom_strategies(
     fn_name: &Ident,
     args: &[Argument],
     options: &Options,
 ) -> TokenStream {
     let proptest = options.true_proptest_path();
-    let arg_strategies: TokenStream =
-        args.iter()
-            .map(|arg| {
-                arg.strategy.as_ref().map(|s| quote! {#s,}).unwrap_or_else(
-                    || {
-                        let ty = &arg.pat_ty.ty;
-                        quote_spanned! {
-                            ty.span() => #proptest::prelude::any::<#ty>(),
-                        }
-                    },
-                )
-            })
-            .collect();
+    let arg_strategies: TokenStream = args
+        .iter()
+        .map(|arg| {
+            arg.strategy
+                .as_ref()
+                .map(|expr| quote! {#expr,})
+                .unwrap_or_else(|| {
+                    let ty = &arg.pat_ty.ty;
+                    quote_spanned! {
+                        ty.span() => #proptest::prelude::any::<#ty>(),
+                    }
+                })
+        })
+        .collect();
 
     let arg_names: TokenStream = args
         .iter()

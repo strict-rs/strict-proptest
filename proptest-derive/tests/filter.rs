@@ -6,6 +6,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Coverage for the `#[proptest(filter(...))]` modifier at container, variant,
+//! and field level across every spelling.
+//!
+//! The derived types apply filters written as closure strings, `fn` paths, and
+//! `filter = "..."` forms, stack multiple filters on one field, and combine
+//! filtering with `strategy`, `value`, and `params`; each property confirms
+//! the generated value satisfies every filter that applies to it.
+
 use proptest::prelude::*;
 use proptest::strict::{TestResult, ensure_property};
 use proptest_derive::Arbitrary;
@@ -81,8 +89,12 @@ struct T3(
     usize,
 );
 
-fn is_v0(v: &T4) -> bool {
-    matches!(v, T4::V0 { .. })
+#[allow(
+    clippy::single_call_fn,
+    reason = "test predicate keeping only the T4::V0 container variant"
+)]
+fn is_v0(candidate: &T4) -> bool {
+    matches!(candidate, T4::V0 { .. })
 }
 
 #[derive(Debug, Arbitrary)]
@@ -95,16 +107,24 @@ enum T4 {
     V1,
 }
 
-fn t5_v0_rem_3(v: &T5) -> bool {
-    if let T5::V0 { field } = v {
+#[allow(
+    clippy::single_call_fn,
+    reason = "T5::V0 filter predicate accepting fields divisible by three"
+)]
+fn t5_v0_rem_3(candidate: &T5) -> bool {
+    if let T5::V0 { field } = candidate {
         rem3(field)
     } else {
         false
     }
 }
 
-fn t5_v1_rem_5(v: &T5) -> bool {
-    if let T5::V1(field) = v {
+#[allow(
+    clippy::single_call_fn,
+    reason = "T5::V1 filter predicate accepting fields divisible by five"
+)]
+fn t5_v1_rem_5(candidate: &T5) -> bool {
+    if let T5::V1(field) = candidate {
         field.is_multiple_of(5)
     } else {
         false
@@ -125,16 +145,24 @@ enum T5 {
     V1(usize),
 }
 
-fn t6_v0_rem_3(v: &T6) -> bool {
-    if let T6::V0 { field } = v {
+#[allow(
+    clippy::single_call_fn,
+    reason = "T6::V0 filter predicate accepting fields divisible by three"
+)]
+fn t6_v0_rem_3(candidate: &T6) -> bool {
+    if let T6::V0 { field } = candidate {
         rem3(field)
     } else {
         false
     }
 }
 
-fn t6_v1_rem_5(v: &T6) -> bool {
-    if let T6::V1(field) = v {
+#[allow(
+    clippy::single_call_fn,
+    reason = "T6::V1 filter predicate accepting fields divisible by five"
+)]
+fn t6_v1_rem_5(candidate: &T6) -> bool {
+    if let T6::V1(field) = candidate {
         field.is_multiple_of(5)
     } else {
         false
@@ -164,22 +192,22 @@ fn t0_test() -> TestResult {
     ensure_property(
         &any::<T0>(),
         "every filter spelling holds on a named struct",
-        |v| {
+        |sample| {
             ensure(
-                even(&v.foo) && rem3(&v.foo),
+                even(&sample.foo) && rem3(&sample.foo),
                 "field and container filters compose",
             )?;
-            ensure(!even(&v.bar), "the closure-string filter holds")?;
+            ensure(!even(&sample.bar), "the closure-string filter holds")?;
             ensure(
-                !even(&v.baz) && v.baz < 100,
+                !even(&sample.baz) && sample.baz < 100,
                 "the filter composes with a strategy",
             )?;
             ensure(
-                even(&v.quux) && v.quux == 42,
+                even(&sample.quux) && sample.quux == 42,
                 "the filter composes with a value",
             )?;
             ensure(
-                v.wibble > 2 && v.wibble <= 100,
+                sample.wibble > 2 && sample.wibble <= 100,
                 "the filter composes with params and a strategy",
             )
         },
@@ -191,22 +219,22 @@ fn t1_test() -> TestResult {
     ensure_property(
         &any::<T1>(),
         "every filter spelling holds under container params",
-        |v| {
+        |sample| {
             ensure(
-                even(&v.foo) && v.foo % 3 == 0,
+                even(&sample.foo) && sample.foo % 3 == 0,
                 "field and container filters compose",
             )?;
-            ensure(!even(&v.bar), "the closure-string filter holds")?;
+            ensure(!even(&sample.bar), "the closure-string filter holds")?;
             ensure(
-                !even(&v.baz) && v.baz < 100,
+                !even(&sample.baz) && sample.baz < 100,
                 "the filter composes with a strategy",
             )?;
             ensure(
-                even(&v.quux) && v.quux == 42,
+                even(&sample.quux) && sample.quux == 42,
                 "the filter composes with a value",
             )?;
             ensure(
-                v.wibble > 2 && v.wibble <= 100,
+                sample.wibble > 2 && sample.wibble <= 100,
                 "the filter composes with the params strategy",
             )
         },
@@ -218,22 +246,22 @@ fn t2_test() -> TestResult {
     ensure_property(
         &any::<T2>(),
         "every filter spelling holds on a tuple struct",
-        |v| {
+        |sample| {
             ensure(
-                even(&v.0) && v.0 % 3 == 0,
+                even(&sample.0) && sample.0 % 3 == 0,
                 "field and container filters compose",
             )?;
-            ensure(!even(&v.1), "the closure-string filter holds")?;
+            ensure(!even(&sample.1), "the closure-string filter holds")?;
             ensure(
-                !even(&v.2) && v.2 < 100,
+                !even(&sample.2) && sample.2 < 100,
                 "the filter composes with a strategy",
             )?;
             ensure(
-                even(&v.3) && v.3 == 42,
+                even(&sample.3) && sample.3 == 42,
                 "the filter composes with a value",
             )?;
             ensure(
-                v.4 > 2 && v.4 <= 100,
+                sample.4 > 2 && sample.4 <= 100,
                 "the filter composes with params and a strategy",
             )
         },
@@ -245,22 +273,22 @@ fn t3_test() -> TestResult {
     ensure_property(
         &any::<T3>(),
         "the duplicate tuple-struct spelling holds",
-        |v| {
+        |sample| {
             ensure(
-                even(&v.0) && v.0 % 3 == 0,
+                even(&sample.0) && sample.0 % 3 == 0,
                 "field and container filters compose",
             )?;
-            ensure(!even(&v.1), "the closure-string filter holds")?;
+            ensure(!even(&sample.1), "the closure-string filter holds")?;
             ensure(
-                !even(&v.2) && v.2 < 100,
+                !even(&sample.2) && sample.2 < 100,
                 "the filter composes with a strategy",
             )?;
             ensure(
-                even(&v.3) && v.3 == 42,
+                even(&sample.3) && sample.3 == 42,
                 "the filter composes with a value",
             )?;
             ensure(
-                v.4 > 2 && v.4 <= 100,
+                sample.4 > 2 && sample.4 <= 100,
                 "the filter composes with params and a strategy",
             )
         },
@@ -272,9 +300,9 @@ fn t4_test() -> TestResult {
     ensure_property(
         &any::<T4>(),
         "a container fn-filter keeps only the matching variant",
-        |v| {
+        |sample| {
             ensure(
-                if let T4::V0 { field } = v {
+                if let T4::V0 { field } = sample {
                     even(&field)
                 } else {
                     false
@@ -290,7 +318,7 @@ fn t5_test() -> TestResult {
     ensure_property(
         &any::<T5>(),
         "variant-level filters hold per variant",
-        |v| match v {
+        |sample| match sample {
             T5::V0 { field } => ensure(
                 rem3(&field) && even(&field),
                 "V0 satisfies the variant and field filters",
@@ -308,7 +336,7 @@ fn t6_test() -> TestResult {
     ensure_property(
         &any::<T6>(),
         "variant-level filters hold under container params",
-        |v| match v {
+        |sample| match sample {
             T6::V0 { field } => ensure(
                 rem3(&field) && even(&field),
                 "V0 satisfies the variant and field filters",
@@ -323,12 +351,16 @@ fn t6_test() -> TestResult {
 
 #[test]
 fn t7_test() -> TestResult {
-    ensure_property(&any::<T7>(), "repeated field filters accumulate", |v| {
-        ensure(
-            even(&v.foo) && rem3(&v.foo),
-            "both accumulated filters hold",
-        )
-    })
+    ensure_property(
+        &any::<T7>(),
+        "repeated field filters accumulate",
+        |sample| {
+            ensure(
+                even(&sample.foo) && rem3(&sample.foo),
+                "both accumulated filters hold",
+            )
+        },
+    )
 }
 
 #[test]

@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::fmt;
+use crate::std_facade::{fmt, format};
 
 #[cfg(feature = "std")]
 use std::string::ToString;
@@ -43,10 +43,15 @@ pub enum TestCaseError {
 /// `TestCaseResult` is public.
 #[derive(Debug, Clone)]
 pub(crate) enum TestCaseOk {
+    /// A freshly generated input passed the test.
     NewCaseSuccess,
+    /// A replayed persisted-failure seed passed the test.
     PersistedCaseSuccess,
+    /// A step replayed from a fork child's log recorded a pass.
     ReplayFromForkSuccess,
+    /// The input's outcome was served from the result cache.
     CacheHitSuccess,
+    /// The input was rejected as invalid (neither pass nor fail).
     Reject,
 }
 
@@ -81,7 +86,7 @@ impl TestCaseError {
 }
 
 impl fmt::Display for TestCaseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             TestCaseError::Reject(ref whence) => {
                 write!(f, "Input rejected at {}", whence)
@@ -111,7 +116,7 @@ pub enum TestError<T> {
 }
 
 impl<T: fmt::Debug> fmt::Display for TestError<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             TestError::Abort(ref why) => write!(f, "Test aborted: {}", why),
             TestError::Fail(ref why, ref what) => {
@@ -133,7 +138,10 @@ impl<T: fmt::Debug> ::std::error::Error for TestError<T> {
     }
 }
 
+/// Sealed-trait guard for `ProptestResultExt`.
 mod private {
+    /// Marker implemented only for `Result`, sealing `ProptestResultExt`
+    /// so no downstream type can implement it.
     pub trait Sealed {}
 
     impl<T, E> Sealed for Result<T, E> {}
@@ -168,6 +176,12 @@ pub trait ProptestResultExt<T, E>: private::Sealed {
     ///   }
     /// }
     /// ```
+    ///
+    /// ## Errors
+    ///
+    /// Returns `Err(TestCaseError::Reject)` when `self` is `Err`, tagging
+    /// the rejection with the caller location and the error's `Debug`
+    /// rendering; an `Ok` is passed through unchanged.
     ///
     /// [`prop_assume!`]: crate::prop_assume
     fn prop_assume_ok(self) -> Result<T, TestCaseError>

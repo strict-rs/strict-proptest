@@ -6,6 +6,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Coverage for the `#[proptest(skip)]` modifier and uninhabited variant
+//! detection, requiring `#![feature(never_type)]`.
+//!
+//! The derived enums mark some variants `#[proptest(skip)]` and give others an
+//! uninhabited `!` payload, and each property confirms only the inhabited,
+//! unskipped variants are ever generated.
+
 #![feature(never_type)]
 #![allow(dead_code, unreachable_code)]
 
@@ -37,9 +44,9 @@ fn ty1_always_v1() -> TestResult {
     ensure_property(
         &any::<Ty1>(),
         "skipped and uninhabited variants never generate",
-        |v| {
+        |sample| {
             ensure(
-                v == Ty1::V1,
+                sample == Ty1::V1,
                 "only the inhabited, unskipped variant appears",
             )
         },
@@ -51,9 +58,9 @@ fn ty_always_1_or_2() -> TestResult {
     ensure_property(
         &any::<Ty2>(),
         "multiple skipped variants never generate",
-        |v| {
+        |sample| {
             ensure(
-                v == Ty2::V1 || v == Ty2::V2,
+                sample == Ty2::V1 || sample == Ty2::V2,
                 "only the unskipped variants appear",
             )
         },

@@ -18,7 +18,7 @@ use crate::test_runner::*;
 
 /// A **relative** `weight` of a particular `Strategy` corresponding to `T`
 /// coupled with `T` itself. The weight is currently given in `u32`.
-pub type W<T> = (u32, T);
+pub type Weighted<T> = (u32, T);
 
 /// A **relative** `weight` of a particular `Strategy` corresponding to `T`
 /// coupled with `Arc<T>`. The weight is currently given in `u32`.
@@ -27,7 +27,7 @@ pub type WA<T> = (u32, Arc<T>);
 /// Error returned by the fallible [`Union`] constructors (and
 /// [`try_float_to_weight`]) when the requested option set cannot form a valid
 /// weighted union.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnionBuildError {
     /// No options were supplied; a union must have at least one.
     Empty,
@@ -41,7 +41,7 @@ pub enum UnionBuildError {
 }
 
 impl fmt::Display for UnionBuildError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => write!(f, "Union must have at least one option"),
             Self::ZeroWeight => write!(f, "Union option has a weight of 0"),
@@ -59,12 +59,16 @@ impl core::error::Error for UnionBuildError {}
 
 /// Validate the relative weights of a prospective union: at least one option,
 /// no zero weights, and a weight sum that fits in a `u32`.
-fn validate_weights<'a>(
-    weights: impl Iterator<Item = &'a u32>,
+#[allow(
+    clippy::single_call_fn,
+    reason = "check a union's relative weight table for zero weights, emptiness, and overflow"
+)]
+fn validate_weights(
+    weights: impl Iterator<Item = u32>,
 ) -> Result<(), UnionBuildError> {
     let mut count = 0u64;
     let mut sum = 0u64;
-    for &weight in weights {
+    for weight in weights {
         if weight == 0 {
             return Err(UnionBuildError::ZeroWeight);
         }
@@ -88,6 +92,8 @@ fn validate_weights<'a>(
 pub struct Union<T: Strategy> {
     // In principle T could be any `Strategy + Clone`, but that isn't possible
     // for BC reasons with the 0.9 series.
+    /// The weighted delegate strategies, each paired with its relative weight
+    /// and wrapped in an `Arc`; one is picked per generated value.
     options: Vec<WA<T>>,
 }
 
@@ -112,23 +118,47 @@ impl<T: Strategy> Union<T> {
 
     /// Fallible form of [`Union::new`]: returns a typed error instead of
     /// panicking when `options` is empty.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`UnionBuildError::Empty`] if `options` yields no elements.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "a uniform-weight Union from an options iterator, erroring instead of panicking when empty"
+    )]
     pub fn try_new_uniform(
         options: impl IntoIterator<Item = T>,
     ) -> Result<Self, UnionBuildError> {
-        let options: Vec<WA<T>> =
-            options.into_iter().map(|v| (1, Arc::new(v))).collect();
+        let options: Vec<WA<T>> = options
+            .into_iter()
+            .map(|strategy| (1, Arc::new(strategy)))
+            .collect();
         if options.is_empty() {
             return Err(UnionBuildError::Empty);
         }
         Ok(Self { options })
     }
 
+    /// Build a uniform union by collecting a fallible iterator of options,
+    /// assigning each collected strategy a weight of 1.
+    ///
+    /// ## Errors
+    ///
+    /// Returns the first `Err` yielded by `it`.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if `it` yields no options.
     #[cfg(feature = "regex-syntax")]
+    #[allow(
+        clippy::single_call_fn,
+        reason = "collect a fallible options iterator into a uniform-weight Union for the regex builder"
+    )]
     pub(crate) fn try_new<E>(
         it: impl Iterator<Item = Result<T, E>>,
     ) -> Result<Self, E> {
         let options: Vec<WA<T>> = it
-            .map(|r| r.map(|v| (1, Arc::new(v))))
+            .map(|result| result.map(|strategy| (1, Arc::new(strategy))))
             .collect::<Result<_, _>>()?;
 
         assert!(!options.is_empty());
@@ -149,7 +179,7 @@ impl<T: Strategy> Union<T> {
     /// Panics if the sum of the weights overflows a `u32`.
     ///
     /// [`Union::try_new_weighted`] is the fallible form.
-    pub fn new_weighted(options: Vec<W<T>>) -> Self {
+    pub fn new_weighted(options: Vec<Weighted<T>>) -> Self {
         match Self::try_new_weighted(options) {
             Ok(union) => union,
             Err(error) => panic!("{}", error),
@@ -159,12 +189,24 @@ impl<T: Strategy> Union<T> {
     /// Fallible form of [`Union::new_weighted`]: returns a typed error
     /// instead of panicking when `options` is empty, an option's weight is
     /// zero, or the weight sum overflows a `u32`.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`UnionBuildError::Empty`] if `options` is empty,
+    /// [`UnionBuildError::ZeroWeight`] if any option has a weight of zero, or
+    /// [`UnionBuildError::WeightSumOverflow`] if the weights sum past `u32`.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "validate a weighted option table and build the Union without panicking on bad weights"
+    )]
     pub fn try_new_weighted(
-        options: Vec<W<T>>,
+        options: Vec<Weighted<T>>,
     ) -> Result<Self, UnionBuildError> {
-        validate_weights(options.iter().map(|(w, _)| w))?;
-        let options =
-            options.into_iter().map(|(w, v)| (w, Arc::new(v))).collect();
+        validate_weights(options.iter().map(|&(weight, _)| weight))?;
+        let options = options
+            .into_iter()
+            .map(|(weight, strategy)| (weight, Arc::new(strategy)))
+            .collect();
         Ok(Self { options })
     }
 
@@ -175,6 +217,16 @@ impl<T: Strategy> Union<T> {
     }
 }
 
+/// Randomly select an option index, biased by the relative `weights`.
+///
+/// The weights are supplied twice (`weights1`, `weights2`) because the
+/// iterator is consumed once to compute their sum and once to locate the
+/// chosen index.
+///
+/// ## Errors
+///
+/// Returns a `Reason` abort if every weight is zero, since sampling an empty
+/// range would otherwise panic inside `rand`.
 fn pick_weighted<I: Iterator<Item = u32>>(
     runner: &mut TestRunner,
     weights1: I,
@@ -188,11 +240,11 @@ fn pick_weighted<I: Iterator<Item = u32>>(
     }
     let weighted_pick = sample_uniform(runner, 0, sum);
     Ok(weights2
-        .scan(0u64, |state, w| {
-            *state += u64::from(w);
+        .scan(0u64, |state, weight| {
+            *state += u64::from(weight);
             Some(*state)
         })
-        .filter(|&v| v <= weighted_pick)
+        .filter(|&cumulative_weight| cumulative_weight <= weighted_pick)
         .count())
 }
 
@@ -201,8 +253,8 @@ impl<T: Strategy> Strategy for Union<T> {
     type Value = T::Value;
 
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-        fn extract_weight<V>(&(w, _): &WA<V>) -> u32 {
-            w
+        fn extract_weight<V>(&(weight, _): &WA<V>) -> u32 {
+            weight
         }
 
         let pick = pick_weighted(
@@ -240,6 +292,9 @@ impl<T: Strategy> Strategy for Union<T> {
     }
 }
 
+/// Bind `$dst` to a shared or mutable (`[mut]`) reference to the `Vec` option
+/// at index `$ix` and run `$body`, so `UnionValueTree` can share its shrink
+/// logic with the tuple variants.
 macro_rules! access_vec {
     ([$($muta:tt)*] $dst:ident = $this:expr, $ix:expr, $body:block) => {{
         let $dst = &$($muta)* $this.options[$ix];
@@ -249,15 +304,24 @@ macro_rules! access_vec {
 
 /// `ValueTree` corresponding to `Union`.
 pub struct UnionValueTree<T: Strategy> {
+    /// One lazily generated value tree per option; only the picked one (and any
+    /// earlier ones reached while shrinking) are actually initialized.
     options: Vec<LazyValueTree<T>>,
     // This struct maintains the invariant that between function calls,
     // `pick` and `prev_pick` (if Some) always point to initialized
     // trees.
+    /// The index of the currently chosen option.
     pick: usize,
+    /// The lowest option index shrinking is still allowed to reach.
     min_pick: usize,
+    /// The option to complicate back to, set while walking to an earlier pick.
     prev_pick: Option<usize>,
 }
 
+/// Emit the shared `ValueTree` body — `current`/`simplify`/`complicate` that
+/// shrink the picked option then walk toward earlier ones — for both
+/// `UnionValueTree` and `TupleUnionValueTree`, reaching options through the
+/// given `$access` macro.
 macro_rules! lazy_union_value_tree_body {
     ($typ:ty, $access:ident) => {
         type Value = $typ;
@@ -362,7 +426,7 @@ impl<T: Strategy> fmt::Debug for UnionValueTree<T>
 where
     T::Tree: fmt::Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("UnionValueTree")
             .field("options", &self.options)
             .field("pick", &self.pick)
@@ -372,6 +436,9 @@ where
     }
 }
 
+/// Define a tuple-slot accessor macro `$name` that binds `$dst` to option
+/// slot `$ix` of a `TupleUnionValueTree` and runs `$body`; slot 0 is a plain
+/// `LazyValueTree`, the remaining `$n` slots are `Option`s.
 macro_rules! def_access_tuple {
     ($b:tt $name:ident, $($n:tt)*) => {
         macro_rules! $name {
@@ -440,6 +507,8 @@ impl<T> TupleUnion<T> {
     }
 }
 
+/// Implement `Strategy` for a `TupleUnion` of a given arity, picking one slot
+/// by weight and eagerly generating only that slot's value tree.
 macro_rules! tuple_union {
     ($($gen:ident $ix:tt)*) => {
         impl<A : Strategy, $($gen: Strategy<Value = A::Value>),*>
@@ -494,12 +563,20 @@ tuple_union!(B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9);
 /// `ValueTree` type produced by `TupleUnion`.
 #[derive(Clone, Copy, Debug)]
 pub struct TupleUnionValueTree<T> {
+    /// The tuple of per-option value trees: slot 0 a `LazyValueTree`, the rest
+    /// `Option`s that stay `None` until shrinking reaches them.
     options: T,
+    /// The index of the currently chosen option.
     pick: usize,
+    /// The lowest option index shrinking is still allowed to reach.
     min_pick: usize,
+    /// The option to complicate back to, set while walking to an earlier pick.
     prev_pick: Option<usize>,
 }
 
+/// Implement `ValueTree` for a `TupleUnionValueTree` of a given arity by
+/// expanding the shared `lazy_union_value_tree_body!` over the matching
+/// tuple-slot accessor.
 macro_rules! value_tree_tuple {
     ($access:ident, $($gen:ident)*) => {
         impl<A : Strategy, $($gen: Strategy<Value = A::Value>),*> ValueTree
@@ -521,6 +598,8 @@ value_tree_tuple!(access_tuple8, B C D E F G H);
 value_tree_tuple!(access_tuple9, B C D E F G H I);
 value_tree_tuple!(access_tupleA, B C D E F G H I J);
 
+/// The total to which the two weights returned by `float_to_weight` always
+/// sum, chosen so the pair never overflows a `u32`.
 const WEIGHT_BASE: u32 = 0x8000_0000;
 
 /// Convert a floating-point weight in the range (0.0,1.0) to a pair of weights
@@ -547,6 +626,15 @@ pub fn float_to_weight(f: f64) -> (u32, u32) {
 
 /// Fallible form of [`float_to_weight`]: returns a typed error instead of
 /// panicking when `f` is not a real number strictly between 0.0 and 1.0.
+///
+/// ## Errors
+///
+/// Returns [`UnionBuildError::InvalidProbability`] if `f` is not a real number
+/// strictly between 0.0 and 1.0, both exclusive.
+#[allow(
+    clippy::single_call_fn,
+    reason = "convert a (0,1) probability into the pos and neg union weight pair without panicking"
+)]
 pub fn try_float_to_weight(f: f64) -> Result<(u32, u32), UnionBuildError> {
     if !(f > 0.0 && f < 1.0) {
         return Err(UnionBuildError::InvalidProbability);
@@ -562,6 +650,8 @@ pub fn try_float_to_weight(f: f64) -> Result<(u32, u32), UnionBuildError> {
 
 #[cfg(test)]
 mod test {
+    use crate::std_facade::vec;
+
     use strict_test_support::{
         TestFailure, ensure, ensure_eq, ensure_ok, ensure_some,
     };
@@ -590,8 +680,8 @@ mod test {
                 input.new_tree(&mut runner).ok(),
                 "union strategy generates a value tree",
             )?;
-            let result = runner.run_one(case, |v| {
-                if v < 15 {
+            let result = runner.run_one(case, |sample| {
+                if sample < 15 {
                     Ok(())
                 } else {
                     Err(TestCaseError::fail("at least 15"))
@@ -685,8 +775,8 @@ mod test {
                 input.new_tree(&mut runner).ok(),
                 "tuple union generates a value tree",
             )?;
-            let result = runner.run_one(case, |v| {
-                if v < 15 {
+            let result = runner.run_one(case, |sample| {
+                if sample < 15 {
                     Ok(())
                 } else {
                     Err(TestCaseError::fail("at least 15"))
@@ -750,7 +840,7 @@ mod test {
     #[test]
     fn test_tuple_union_all_sizes() -> Result<(), TestFailure> {
         let mut runner = TestRunner::deterministic();
-        let r = Arc::new(1i32..10);
+        let strategy = Arc::new(1i32..10);
 
         macro_rules! test {
             ($($part:expr),*) => {{
@@ -776,15 +866,24 @@ mod test {
             }}
         }
 
-        test!(r); // 2
-        test!(r, r); // 3
-        test!(r, r, r); // 4
-        test!(r, r, r, r); // 5
-        test!(r, r, r, r, r); // 6
-        test!(r, r, r, r, r, r); // 7
-        test!(r, r, r, r, r, r, r); // 8
-        test!(r, r, r, r, r, r, r, r); // 9
-        test!(r, r, r, r, r, r, r, r, r); // 10
+        test!(strategy); // 2
+        test!(strategy, strategy); // 3
+        test!(strategy, strategy, strategy); // 4
+        test!(strategy, strategy, strategy, strategy); // 5
+        test!(strategy, strategy, strategy, strategy, strategy); // 6
+        test!(strategy, strategy, strategy, strategy, strategy, strategy); // 7
+        test!(
+            strategy, strategy, strategy, strategy, strategy, strategy,
+            strategy
+        ); // 8
+        test!(
+            strategy, strategy, strategy, strategy, strategy, strategy,
+            strategy, strategy
+        ); // 9
+        test!(
+            strategy, strategy, strategy, strategy, strategy, strategy,
+            strategy, strategy, strategy
+        ); // 10
         Ok(())
     }
 
@@ -882,7 +981,8 @@ mod test {
     /// Test that unions work even if local filtering causes errors.
     #[test]
     fn test_filter_union_sanity() {
-        let filter_strategy = (0u32..256).prop_filter("!%5", |&v| 0 != v % 5);
+        let filter_strategy =
+            (0u32..256).prop_filter("!%5", |&sample| 0 != sample % 5);
         check_strategy_sanity(
             Union::new(vec![filter_strategy; 8]),
             Some(filter_sanity_options()),
@@ -892,7 +992,8 @@ mod test {
     /// Test that tuple unions work even if local filtering causes errors.
     #[test]
     fn test_filter_tuple_union_sanity() {
-        let filter_strategy = (0u32..256).prop_filter("!%5", |&v| 0 != v % 5);
+        let filter_strategy =
+            (0u32..256).prop_filter("!%5", |&sample| 0 != sample % 5);
         check_strategy_sanity(
             TupleUnion::new((
                 (1, Arc::new(filter_strategy.clone())),

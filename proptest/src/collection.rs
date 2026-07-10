@@ -98,10 +98,12 @@ impl SizeRange {
         self.0.end
     }
 
+    /// Iterates over every size in the range, from `start` up to `end_excl`.
     pub(crate) fn iter(&self) -> impl Iterator<Item = usize> {
         self.0.clone()
     }
 
+    /// Returns whether the range admits no sizes at all (`start == end`).
     pub(crate) fn is_empty(&self) -> bool {
         self.start() == self.end_excl()
     }
@@ -119,6 +121,10 @@ impl SizeRange {
         }
     }
 
+    /// Panics with the [`EmptySizeRange`] message when the range is empty.
+    ///
+    /// The panicking counterpart of [`SizeRange::ensure_nonempty`], used by the
+    /// infallible collection constructors.
     pub(crate) fn assert_nonempty(&self) {
         if let Err(error) = self.ensure_nonempty() {
             panic!("{}", error);
@@ -129,14 +135,16 @@ impl SizeRange {
 /// Error returned by the fallible collection-strategy constructors (and other
 /// size-driven strategy constructors) when the requested size range is empty,
 /// for example `0..0`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EmptySizeRange {
+    /// The (inclusive) lower bound of the offending range.
     start: usize,
+    /// The (exclusive) upper bound of the offending range.
     end_excl: usize,
 }
 
 impl fmt::Display for EmptySizeRange {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "Invalid use of empty size range. (hint: did you \
@@ -173,15 +181,15 @@ impl From<RangeTo<usize>> for SizeRange {
 
 /// Given `low .. high`, then a size range `[low, high)` is the result.
 impl From<Range<usize>> for SizeRange {
-    fn from(r: Range<usize>) -> Self {
-        SizeRange(r)
+    fn from(range: Range<usize>) -> Self {
+        SizeRange(range)
     }
 }
 
 /// Given `low ..= high`, then a size range `[low, high]` is the result.
 impl From<RangeInclusive<usize>> for SizeRange {
-    fn from(r: RangeInclusive<usize>) -> Self {
-        size_range(*r.start()..r.end().saturating_add(1))
+    fn from(range: RangeInclusive<usize>) -> Self {
+        size_range(*range.start()..range.end().saturating_add(1))
     }
 }
 
@@ -220,7 +228,9 @@ impl Add<usize> for SizeRange {
 #[must_use = "strategies do nothing unless used"]
 #[derive(Clone, Debug)]
 pub struct VecStrategy<T: Strategy> {
+    /// Strategy each generated element is drawn from.
     element: T,
+    /// Range constraining the generated `Vec`'s length.
     size: SizeRange,
 }
 
@@ -240,6 +250,11 @@ pub fn vec<T: Strategy>(
 
 /// Fallible form of [`vec()`]: returns a typed [`EmptySizeRange`] error instead
 /// of panicking when `size` is an empty range.
+///
+/// # Errors
+///
+/// Returns [`EmptySizeRange`] when `size` resolves to an empty range such as
+/// `0..0`.
 pub fn try_vec<T: Strategy>(
     element: T,
     size: impl Into<SizeRange>,
@@ -281,6 +296,11 @@ pub fn vec_deque<T: Strategy>(
 
 /// Fallible form of [`vec_deque`]: returns a typed [`EmptySizeRange`] error
 /// instead of panicking when `size` is an empty range.
+///
+/// # Errors
+///
+/// Returns [`EmptySizeRange`] when `size` resolves to an empty range such as
+/// `0..0`.
 pub fn try_vec_deque<T: Strategy>(
     element: T,
     size: impl Into<SizeRange>,
@@ -323,6 +343,11 @@ pub fn linked_list<T: Strategy>(
 
 /// Fallible form of [`linked_list`]: returns a typed [`EmptySizeRange`] error
 /// instead of panicking when `size` is an empty range.
+///
+/// # Errors
+///
+/// Returns [`EmptySizeRange`] when `size` resolves to an empty range such as
+/// `0..0`.
 pub fn try_linked_list<T: Strategy>(
     element: T,
     size: impl Into<SizeRange>,
@@ -368,6 +393,11 @@ where
 
 /// Fallible form of [`binary_heap`]: returns a typed [`EmptySizeRange`] error
 /// instead of panicking when `size` is an empty range.
+///
+/// # Errors
+///
+/// Returns [`EmptySizeRange`] when `size` resolves to an empty range such as
+/// `0..0`.
 pub fn try_binary_heap<T: Strategy>(
     element: T,
     size: impl Into<SizeRange>,
@@ -389,6 +419,10 @@ mapfn! {
     }
 }
 
+/// Minimum-size filter predicate shared by the set and map strategies.
+///
+/// Carries the required minimum element count so a `statics::Filter` can reject
+/// collections that fell below it when duplicate keys collapsed the length.
 #[derive(Debug, Clone, Copy)]
 struct MinSize(usize);
 
@@ -441,6 +475,11 @@ where
 
 /// Fallible form of [`hash_set`]: returns a typed [`EmptySizeRange`] error
 /// instead of panicking when `size` is an empty range.
+///
+/// # Errors
+///
+/// Returns [`EmptySizeRange`] when `size` resolves to an empty range such as
+/// `0..0`.
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub fn try_hash_set<T: Strategy>(
@@ -509,6 +548,11 @@ where
 
 /// Fallible form of [`btree_set`]: returns a typed [`EmptySizeRange`] error
 /// instead of panicking when `size` is an empty range.
+///
+/// # Errors
+///
+/// Returns [`EmptySizeRange`] when `size` resolves to an empty range such as
+/// `0..0`.
 pub fn try_btree_set<T: Strategy>(
     element: T,
     size: impl Into<SizeRange>,
@@ -591,6 +635,11 @@ where
 
 /// Fallible form of [`hash_map()`]: returns a typed [`EmptySizeRange`] error
 /// instead of panicking when `size` is an empty range.
+///
+/// # Errors
+///
+/// Returns [`EmptySizeRange`] when `size` resolves to an empty range such as
+/// `0..0`.
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub fn try_hash_map<K: Strategy, V: Strategy>(
@@ -673,6 +722,11 @@ where
 
 /// Fallible form of [`btree_map`]: returns a typed [`EmptySizeRange`] error
 /// instead of panicking when `size` is an empty range.
+///
+/// # Errors
+///
+/// Returns [`EmptySizeRange`] when `size` resolves to an empty range such as
+/// `0..0`.
 pub fn try_btree_map<K: Strategy, V: Strategy>(
     key: K,
     value_strategy: V,
@@ -692,19 +746,27 @@ where
     )))
 }
 
+/// The shrink operation a `VecValueTree` will attempt next.
 #[derive(Clone, Copy, Debug)]
 enum Shrink {
+    /// Drop the element at the given index from the output.
     DeleteElement(usize),
+    /// Shrink the element at the given index in place.
     ShrinkElement(usize),
 }
 
 /// `ValueTree` corresponding to `VecStrategy`.
 #[derive(Clone, Debug)]
 pub struct VecValueTree<T: ValueTree> {
+    /// Value trees for every generated element, including excluded ones.
     elements: Vec<T>,
+    /// Which element indices currently contribute to the output.
     included_elements: VarBitSet,
+    /// Fewest elements shrinking is allowed to leave included.
     min_size: usize,
+    /// The shrink operation to try on the next `simplify()`.
     shrink: Shrink,
+    /// The last applied shrink, undone in reverse by `complicate()`.
     prev_shrink: Option<Shrink>,
 }
 
@@ -738,7 +800,7 @@ impl<T: Strategy> Strategy for Vec<T> {
         let len = self.len();
         let elements = self
             .iter()
-            .map(|t| t.new_tree(runner))
+            .map(|strategy| strategy.new_tree(runner))
             .collect::<Result<Vec<_>, Reason>>()?;
 
         Ok(VecValueTree {
@@ -853,6 +915,7 @@ impl<T: ValueTree> ValueTree for VecValueTree<T> {
 #[cfg(test)]
 mod test {
     use std::string::ToString;
+    use std::vec;
 
     use strict_test_support::{
         TestFailure, ensure, ensure_contains, ensure_eq, ensure_ok, ensure_some,
@@ -982,8 +1045,8 @@ mod test {
                 "the generated vec has at least two distinct values",
             )?;
 
-            let result = runner.run_one(case, |v| {
-                if v.iter().copied().sum::<usize>() < 9 {
+            let result = runner.run_one(case, |generated| {
+                if generated.iter().copied().sum::<usize>() < 9 {
                     Ok(())
                 } else {
                     Err(TestCaseError::fail("greater than 8"))
@@ -1065,12 +1128,12 @@ mod test {
         let mut runner = TestRunner::deterministic();
 
         for _ in 0..256 {
-            let v = ensure_some(
+            let map = ensure_some(
                 input.new_tree(&mut runner).ok(),
                 "hash_map strategy generates a value tree",
             )?
             .current();
-            ensure_eq(&2, &v.len(), "the map has the requested size")?;
+            ensure_eq(&2, &map.len(), "the map has the requested size")?;
         }
         Ok(())
     }
@@ -1083,12 +1146,12 @@ mod test {
         let mut runner = TestRunner::deterministic();
 
         for _ in 0..256 {
-            let v = ensure_some(
+            let set = ensure_some(
                 input.new_tree(&mut runner).ok(),
                 "hash_set strategy generates a value tree",
             )?
             .current();
-            ensure_eq(&2, &v.len(), "the set has the requested size")?;
+            ensure_eq(&2, &set.len(), "the set has the requested size")?;
         }
         Ok(())
     }

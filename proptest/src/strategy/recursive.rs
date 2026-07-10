@@ -16,15 +16,24 @@ use crate::test_runner::*;
 /// Return type from `Strategy::prop_recursive()`.
 #[must_use = "strategies do nothing unless used"]
 pub struct Recursive<T, F> {
+    /// The leaf strategy, boxed, that produces the non-recursive base cases.
     base: BoxedStrategy<T>,
+    /// The closure that wraps a level's strategy into the next, deeper level,
+    /// held behind an `Arc` so the wrapper clones cheaply.
     recurse: Arc<F>,
+    /// The hard cap on how many branch levels the generated structure may
+    /// nest.
     depth: u32,
+    /// The target total number of elements the generated structure should
+    /// have, used to tune branch probability.
     desired_size: u32,
+    /// The expected maximum size of any single recursive collection, used
+    /// alongside `desired_size` to derive per-level branch probability.
     expected_branch_size: u32,
 }
 
 impl<T: fmt::Debug, F> fmt::Debug for Recursive<T, F> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Recursive")
             .field("base", &self.base)
             .field("recurse", &"<function>")
@@ -53,6 +62,13 @@ impl<
     F: Fn(BoxedStrategy<T>) -> R,
 > Recursive<T, F>
 {
+    /// Build a recursive strategy from the leaf strategy `base` and the
+    /// `recurse` closure, capturing the depth and size targets that shape
+    /// generation.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "capture the leaf strategy, recursion closure, and depth and size caps for prop_recursive"
+    )]
     pub(super) fn new(
         base: impl Strategy<Value = T> + 'static,
         depth: u32,
@@ -160,9 +176,9 @@ mod test {
                     let mut depth = 0;
                     let mut count = 0;
                     for child in children {
-                        let (d, c) = child.stats();
-                        depth = max(d, depth);
-                        count += c;
+                        let (child_depth, child_count) = child.stats();
+                        depth = max(child_depth, depth);
+                        count += child_count;
                     }
 
                     (depth + 1, count + 1)

@@ -7,6 +7,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Plays with value generation and shrinking by hand: builds a `ValueTree`,
+//! then walks it toward simpler values.
+//!
+//! Backs the Proptest Book's tutorial `shrinking-basics` chapter. It builds a
+//! tree from a regex string strategy via `Strategy::new_tree`, prints
+//! `current`, then loops on `simplify` printing each step. This is not how
+//! proptest is normally used; it only illustrates the shrinking layer.
+
 // Shows how to pick values from a strategy and simplify them.
 //
 // This is *not* how proptest is normally used; it is simply used to play

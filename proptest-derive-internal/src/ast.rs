@@ -13,7 +13,8 @@
 use std::ops::{Add, AddAssign};
 
 use proc_macro2::{Span, TokenStream};
-use quote::{ToTokens, TokenStreamExt};
+use quote::{ToTokens, TokenStreamExt, quote, quote_spanned};
+use syn::parse_quote;
 use syn::spanned::Spanned;
 
 use crate::error::{Ctx, DeriveResult};
@@ -43,7 +44,7 @@ const TOP_PARAM_NAME: &str = "_top";
 
 /// One summand of a union strategy: a constructor together with its relative
 /// selection weight.
-pub type WeightedCtor = (u32, Ctor);
+pub(crate) type WeightedCtor = (u32, Ctor);
 
 /// The name of the variable name used for user facing parameter types
 /// specified in a `#[proptest(params = "<type>")]` attribute.
@@ -57,7 +58,7 @@ const API_PARAM_NAME: &str = "params";
 
 /// Top level AST and everything required to implement `Arbitrary` for any
 /// given type. Linearizing this AST gives you the impl wrt. Rust code.
-pub struct Impl {
+pub(crate) struct Impl {
     /// Name of the type.
     typ: syn::Ident,
     /// Tracker for uses of Arbitrary trait for a generic type.
@@ -70,11 +71,15 @@ pub struct Impl {
 /// That is: the associated items `Parameters` (`Params`),
 /// `Strategy` (`Strategy`) as well as the construction of the
 /// strategy itself (`Ctor`).
-pub type ImplParts = (Params, Strategy, Ctor);
+pub(crate) type ImplParts = (Params, Strategy, Ctor);
 
 impl Impl {
     /// Constructs a new `Impl` from the parts as described on the type.
-    pub fn new(typ: syn::Ident, tracker: UseTracker, parts: ImplParts) -> Self {
+    pub(crate) fn new(
+        typ: syn::Ident,
+        tracker: UseTracker,
+        parts: ImplParts,
+    ) -> Self {
         Self {
             typ,
             tracker,
@@ -84,7 +89,7 @@ impl Impl {
 
     /// Linearises the impl into a sequence of tokens.
     /// This produces the actual Rust code for the impl.
-    pub fn into_tokens(self, ctx: Ctx) -> DeriveResult<TokenStream> {
+    pub(crate) fn into_tokens(self, ctx: Ctx<'_>) -> DeriveResult<TokenStream> {
         let Impl {
             typ,
             mut tracker,
@@ -92,13 +97,21 @@ impl Impl {
         } = self;
 
         /// A `Debug` bound on a type variable.
+        #[allow(
+            clippy::single_call_fn,
+            reason = "the std::fmt::Debug bound stamped on generic parameters the derive leaves unused"
+        )]
         fn debug_bound() -> syn::TypeParamBound {
             parse_quote!(::std::fmt::Debug)
         }
 
         /// An `Arbitrary` bound on a type variable.
+        #[allow(
+            clippy::single_call_fn,
+            reason = "the Arbitrary bound required of generic parameters the derive actually uses"
+        )]
         fn arbitrary_bound() -> syn::TypeParamBound {
-            parse_quote!(_proptest::arbitrary::Arbitrary)
+            parse_quote!(::proptest::arbitrary::Arbitrary)
         }
 
         // Add bounds and get generics for the impl.
@@ -109,21 +122,11 @@ impl Impl {
 
         let _top = call_site_ident(TOP_PARAM_NAME);
 
-        // Linearise everything. We're done after this.
-        //
-        // NOTE: The clippy::arc_with_non_send_sync lint is disabled here because the strategies
-        // generated are often not Send or Sync, such as BoxedStrategy.
-        //
-        // The double-curly-braces are not strictly required, but allow the expression to be
-        // annotated with an attribute.
-        let q = quote! {
-            #[allow(non_local_definitions)]
-            #[allow(non_upper_case_globals)]
-            #[allow(clippy::arc_with_non_send_sync)]
-            const _: () = {
-            use proptest as _proptest;
-
-            impl #impl_generics _proptest::arbitrary::Arbitrary
+        // Generated helper paths are fully qualified so the impl can be
+        // emitted at item scope without an alias-carrier item or generated
+        // lint allowances.
+        let expansion = quote! {
+            impl #impl_generics ::proptest::arbitrary::Arbitrary
             for #typ #ty_generics #where_clause {
                 type Parameters = #params;
 
@@ -133,11 +136,9 @@ impl Impl {
                     #ctor
                 }
             }
-
-            };
         };
 
-        Ok(q)
+        Ok(expansion)
     }
 }
 
@@ -146,18 +147,26 @@ impl Impl {
 //==============================================================================
 
 /// A pair of `Strategy` and `Ctor`. These always come in pairs.
-pub type StratPair = (Strategy, Ctor);
+pub(crate) type StratPair = (Strategy, Ctor);
 
 /// The type and constructor for `any::<Type>()`.
-pub fn pair_any(ty: syn::Type, span: Span) -> StratPair {
-    let q = Ctor::Arbitrary(ty.clone(), None, span);
-    (Strategy::Arbitrary(ty, span), q)
+#[allow(
+    clippy::single_call_fn,
+    reason = "pair a field's any::<Type>() strategy with the expression that reconstructs its value"
+)]
+pub(crate) fn pair_any(ty: syn::Type) -> StratPair {
+    let ctor = Ctor::Arbitrary(ty.clone(), None);
+    (Strategy::Arbitrary(ty), ctor)
 }
 
 /// The type and constructor for `any_with::<Type>(parameters)`.
-pub fn pair_any_with(ty: syn::Type, var: usize, span: Span) -> StratPair {
-    let q = Ctor::Arbitrary(ty.clone(), Some(var), span);
-    (Strategy::Arbitrary(ty, span), q)
+#[allow(
+    clippy::single_call_fn,
+    reason = "join a parameterized any_with::<Type>(params) strategy to its constructor expression"
+)]
+pub(crate) fn pair_any_with(ty: syn::Type, var: usize) -> StratPair {
+    let ctor = Ctor::Arbitrary(ty.clone(), Some(var));
+    (Strategy::Arbitrary(ty), ctor)
 }
 
 /// The type and constructor for a specific strategy value constructed by the
@@ -167,56 +176,64 @@ pub fn pair_any_with(ty: syn::Type, var: usize, span: Span) -> StratPair {
 /// This is a temporary restriction. Once `impl Trait` is stabilized,
 /// the boxing and dynamic dispatch can be replaced with a statically
 /// dispatched anonymous type instead.
-pub fn pair_existential(ty: syn::Type, strat: syn::Expr) -> StratPair {
+pub(crate) fn pair_existential(ty: syn::Type, strat: syn::Expr) -> StratPair {
     (Strategy::Existential(ty), Ctor::Existential(strat))
 }
 
 /// The type and constructor for a strategy that always returns the value
 /// provided in the expression `value_expr`.
 /// This is statically dispatched since no erasure is needed or used.
-pub fn pair_value(ty: syn::Type, value_expr: syn::Expr) -> StratPair {
+pub(crate) fn pair_value(ty: syn::Type, value_expr: syn::Expr) -> StratPair {
     (Strategy::Value(ty), Ctor::Value(value_expr))
 }
 
 /// Same as `pair_existential` for the `Self` type.
-pub fn pair_existential_self(strat: syn::Expr) -> StratPair {
+pub(crate) fn pair_existential_self(strat: syn::Expr) -> StratPair {
     pair_existential(self_ty(), strat)
 }
 
 /// Same as `pair_value` for the `Self` type.
-pub fn pair_value_self(value_expr: syn::Expr) -> StratPair {
+pub(crate) fn pair_value_self(value_expr: syn::Expr) -> StratPair {
     pair_value(self_ty(), value_expr)
 }
 
 /// Erased strategy for a fixed value.
-pub fn pair_value_exist(ty: syn::Type, strat: syn::Expr) -> StratPair {
+pub(crate) fn pair_value_exist(ty: syn::Type, strat: syn::Expr) -> StratPair {
     (Strategy::Existential(ty), Ctor::ValueExistential(strat))
 }
 
 /// Erased strategy for a fixed value.
-pub fn pair_value_exist_self(strat: syn::Expr) -> StratPair {
+#[allow(
+    clippy::single_call_fn,
+    reason = "erase a constant Self strategy into a boxed existential StratPair"
+)]
+pub(crate) fn pair_value_exist_self(strat: syn::Expr) -> StratPair {
     pair_value_exist(self_ty(), strat)
 }
 
 /// Same as `pair_value` but for a unit variant or unit struct.
-pub fn pair_unit_self(path: &syn::Path) -> StratPair {
+pub(crate) fn pair_unit_self(path: &syn::Path) -> StratPair {
     pair_value_self(parse_quote!( #path {} ))
 }
 
 /// The type and constructor for `#[proptest(regex(..))]`.
-pub fn pair_regex(ty: syn::Type, regex: syn::Expr) -> StratPair {
+pub(crate) fn pair_regex(ty: syn::Type, regex: syn::Expr) -> StratPair {
     (Strategy::Regex(ty.clone()), Ctor::Regex(ty, regex))
 }
 
 /// Same as `pair_regex` for the `Self` type.
-pub fn pair_regex_self(regex: syn::Expr) -> StratPair {
+pub(crate) fn pair_regex_self(regex: syn::Expr) -> StratPair {
     pair_regex(self_ty(), regex)
 }
 
-/// The type and constructor for .prop_map:ing a set of strategies
+/// The type and constructor for applying `prop_map` to a set of strategies
 /// into the type we are implementing for. The closure for the
 /// `.prop_map(<closure>)` must also be given.
-pub fn pair_map(
+#[allow(
+    clippy::single_call_fn,
+    reason = "fold per-field strategies into a prop_map StratPair with its rebuild closure"
+)]
+pub(crate) fn pair_map(
     (strats, ctors): (Vec<Strategy>, Vec<Ctor>),
     closure: MapClosure,
 ) -> StratPair {
@@ -229,14 +246,18 @@ pub fn pair_map(
 /// The type and constructor for a union of strategies which produces a new
 /// strategy that used the given strategies with probabilities based on the
 /// assigned relative weights for each strategy.
-pub fn pair_oneof(
+#[allow(
+    clippy::single_call_fn,
+    reason = "combine weighted variant strategies into a oneof union StratPair"
+)]
+pub(crate) fn pair_oneof(
     (strats, ctors): (Vec<Strategy>, Vec<WeightedCtor>),
 ) -> StratPair {
     (Strategy::Union(strats.into()), Ctor::Union(ctors.into()))
 }
 
 /// Potentially apply a filter to a strategy type and its constructor.
-pub fn pair_filter(
+pub(crate) fn pair_filter(
     filter: Vec<syn::Expr>,
     ty: syn::Type,
     pair: StratPair,
@@ -254,17 +275,18 @@ pub fn pair_filter(
 //==============================================================================
 
 /// Represents the associated item of `Parameters` of an `Arbitrary` impl.
+#[derive(Debug)]
 pub struct Params(Vec<syn::Type>);
 
 impl Params {
     /// Construct an `empty` list of parameters.
     /// This is equivalent to the unit type `()`.
-    pub fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Params(Vec::new())
     }
 
     /// Computes and returns the number of parameter types.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.0.len()
     }
 }
@@ -299,8 +321,12 @@ impl ToTokens for Params {
 
 /// Returns for a given type `ty` the associated item `Parameters` of the
 /// type's `Arbitrary` implementation.
-pub fn arbitrary_param(ty: &syn::Type) -> syn::Type {
-    parse_quote!(<#ty as _proptest::arbitrary::Arbitrary>::Parameters)
+#[allow(
+    clippy::single_call_fn,
+    reason = "project a field type onto its Arbitrary Parameters associated type"
+)]
+pub(crate) fn arbitrary_param(ty: &syn::Type) -> syn::Type {
+    parse_quote!(<#ty as ::proptest::arbitrary::Arbitrary>::Parameters)
 }
 
 //==============================================================================
@@ -308,11 +334,11 @@ pub fn arbitrary_param(ty: &syn::Type) -> syn::Type {
 //==============================================================================
 
 /// The type of a given `Strategy`.
-pub enum Strategy {
+pub(crate) enum Strategy {
     /// Assuming the metavariable `$ty` for a given type, this models the
     /// strategy type `<$ty as Arbitrary>::Strategy`.
-    Arbitrary(syn::Type, Span),
-    /// This models <$ty as StrategyFromRegex>::Strategy.
+    Arbitrary(syn::Type),
+    /// This models `<$ty as StrategyFromRegex>::Strategy`.
     Regex(syn::Type),
     /// Assuming the metavariable `$ty` for a given type, this models the
     /// strategy type `BoxedStrategy<$ty>`, i.e: an existentially typed strategy.
@@ -336,6 +362,8 @@ pub enum Strategy {
     Filter(Box<Strategy>, syn::Type),
 }
 
+/// Append the tokens of a `quote!` invocation to an existing `TokenStream`;
+/// shorthand for `$tokens.append_all(quote!(...))`.
 macro_rules! quote_append {
     ($tokens: expr, $($quasi: tt)*) => {
         $tokens.append_all(quote!($($quasi)*))
@@ -343,15 +371,21 @@ macro_rules! quote_append {
 }
 
 impl Strategy {
+    /// Collect the concrete element types this strategy produces, recursing
+    /// into `Map` / `Union` combinators to flatten their component types.
     fn types(&self) -> Vec<syn::Type> {
         use self::Strategy::*;
         match self {
-            Arbitrary(ty, _) => vec![ty.clone()],
+            Arbitrary(ty) => vec![ty.clone()],
             Regex(ty) => vec![ty.clone()],
             Existential(ty) => vec![ty.clone()],
             Value(ty) => vec![ty.clone()],
-            Map(strats) => strats.iter().flat_map(|s| s.types()).collect(),
-            Union(strats) => strats.iter().flat_map(|s| s.types()).collect(),
+            Map(strats) => {
+                strats.iter().flat_map(|strat| strat.types()).collect()
+            }
+            Union(strats) => {
+                strats.iter().flat_map(|strat| strat.types()).collect()
+            }
             Filter(_, ty) => vec![ty.clone()],
         }
     }
@@ -363,14 +397,14 @@ impl ToTokens for Strategy {
         // union which is described separately.
         use self::Strategy::*;
         match self {
-            Arbitrary(ty, span) => tokens.append_all(quote_spanned!(*span=>
-                <#ty as _proptest::arbitrary::Arbitrary>::Strategy
-            )),
+            Arbitrary(ty) => quote_append!(tokens,
+                <#ty as ::proptest::arbitrary::Arbitrary>::Strategy
+            ),
             Regex(ty) => quote_append!(tokens,
-                <#ty as _proptest::string::StrategyFromRegex>::Strategy
+                <#ty as ::proptest::string::StrategyFromRegex>::Strategy
             ),
             Existential(ty) => quote_append!(tokens,
-                _proptest::strategy::BoxedStrategy<#ty>
+                ::proptest::strategy::BoxedStrategy<#ty>
             ),
             Value(ty) => quote_append!(tokens, fn() -> #ty ),
             Map(strats) => {
@@ -378,7 +412,7 @@ impl ToTokens for Strategy {
                 let field_tys = NestedTuple(&types);
                 let strats = NestedTuple(strats);
                 quote_append!(tokens,
-                    _proptest::strategy::Map< ( #strats ),
+                    ::proptest::strategy::Map< #strats,
                         fn( #field_tys ) -> Self
                     >
                 )
@@ -388,7 +422,7 @@ impl ToTokens for Strategy {
             #[cfg(feature = "boxed_union")]
             Union(strats) => union_strat_to_tokens_boxed(tokens, strats),
             Filter(strat, ty) => quote_append!(tokens,
-                _proptest::strategy::Filter<#strat, fn(&#ty) -> bool>
+                ::proptest::strategy::Filter<#strat, fn(&#ty) -> bool>
             ),
         }
     }
@@ -399,7 +433,7 @@ impl ToTokens for Strategy {
 //==============================================================================
 
 /// The right hand side (RHS) of a let binding of parameters.
-pub enum FromReg {
+pub(crate) enum FromReg {
     /// Denotes a move from the top parameter given in the arguments of
     /// `arbitrary_with`.
     Top,
@@ -409,7 +443,7 @@ pub enum FromReg {
 }
 
 /// The left hand side (LHS) of a let binding of parameters.
-pub enum ToReg {
+pub(crate) enum ToReg {
     /// Denotes a move and declaration to a sequence of variables from
     /// `params_0` to `params_x`.
     Range(usize),
@@ -422,11 +456,11 @@ pub enum ToReg {
 }
 
 /// Models an expression that generates a proptest `Strategy`.
-pub enum Ctor {
-    /// A strategy generated by using the `Arbitrary` impl for the given `Ty´.
+pub(crate) enum Ctor {
+    /// A strategy generated by using the `Arbitrary` impl for the given `Ty`.
     /// If `Some(idx)` is specified, then a parameter at `params_<idx>` is used
     /// and provided to `any_with::<Ty>(params_<idx>)`.
-    Arbitrary(syn::Type, Option<usize>, Span),
+    Arbitrary(syn::Type, Option<usize>),
     /// A strategy that is generated by a mapping a regex in the form of a
     /// string slice to the actual regex.
     Regex(syn::Type, syn::Expr),
@@ -451,15 +485,15 @@ pub enum Ctor {
 /// Wraps the given strategy producing expression with a move into
 /// `params_<to>` from `FromReg`. This is used when the given `c` expects
 /// `params_<to>` to be there.
-pub fn extract_all(c: Ctor, to: usize, from: FromReg) -> Ctor {
-    extract(c, ToReg::Range(to), from)
+pub(crate) fn extract_all(ctor: Ctor, to: usize, from: FromReg) -> Ctor {
+    extract(ctor, ToReg::Range(to), from)
 }
 
 /// Wraps the given strategy producing expression with a move into `params`
 /// (literally named like that) from `FromReg`. This is used when the given
 /// `c` expects `params` to be there.
-pub fn extract_api(c: Ctor, from: FromReg) -> Ctor {
-    extract(c, ToReg::Api, from)
+pub(crate) fn extract_api(ctor: Ctor, from: FromReg) -> Ctor {
+    extract(ctor, ToReg::Api, from)
 }
 
 impl ToTokens for FromReg {
@@ -491,33 +525,32 @@ impl ToTokens for Ctor {
         use self::Ctor::*;
         match self {
             Filter(ctor, filter) => quote_append!(tokens,
-                _proptest::strategy::Strategy::prop_filter(
+                ::proptest::strategy::Strategy::prop_filter(
                     #ctor, stringify!(#filter), #filter)
             ),
             Extract(ctor, to, from) => quote_append!(tokens, {
                 let #to = #from; #ctor
             }),
-            Arbitrary(ty, fv, span) => {
-                tokens.append_all(if let Some(fv) = fv {
-                    let args = param(*fv);
-                    quote_spanned!(*span=>
-                        _proptest::arbitrary::any_with::<#ty>(#args)
-                    )
-                } else {
-                    quote_spanned!(*span=>
-                        _proptest::arbitrary::any::<#ty>()
-                    )
-                })
-            }
+            Arbitrary(ty, fv) => tokens.append_all(if let Some(fv) = fv {
+                let args = param(*fv);
+                quote!(
+                    ::proptest::arbitrary::any_with::<#ty>(#args)
+                )
+            } else {
+                quote!(
+                    ::proptest::arbitrary::any::<#ty>()
+                )
+            }),
             Regex(ty, regex) => quote_append!(tokens,
-                <#ty as _proptest::string::StrategyFromRegex>::from_regex(#regex)
+                <#ty as ::proptest::string::StrategyFromRegex>::from_regex(#regex)
             ),
             Existential(expr) => quote_append!(tokens,
-                _proptest::strategy::Strategy::boxed( #expr ) ),
-            Value(expr) => quote_append!(tokens, (|| #expr) as fn() -> _),
+                ::proptest::strategy::Strategy::boxed( #expr ) ),
+            Value(expr) => quote_append!(tokens,
+                { let value_fn: fn() -> _ = || #expr; value_fn }),
             ValueExistential(expr) => quote_append!(tokens,
-                _proptest::strategy::Strategy::boxed(
-                    _proptest::strategy::LazyJust::new(move || #expr)
+                ::proptest::strategy::Strategy::boxed(
+                    ::proptest::strategy::LazyJust::new(move || #expr)
                 )
             ),
             Map(ctors, closure) => map_ctor_to_tokens(tokens, ctors, closure),
@@ -529,6 +562,10 @@ impl ToTokens for Ctor {
     }
 }
 
+/// Renders a slice of elements as a tuple, nesting in chunks of
+/// `NESTED_TUPLE_CHUNK_SIZE` so the emitted tuple stays within proptest's
+/// fixed tuple arities. An empty slice renders `()` and a singleton renders
+/// the element itself.
 struct NestedTuple<'a, T>(&'a [T]);
 
 /// The chunked tail of a `NestedTuple`: each rendering step emits one chunk
@@ -537,7 +574,7 @@ struct NestedTuple<'a, T>(&'a [T]);
 /// tuple arities.
 struct NestedTupleTail<'a, T>(::std::slice::Chunks<'a, T>);
 
-impl<'a, T: ToTokens> ToTokens for NestedTuple<'a, T> {
+impl<T: ToTokens> ToTokens for NestedTuple<'_, T> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let NestedTuple(elems) = self;
         if elems.is_empty() {
@@ -551,15 +588,15 @@ impl<'a, T: ToTokens> ToTokens for NestedTuple<'a, T> {
     }
 }
 
-impl<'a, T: ToTokens> ToTokens for NestedTupleTail<'a, T> {
+impl<T: ToTokens> ToTokens for NestedTupleTail<'_, T> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let mut chunks = self.0.clone();
         let Some(head) = chunks.next() else {
             return;
         };
-        if let [c] = head {
+        if let [elem] = head {
             // Only one element left - no need to nest.
-            quote_append!(tokens, #c);
+            quote_append!(tokens, #elem);
         } else {
             let tail = NestedTupleTail(chunks);
             quote_append!(tokens, (#(#head,)* #tail));
@@ -567,6 +604,12 @@ impl<'a, T: ToTokens> ToTokens for NestedTupleTail<'a, T> {
     }
 }
 
+/// Tokenize a `Map` constructor: a `prop_map` of the nested tuple of
+/// component constructors through the given closure into `Self`.
+#[allow(
+    clippy::single_call_fn,
+    reason = "tokenize a Map ctor as prop_map over the tuple of field constructors"
+)]
 fn map_ctor_to_tokens(
     tokens: &mut TokenStream,
     ctors: &[Ctor],
@@ -575,7 +618,7 @@ fn map_ctor_to_tokens(
     let ctors = NestedTuple(ctors);
 
     quote_append!(tokens,
-        _proptest::strategy::Strategy::prop_map(
+        ::proptest::strategy::Strategy::prop_map(
             #ctors,
             #closure
         )
@@ -643,7 +686,7 @@ fn union_ctor_to_tokens(tokens: &mut TokenStream, ctors: &[WeightedCtor]) {
     let tail = WeightedUnionTail(weight_sum(ctors) - weight_sum(chunk), chunks);
 
     quote_append!(tokens,
-        _proptest::strategy::TupleUnion::new(( #(#head,)* #tail ))
+        ::proptest::strategy::TupleUnion::new(( #(#head,)* #tail ))
     );
 }
 
@@ -671,7 +714,7 @@ fn union_strat_to_tokens(tokens: &mut TokenStream, strats: &[Strategy]) {
     let tail = UnionTypeTail(chunks);
 
     quote_append!(tokens,
-        _proptest::strategy::TupleUnion<( #(#head,)* #tail )>
+        ::proptest::strategy::TupleUnion<( #(#head,)* #tail )>
     );
 }
 
@@ -683,7 +726,7 @@ fn union_strat_to_tokens(tokens: &mut TokenStream, strats: &[Strategy]) {
 struct WeightedUnionTail<'a>(u32, ::std::slice::Chunks<'a, WeightedCtor>);
 
 #[cfg(not(feature = "boxed_union"))]
-impl<'a> ToTokens for WeightedUnionTail<'a> {
+impl ToTokens for WeightedUnionTail<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let (tweight, mut chunks) = (self.0, self.1.clone());
 
@@ -698,7 +741,7 @@ impl<'a> ToTokens for WeightedUnionTail<'a> {
             let tail = WeightedUnionTail(tweight - weight_sum(chunk), chunks);
             quote_append!(tokens,
                 (#tweight, ::std::sync::Arc::new(
-                    _proptest::strategy::TupleUnion::new((
+                    ::proptest::strategy::TupleUnion::new((
                         #(#head,)* #tail
                     ))))
             );
@@ -712,7 +755,7 @@ impl<'a> ToTokens for WeightedUnionTail<'a> {
 struct UnionTypeTail<'a>(::std::slice::Chunks<'a, Strategy>);
 
 #[cfg(not(feature = "boxed_union"))]
-impl<'a> ToTokens for UnionTypeTail<'a> {
+impl ToTokens for UnionTypeTail<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let mut chunks = self.0.clone();
 
@@ -727,7 +770,7 @@ impl<'a> ToTokens for UnionTypeTail<'a> {
             let tail = UnionTypeTail(chunks);
             quote_append!(tokens,
                 (u32,
-                 ::std::sync::Arc<_proptest::strategy::TupleUnion<(
+                 ::std::sync::Arc<::proptest::strategy::TupleUnion<(
                      #(#head,)* #tail
                  )>>)
             );
@@ -761,6 +804,10 @@ fn arc_strategy_entry(s: &Strategy) -> TokenStream {
 /// This can be used instead of `union_ctor_to_tokens` to generate a boxing
 /// macro.
 #[cfg(feature = "boxed_union")]
+#[allow(
+    clippy::single_call_fn,
+    reason = "fold enum variants into a heap-erased Union constructor under boxed_union"
+)]
 fn union_ctor_to_tokens_boxed(
     tokens: &mut TokenStream,
     ctors: &[WeightedCtor],
@@ -779,18 +826,26 @@ fn union_ctor_to_tokens_boxed(
 
     quote_append!(
         tokens,
-        _proptest::strategy::Union::new_weighted(vec![ #(#ctors_boxed,)* ])
+        ::proptest::strategy::Union::new_weighted(vec![ #(#ctors_boxed,)* ])
     );
 
+    #[allow(
+        clippy::single_call_fn,
+        reason = "box one boxed_union weighted summand inside a Strategy call"
+    )]
     fn wrap_boxed(arg: &WeightedCtor) -> TokenStream {
-        let (w, c) = arg;
-        quote!( (#w, _proptest::strategy::Strategy::boxed(#c)) )
+        let (weight, ctor) = arg;
+        quote!( (#weight, ::proptest::strategy::Strategy::boxed(#ctor)) )
     }
 }
 
 /// Tokenizes a weighted list of `Strategy`.
 /// For details, see `union_ctor_to_tokens_boxed`.
 #[cfg(feature = "boxed_union")]
+#[allow(
+    clippy::single_call_fn,
+    reason = "render the enum Strategy type as a BoxedStrategy union under boxed_union"
+)]
 fn union_strat_to_tokens_boxed(tokens: &mut TokenStream, strats: &[Strategy]) {
     if strats.is_empty() {
         return;
@@ -804,7 +859,7 @@ fn union_strat_to_tokens_boxed(tokens: &mut TokenStream, strats: &[Strategy]) {
 
     quote_append!(
         tokens,
-        _proptest::strategy::Union<_proptest::strategy::BoxedStrategy<Self>>
+        ::proptest::strategy::Union<::proptest::strategy::BoxedStrategy<Self>>
     );
 }
 
@@ -812,8 +867,8 @@ fn union_strat_to_tokens_boxed(tokens: &mut TokenStream, strats: &[Strategy]) {
 /// contents of the `from` register. The correctness of this wrt. the
 /// generated Rust code has to be verified externally by checking the
 /// construction of the particular `Ctor`.
-fn extract(c: Ctor, to: ToReg, from: FromReg) -> Ctor {
-    Ctor::Extract(Box::new(c), to, from)
+fn extract(ctor: Ctor, to: ToReg, from: FromReg) -> Ctor {
+    Ctor::Extract(Box::new(ctor), to, from)
 }
 
 /// Construct a `FreshVar` prefixed by `param_`.
@@ -826,13 +881,13 @@ fn param<'a>(fv: usize) -> FreshVar<'a> {
 //==============================================================================
 
 /// Constructs a `MapClosure` for the given `path` and a list of fields.
-pub fn map_closure(path: syn::Path, fs: &[syn::Field]) -> MapClosure {
+pub(crate) fn map_closure(path: syn::Path, fs: &[syn::Field]) -> MapClosure {
     MapClosure(path, fs.to_owned())
 }
 
 /// A `MapClosure` models the closure part inside a `.prop_map(..)` call.
 #[derive(Debug)]
-pub struct MapClosure(syn::Path, Vec<syn::Field>);
+pub(crate) struct MapClosure(syn::Path, Vec<syn::Field>);
 
 impl ToTokens for MapClosure {
     fn to_tokens(&self, tokens: &mut TokenStream) {
@@ -870,17 +925,21 @@ fn fresh_var(prefix: &str, count: usize) -> FreshVar<'_> {
 /// A `FreshVar` is an internal implementation detail and models a temporary
 /// variable on the stack.
 struct FreshVar<'a> {
+    /// The name prefix (e.g. `param` or `tmp`) the variable renders with.
     prefix: &'a str,
+    /// The numeric suffix distinguishing this variable from others sharing
+    /// the prefix; the variable renders as `{prefix}_{count}`.
     count: usize,
 }
 
-impl<'a> ToTokens for FreshVar<'a> {
+impl ToTokens for FreshVar<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let ident = format!("{}_{}", self.prefix, self.count);
         call_site_ident(&ident).to_tokens(tokens)
     }
 }
 
+/// Build an identifier with the given name at the call-site span.
 fn call_site_ident(ident: &str) -> syn::Ident {
     syn::Ident::new(ident, Span::call_site())
 }

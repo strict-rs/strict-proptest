@@ -28,11 +28,11 @@ arbitrary!(Option<string::ParseError>; None);
 #[cfg(feature = "unstable")]
 arbitrary!(Option<!>; None);
 
-arbitrary!([A: Arbitrary] opt::Option<A>, OptionStrategy<A::Strategy>,
+arbitrary!([A: Arbitrary] Option<A>, OptionStrategy<A::Strategy>,
     product_type![Probability, A::Parameters];
     args => {
-        let product_unpack![prob, a] = args;
-        weighted(prob, any_with::<A>(a))
+        let product_unpack![prob, elem_params] = args;
+        weighted(prob, any_with::<A>(elem_params))
     }
 );
 
@@ -48,6 +48,8 @@ lift1!(['static] opt::IntoIter<A>, Probability;
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         probability => Probability,
         option      => Option<u8>,

@@ -51,7 +51,7 @@ arbitrary!(
     [A: Arbitrary + Iterator, B: Arbitrary + Iterator]
     Zip<A, B>, SMapped<(A, B), Self>,
     product_type![A::Parameters, B::Parameters];
-    args => static_map(any_with::<(A, B)>(args), |(a, b)| a.zip(b))
+    args => static_map(any_with::<(A, B)>(args), |(first, second)| first.zip(second))
 );
 
 lift1!(
@@ -59,7 +59,7 @@ lift1!(
     Zip<B, A>,
     B::Parameters;
     base, args =>
-        (any_with::<B>(args), base).prop_map(|(b, a)| b.zip(a)).boxed()
+        (any_with::<B>(args), base).prop_map(|(first, second)| first.zip(second)).boxed()
 );
 
 impl<A: fmt::Debug + Iterator, B: fmt::Debug + Iterator>
@@ -76,7 +76,9 @@ impl<A: fmt::Debug + Iterator, B: fmt::Debug + Iterator>
         AS: Strategy<Value = A> + 'static,
         BS: Strategy<Value = B> + 'static,
     {
-        (fst, snd).prop_map(|(a, b)| a.zip(b)).boxed()
+        (fst, snd)
+            .prop_map(|(first, second)| first.zip(second))
+            .boxed()
     }
 }
 
@@ -86,7 +88,7 @@ arbitrary!(
      B: Arbitrary + Iterator<Item = T>]
     Chain<A, B>, SMapped<(A, B), Self>,
     product_type![A::Parameters, B::Parameters];
-    args => static_map(any_with::<(A, B)>(args), |(a, b)| a.chain(b))
+    args => static_map(any_with::<(A, B)>(args), |(first, second)| first.chain(second))
 );
 
 lift1!([fmt::Debug + 'static + Iterator<Item = T>,
@@ -95,7 +97,7 @@ lift1!([fmt::Debug + 'static + Iterator<Item = T>,
     Chain<B, A>,
     B::Parameters;
     base, args =>
-        (any_with::<B>(args), base).prop_map(|(b, a)| b.chain(a)).boxed()
+        (any_with::<B>(args), base).prop_map(|(first, second)| first.chain(second)).boxed()
 );
 
 impl<T, A: fmt::Debug + Iterator<Item = T>, B: fmt::Debug + Iterator<Item = T>>
@@ -112,22 +114,30 @@ impl<T, A: fmt::Debug + Iterator<Item = T>, B: fmt::Debug + Iterator<Item = T>>
         AS: Strategy<Value = A> + 'static,
         BS: Strategy<Value = B> + 'static,
     {
-        (fst, snd).prop_map(|(a, b)| a.chain(b)).boxed()
+        (fst, snd)
+            .prop_map(|(first, second)| first.chain(second))
+            .boxed()
     }
 }
 
+/// Implements `Arbitrary` (and the matching `lift1!`) for an iterator adapter
+/// built from an inner iterator plus a `usize` argument.
+///
+/// Given an adapter type and its constructor method (e.g. `Skip`/`skip`,
+/// `Take`/`take`), it generates an arbitrary inner iterator paired with an
+/// arbitrary `usize` and applies the method to build the adapter.
 macro_rules! usize_mod {
     ($type: ident, $mapper: ident) => {
         arbitrary!([A: Arbitrary + Iterator] $type<A>,
             SMapped<(A, usize), Self>, A::Parameters;
-            a => static_map(
-                any_with::<(A, usize)>(product_pack![a, ()]),
-                |(a, b)| a.$mapper(b)
+            args => static_map(
+                any_with::<(A, usize)>(product_pack![args, ()]),
+                |(inner, count)| inner.$mapper(count)
             )
         );
 
         lift1!([Iterator] $type<A>;
-            base => (base, any::<usize>()).prop_map(|(a, b)| a.$mapper(b))
+            base => (base, any::<usize>()).prop_map(|(inner, count)| inner.$mapper(count))
         );
     };
 }
@@ -151,9 +161,9 @@ mod test {
         type Item = &'static u8;
         fn next(&mut self) -> Option<Self::Item> {
             if self.0 < 5 {
-                let r = &DUMMY[self.0 as usize];
+                let byte = &DUMMY[self.0 as usize];
                 self.0 += 1;
-                Some(r)
+                Some(byte)
             } else {
                 None
             }
@@ -164,7 +174,7 @@ mod test {
         empty     => Empty<u8>,
         once      => Once<u8>,
         repeat    => Repeat<u8>,
-        cloned    => Cloned<super::Dummy>,
+        cloned    => Cloned<Dummy>,
         cycle     => Cycle<Once<u8>>,
         enumerate => Enumerate<Repeat<u8>>,
         fuse      => Fuse<Once<u8>>,

@@ -23,7 +23,7 @@ Provided methods (rarely overridden except `preconditions`):
 
 ### `Sequential` / `SequentialValueTree` (generation + shrinking)
 
-`Sequential` holds `size: SizeRange` plus `Arc<dyn Fn ...>` copies of `init_state` / `preconditions` / `transitions` / `next` (its `Debug` prints only `size`). Its `Strategy::Value` is the triple `(State, Vec<Transition>, Option<Arc<AtomicUsize>>)` — initial state, the transition sequence, and a shared "seen" counter (below).
+`Sequential` holds `size: SizeRange` plus `Arc<dyn Fn ...>` copies of `init_state` / `preconditions` / `transitions` / `next` (its `Debug` prints only `size`). Its `Strategy::Value` is the triple `(State, Vec<Transition>, Option<Arc<AtomicUsize>>)` — initial state, the transition sequence, and a shared "seen" counter (below). `SequentialValueTree`'s hand-written `Debug` renders the shrink cursor (`is_initial_state_shrinkable`, the transition count and the included/shrinkable bit-set counts, `max_ix`, `shrink`/`last_shrink`) via `finish_non_exhaustive`, carrying no `Debug` bounds on its generics because it prints none of the generic or `Arc<dyn Fn>` fields.
 
 `new_tree`:
 
@@ -71,7 +71,7 @@ The triple's third element is `Option<Arc<AtomicUsize>>`, the out-of-band channe
 
 ## Feature gating & no_std
 
-The only `#[cfg(feature = "std")]` is in `test_sequential`, gating the `INFO_LOG` / `eprintln!` verbose output (the no_std arm replaces it with `let _ = ...`). Otherwise `strategy.rs` uses `std::sync::{Arc, atomic}` directly (only `Vec` / `fmt` come from `proptest::std_facade`), so the strategy module is effectively std-only. `VarBitSet` / `BitSetLike` come from `proptest::bits` (the parent crate enables proptest's `bit-set` feature).
+The only `#[cfg(feature = "std")]` is in `test_sequential`, gating the `INFO_LOG` / `eprintln!` verbose output (the no_std arms consume the otherwise-unused values — `drop((config, trans_len))`, and `let _ = ix` for the `Copy` index). Otherwise `strategy.rs` uses `std::sync::{Arc, atomic}` directly (only `Vec` / `fmt` come from `proptest::std_facade`), so the strategy module is effectively std-only. `VarBitSet` / `BitSetLike` come from `proptest::bits` (the parent crate enables proptest's `bit-set` feature).
 
 ## Where the behavior is exercised
 

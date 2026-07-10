@@ -21,26 +21,26 @@ use crate::strategy::*;
 // These are Result with uninhabited type in some variant:
 arbitrary!([A: Arbitrary] Result<A, string::ParseError>,
     SMapped<A, Self>, A::Parameters;
-    args => static_map(any_with::<A>(args), Result::Ok)
+    args => static_map(any_with::<A>(args), Ok)
 );
 arbitrary!([A: Arbitrary] Result<string::ParseError, A>,
     SMapped<A, Self>, A::Parameters;
-    args => static_map(any_with::<A>(args), Result::Err)
+    args => static_map(any_with::<A>(args), Err)
 );
 #[cfg(feature = "unstable")]
 arbitrary!([A: Arbitrary] Result<A, !>,
     SMapped<A, Self>, A::Parameters;
-    args => static_map(any_with::<A>(args), Result::Ok)
+    args => static_map(any_with::<A>(args), Ok)
 );
 #[cfg(feature = "unstable")]
 arbitrary!([A: Arbitrary] Result<!, A>,
     SMapped<A, Self>, A::Parameters;
-    args => static_map(any_with::<A>(args), Result::Err)
+    args => static_map(any_with::<A>(args), Err)
 );
 
-lift1!([] Result<A, string::ParseError>; Result::Ok);
+lift1!([] Result<A, string::ParseError>; Ok);
 #[cfg(feature = "unstable")]
-lift1!([] Result<A, !>; Result::Ok);
+lift1!([] Result<A, !>; Ok);
 
 // We assume that `MaybeOk` is canonical as it's the most likely Strategy
 // a user wants.
@@ -49,9 +49,10 @@ arbitrary!([A: Arbitrary, B: Arbitrary] Result<A, B>,
     MaybeOk<A::Strategy, B::Strategy>,
     product_type![Probability, A::Parameters, B::Parameters];
     args => {
-        let product_unpack![prob, a, b] = args;
-        let (p, a, b) = (prob, any_with::<A>(a), any_with::<B>(b));
-        maybe_ok_weighted(p, a, b)
+        let product_unpack![prob, ok_params, err_params] = args;
+        let (probability, ok_strategy, err_strategy) =
+            (prob, any_with::<A>(ok_params), any_with::<B>(err_params));
+        maybe_ok_weighted(probability, ok_strategy, err_strategy)
     }
 );
 
@@ -65,9 +66,10 @@ where
     where
         AS: Strategy<Value = A> + 'static,
     {
-        let product_unpack![prob, e] = args;
-        let (p, a, e) = (prob, base, any_with::<E>(e));
-        maybe_ok_weighted(p, a, e).boxed()
+        let product_unpack![prob, err_params] = args;
+        let (probability, ok_strategy, err_strategy) =
+            (prob, base, any_with::<E>(err_params));
+        maybe_ok_weighted(probability, ok_strategy, err_strategy).boxed()
     }
 }
 
@@ -99,6 +101,8 @@ lift1!(['static] IntoIter<A>, Probability; base, args => {
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         result    => Result<u8, u16>,
         into_iter => IntoIter<u8>,

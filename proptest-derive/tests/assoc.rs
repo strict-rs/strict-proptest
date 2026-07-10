@@ -6,6 +6,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Compile-and-run coverage for `#[derive(Arbitrary)]` on fields typed as
+//! associated-type projections.
+//!
+//! Derives `Arbitrary` for structs whose field types are associated-type
+//! projections in every spelling (`<TypeA as Func>::Out`, `Tyvar::OutB`,
+//! `<Tyvar as FuncB>::OutB`, and nested projections), including such
+//! projections wrapped in `Vec`. The derive must still infer the correct
+//! `Arbitrary` bounds, and the generated projected fields carry their
+//! pinned values.
+
 use proptest::prelude::{Arbitrary, any};
 use proptest::strict::{TestResult, ensure_property};
 use proptest_derive::Arbitrary;
@@ -128,7 +138,7 @@ macro_rules! debug {
         impl<T: $trait> ::std::fmt::Debug for $ty<T> {
             fn fmt(
                 &self,
-                fmt: &mut ::std::fmt::Formatter,
+                fmt: &mut ::std::fmt::Formatter<'_>,
             ) -> Result<(), ::std::fmt::Error> {
                 fmt.debug_struct(stringify!($ty))
                     .field("field", &"<redacted>")
@@ -180,16 +190,20 @@ fn ensure_all_42<'a, I>(items: I) -> TestResult
 where
     I: IntoIterator<Item = &'a OutTy>,
 {
-    for item in items {
-        ensure_eq(&item.val, &42, "every generated element is pinned to 42")?;
+    for element in items {
+        ensure_eq(
+            &element.val,
+            &42,
+            "every generated element is pinned to 42",
+        )?;
     }
     Ok(())
 }
 
 #[test]
 fn t0_field_val_42() -> TestResult {
-    ensure_property(&any::<T0>(), "a projected field generates", |t| {
-        ensure_eq(&t.field.val, &42, "the projected field is pinned")
+    ensure_property(&any::<T0>(), "a projected field generates", |sample| {
+        ensure_eq(&sample.field.val, &42, "the projected field is pinned")
     })
 }
 
@@ -208,50 +222,74 @@ fn t3_all_42() -> TestResult {
     ensure_property(
         &any::<T3>(),
         "a projected collection field generates",
-        |t| ensure_all_42(t.field.iter()),
+        |sample| ensure_all_42(sample.field.iter()),
     )
 }
 
 #[test]
 fn t4_field_val_42() -> TestResult {
-    ensure_property(&any::<T4<TypeB>>(), "a projected field generates", |t| {
-        ensure_eq(&t.field.val, &42, "the projected field is pinned")
-    })
+    ensure_property(
+        &any::<T4<TypeB>>(),
+        "a projected field generates",
+        |sample| {
+            ensure_eq(&sample.field.val, &42, "the projected field is pinned")
+        },
+    )
 }
 
 #[test]
 fn t5_field_val_42() -> TestResult {
-    ensure_property(&any::<T5<TypeB>>(), "a projected field generates", |t| {
-        ensure_eq(&t.field.val, &42, "the projected field is pinned")
-    })
+    ensure_property(
+        &any::<T5<TypeB>>(),
+        "a projected field generates",
+        |sample| {
+            ensure_eq(&sample.field.val, &42, "the projected field is pinned")
+        },
+    )
 }
 
 #[test]
 fn t6_field_val_42() -> TestResult {
-    ensure_property(&any::<T6<TypeB>>(), "a projected field generates", |t| {
-        ensure_eq(&t.field.val, &42, "the projected field is pinned")
-    })
+    ensure_property(
+        &any::<T6<TypeB>>(),
+        "a projected field generates",
+        |sample| {
+            ensure_eq(&sample.field.val, &42, "the projected field is pinned")
+        },
+    )
 }
 
 #[test]
 fn t7_field_val_42() -> TestResult {
-    ensure_property(&any::<T7<TypeA>>(), "a projected field generates", |t| {
-        ensure_eq(&t.field.val, &42, "the projected field is pinned")
-    })
+    ensure_property(
+        &any::<T7<TypeA>>(),
+        "a projected field generates",
+        |sample| {
+            ensure_eq(&sample.field.val, &42, "the projected field is pinned")
+        },
+    )
 }
 
 #[test]
 fn t8_field_val_42() -> TestResult {
-    ensure_property(&any::<T8<TypeA>>(), "a projected field generates", |t| {
-        ensure_eq(&t.field.val, &42, "the projected field is pinned")
-    })
+    ensure_property(
+        &any::<T8<TypeA>>(),
+        "a projected field generates",
+        |sample| {
+            ensure_eq(&sample.field.val, &42, "the projected field is pinned")
+        },
+    )
 }
 
 #[test]
 fn t9_field_val_42() -> TestResult {
-    ensure_property(&any::<T9<TypeA>>(), "a projected field generates", |t| {
-        ensure_eq(&t.field.val, &42, "the projected field is pinned")
-    })
+    ensure_property(
+        &any::<T9<TypeA>>(),
+        "a projected field generates",
+        |sample| {
+            ensure_eq(&sample.field.val, &42, "the projected field is pinned")
+        },
+    )
 }
 
 #[test]
@@ -259,7 +297,7 @@ fn t10_all_42() -> TestResult {
     ensure_property(
         &any::<T10<TypeB>>(),
         "a projected collection field generates",
-        |t| ensure_all_42(t.field.iter()),
+        |sample| ensure_all_42(sample.field.iter()),
     )
 }
 
@@ -268,7 +306,7 @@ fn t11_all_42() -> TestResult {
     ensure_property(
         &any::<T11<TypeB>>(),
         "a projected collection field generates",
-        |t| ensure_all_42(t.field.iter()),
+        |sample| ensure_all_42(sample.field.iter()),
     )
 }
 
@@ -277,7 +315,7 @@ fn t12_all_42() -> TestResult {
     ensure_property(
         &any::<T12<TypeB>>(),
         "a projected collection field generates",
-        |t| ensure_all_42(t.field.iter()),
+        |sample| ensure_all_42(sample.field.iter()),
     )
 }
 
@@ -286,7 +324,7 @@ fn t13_all_42() -> TestResult {
     ensure_property(
         &any::<T13<TypeA>>(),
         "a projected collection field generates",
-        |t| ensure_all_42(t.field.iter()),
+        |sample| ensure_all_42(sample.field.iter()),
     )
 }
 
@@ -295,7 +333,7 @@ fn t14_all_42() -> TestResult {
     ensure_property(
         &any::<T14<TypeA>>(),
         "a projected collection field generates",
-        |t| ensure_all_42(t.field.iter()),
+        |sample| ensure_all_42(sample.field.iter()),
     )
 }
 
@@ -304,6 +342,6 @@ fn t15_all_42() -> TestResult {
     ensure_property(
         &any::<T15<TypeA>>(),
         "a projected collection field generates",
-        |t| ensure_all_42(t.field.iter()),
+        |sample| ensure_all_42(sample.field.iter()),
     )
 }

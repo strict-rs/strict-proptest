@@ -189,6 +189,14 @@ pub trait ArbitraryF2<A: fmt::Debug, B: fmt::Debug>:
         BS: Strategy<Value = B> + 'static;
 }
 
+/// Generates an `ArbitraryF1` impl that lifts a base `Strategy` over a
+/// single-type-parameter container (`Box`, `Vec`, `Option`, ...), so
+/// `proptest_derive` and the arbitrary tiers need only one line rather than a
+/// full higher-order impl.
+///
+/// The arms cover, in order: a full hand-written `lift1_with` body; a
+/// params-defaulted body (`Parameters = ()`); a `prop_map`-via-mapper body;
+/// and a `prop_map_into` default that maps the base value into the container.
 macro_rules! lift1 {
     ([$($bounds : tt)*] $typ: ty, $params: ty;
      $base: ident, $args: ident => $logic: expr) => {

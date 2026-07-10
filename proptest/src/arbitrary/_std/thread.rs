@@ -23,9 +23,9 @@ arbitrary!(Builder, SMapped<(Option<usize>, Option<String>), Self>; {
         product_pack![prob, Default::default()]
     ];
     static_map(arbitrary_with(args), |(os, on)| {
-        let mut b = Builder::new();
-        b = if let Some(size) = os { b.stack_size(size) } else { b };
-        if let Some(name) = on { b.name(name) } else { b }
+        let mut builder = Builder::new();
+        builder = if let Some(size) = os { builder.stack_size(size) } else { builder };
+        if let Some(name) = on { builder.name(name) } else { builder }
     })
 });
 
@@ -61,6 +61,8 @@ arbitrary!([A: 'static + Send + Arbitrary<'a>] JoinHandle<A>,
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         builder => Builder
     );

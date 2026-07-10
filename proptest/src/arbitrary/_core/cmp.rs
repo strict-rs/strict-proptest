@@ -15,6 +15,7 @@ use crate::strategy::{Just, TupleUnion, WA};
 
 wrap_ctor!(Reverse, Reverse);
 
+/// One weighted arm of the `Ordering` union: a `Just` of a single variant.
 type Wajo = WA<Just<Ordering>>;
 arbitrary!(Ordering, TupleUnion<(Wajo, Wajo, Wajo)>;
     prop_oneof![
@@ -26,6 +27,8 @@ arbitrary!(Ordering, TupleUnion<(Wajo, Wajo, Wajo)>;
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         reverse => Reverse<u8>,
         ordering => Ordering

@@ -40,8 +40,13 @@ use crate::test_runner::*;
 #[derive(Debug, Clone, Copy)]
 #[must_use = "strategies do nothing unless used"]
 pub struct Fuse<T> {
+    /// The wrapped strategy or value tree whose calls are being guarded.
     inner: T,
+    /// Whether a `simplify()` call may currently be productive; cleared once
+    /// `simplify()` returns `false`, restored when `complicate()` succeeds.
     may_simplify: bool,
+    /// Whether a `complicate()` call may currently be productive; cleared once
+    /// `complicate()` returns `false`, restored when `simplify()` succeeds.
     may_complicate: bool,
 }
 
@@ -161,6 +166,10 @@ mod test {
     }
 
     impl StrictValueTree {
+        #[allow(
+            clippy::single_call_fn,
+            reason = "test-only ValueTree fixture constructor seeding the Fuse guard contract checks"
+        )]
         fn new(start: u32) -> Self {
             StrictValueTree {
                 min: 0,

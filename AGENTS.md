@@ -6,10 +6,11 @@ This file provides guidance to coding agents when working with code in this repo
 
 `proptest` is a Hypothesis-style property-testing framework for Rust: you describe how to *generate* inputs with composable `Strategy` objects, and when a test fails proptest *shrinks* the input down to a minimal failing case and persists it for replay. Unlike QuickCheck, generation and shrinking are defined per-`Strategy` value rather than per-type, which is what makes strategies freely composable.
 
-This is a Cargo workspace (`resolver = "3"`, edition 2024) of four published crates:
+This is a Cargo workspace (`resolver = "3"`, edition 2024) of five crates:
 
 - **`proptest/`** — the core library. `#![no_std]` with optional `std`/`alloc`. Almost all of the logic lives here.
-- **`proptest-derive/`** — proc-macro crate providing `#[derive(Arbitrary)]`. Testing it requires **nightly**.
+- **`proptest-derive/`** — proc-macro crate providing `#[derive(Arbitrary)]`. A thin shim: it converts tokens and delegates to `proptest-derive-internal`. Testing it requires **nightly**.
+- **`proptest-derive-internal/`** — ordinary library crate holding the `#[derive(Arbitrary)]` pipeline (parsing, attribute interpretation, bound inference, codegen). An implementation detail of `proptest-derive` — published alongside it, never depended on directly.
 - **`proptest-macro/`** — proc-macro crate providing the `#[property_test]` attribute macro (a terser alternative to writing a `proptest!` block).
 - **`proptest-state-machine/`** — state-machine / model-based testing built on top of `proptest`.
 
@@ -39,11 +40,13 @@ proptest-macro (snapshot tests via `insta`; review changed snapshots with `cargo
 cargo test -p proptest-macro
 ```
 
-proptest-derive — **requires nightly**, and is sensitive to stale build artifacts: if you get errors that make no sense, `cargo clean` and retry (it uses `compiletest_rs` with UI cases under `tests/compile-fail/` and `tests/*.rs`):
+proptest-derive — **requires nightly**, and is sensitive to stale build artifacts: if you get errors that make no sense, `cargo clean` and retry (it uses `compiletest_rs` with UI cases under `tests/compile-fail/` and `tests/*.rs`). The expansion unit tests live in `proptest-derive-internal`; run both crates, both feature configs:
 
 ```sh
 cargo +nightly test -p proptest-derive
 cargo +nightly test -p proptest-derive --features boxed_union
+cargo +nightly test -p proptest-derive-internal
+cargo +nightly test -p proptest-derive-internal --features boxed_union
 ```
 
 proptest-state-machine:
@@ -85,7 +88,7 @@ cd proptest/test-persistence-location && ./run-tests.sh
 
 ### Supporting crates
 
-- **proptest-derive** (`src/lib.rs` → `derive.rs`): tokens → AST (`ast.rs`) → parse `#[proptest(...)]` attributes (`attr.rs`, evaluated in `interp.rs`) → track type-parameter usage to emit correct `Arbitrary` bounds (`use_tracking.rs`) → generate the `Arbitrary` impl. The `boxed_union` feature swaps generated `TupleUnion` structs for boxed strategies.
+- **proptest-derive** (shim `src/lib.rs`) delegating to **proptest-derive-internal** (`lib.rs` → `derive.rs`): tokens → AST (`ast.rs`) → parse `#[proptest(...)]` attributes (`attr.rs`, evaluated in `interp.rs`) → track type-parameter usage to emit correct `Arbitrary` bounds (`use_tracking.rs`) → generate the `Arbitrary` impl. The `boxed_union` feature (forwarded by the shim) swaps generated `TupleUnion` structs for boxed strategies.
 - **proptest-macro** (`src/property_test/`): `#[property_test]` validates the fn signature (`validate.rs` — including that the body returns `Result<(), TestFailure>` / `proptest::strict::TestResult`; `()` bodies are compile errors), reads options like `config = …` / `proptest_path = …` (`options.rs`), then rewrites the fn — synthesizing a params struct with an `Arbitrary` impl and running the body through `proptest::strict::ensure_property`, so the generated `#[test]` wrapper returns `proptest::strict::TestResult` instead of panicking on failure (`codegen/`). A per-argument `#[strategy = <expr>]` overrides the `Arbitrary` default.
 - **proptest-state-machine** (`src/strategy.rs`, `src/test_runner.rs`): you implement `ReferenceStateMachine` (an abstract model — `State`, `Transition`, `transitions()`, `apply()`, preconditions) and `StateMachineTest` (the real system under test — `apply()`, `check_invariants()`). The `prop_state_machine!` macro expands to a `proptest!` that generates and shrinks transition *sequences*. See `examples/state_machine_heap.rs` and `examples/state_machine_echo_server.rs`.
 

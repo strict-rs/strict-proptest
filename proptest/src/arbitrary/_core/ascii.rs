@@ -19,5 +19,7 @@ arbitrary!(EscapeDefault, SMapped<u8, Self>;
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(escape_default => EscapeDefault);
 }

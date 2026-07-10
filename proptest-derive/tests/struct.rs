@@ -6,6 +6,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Baseline `#[derive(Arbitrary)]` coverage for plain named-field structs
+//! with no `#[proptest(...)]` modifiers.
+//!
+//! The derived types range from a single field up to twenty fields over
+//! the primitive and standard types, and `asserting_arbitrary` checks
+//! each derived type resolves an `Arbitrary` impl with the correct bounds.
+
 use proptest::prelude::Arbitrary;
 use proptest_derive::Arbitrary;
 

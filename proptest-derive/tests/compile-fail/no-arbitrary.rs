@@ -18,5 +18,4 @@ struct T0;
 #[derive(Debug, Arbitrary)] //~ the trait bound `T0: Arbitrary` is not satisfied [E0277]
 struct T1 {
     f0: T0, //~ the trait bound `T0: Arbitrary` is not satisfied [E0277]
-            //~^ the trait bound `T0: Arbitrary` is not satisfied [E0277]
 }

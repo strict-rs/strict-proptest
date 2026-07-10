@@ -36,24 +36,13 @@
 pub mod std_facade;
 
 #[cfg(any(feature = "std", test))]
-#[macro_use]
 extern crate std;
 
 #[cfg(all(feature = "alloc", not(feature = "std")))]
-#[macro_use]
 extern crate alloc;
 
 #[macro_use]
 mod product_tuple;
-
-#[macro_use]
-extern crate bitflags;
-#[cfg(feature = "bit-set")]
-extern crate bit_set;
-
-#[cfg(feature = "fork")]
-#[macro_use]
-extern crate rusty_fork;
 
 #[macro_use]
 mod macros;
@@ -96,8 +85,8 @@ pub use proptest_macro::property_test;
 #[cfg(feature = "attr-macro")]
 #[test]
 fn compile_tests() -> Result<(), trybuild::TryBuildError> {
-    let mut t = trybuild::TestCases::new();
-    t.pass("tests/pass/*.rs");
-    t.compile_fail("tests/fail/*.rs");
-    t.run()
+    let mut cases = trybuild::TestCases::new();
+    cases.pass("tests/pass/*.rs");
+    cases.compile_fail("tests/fail/*.rs");
+    cases.run()
 }

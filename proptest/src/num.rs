@@ -15,6 +15,7 @@
 mod float_samplers;
 
 use crate::test_runner::TestRunner;
+use bitflags::bitflags;
 use rand::distr::uniform::{SampleUniform, Uniform};
 use rand::distr::{Distribution, StandardUniform};
 
@@ -31,7 +32,11 @@ pub(crate) fn sample_uniform<X: SampleUniform>(
 }
 
 /// Generate a random value of `X`, sampled uniformly from the closed
-/// range `[low, high]` (inclusive). Panics if `low > high`.
+/// range `[low, high]` (inclusive).
+///
+/// # Panics
+///
+/// Panics if `low > high`, i.e. the range is empty and has no value to draw.
 pub fn sample_uniform_incl<X: SampleUniform>(
     run: &mut TestRunner,
     start: X,
@@ -42,6 +47,12 @@ pub fn sample_uniform_incl<X: SampleUniform>(
         .sample(run.rng())
 }
 
+/// Defines a pair of uniform samplers that go through a wider integer type.
+///
+/// For a target type `$to` sampled via `$from` (e.g. `usize` via `u64`), emits
+/// `$name` (half-open `[start, end)`) and `$incl` (closed `[start, end]`),
+/// which cast through `$from` before sampling to reach types `rand` cannot
+/// sample directly.
 macro_rules! sample_uniform {
     ($name: ident, $incl:ident, $from:ty, $to:ty) => {
         fn $name(run: &mut TestRunner, start: $to, end: $to) -> $to {
@@ -58,6 +69,11 @@ macro_rules! sample_uniform {
     };
 }
 
+/// Dispatches to a uniform sampler in either `generic` or `plain` mode.
+///
+/// In `generic` mode the bounds are `.into()`-converted to the sample type
+/// (used by the primitive ranges); in `plain` mode they are forwarded as-is
+/// (used where the value type already is the sample type).
 macro_rules! sample_uniform_value {
     (
         generic,
@@ -99,12 +115,19 @@ sample_uniform!(isize_sample_uniform, isize_sample_uniform_incl, i32, isize);
 #[cfg(target_pointer_width = "16")]
 sample_uniform!(isize_sample_uniform, isize_sample_uniform_incl, i16, isize);
 
+/// Draws a fully arbitrary integer straight from the RNG's `random()`.
+///
+/// Used for the integer types `rand` samples natively.
 macro_rules! supported_int_any {
     ($runner:ident, $typ:ty) => {
         $runner.rng().random()
     };
 }
 
+/// Draws a fully arbitrary integer for a type the RNG cannot sample directly.
+///
+/// Falls back to a raw `next_u64` word cast to the target type, used for
+/// `usize`/`isize` on 64-bit targets.
 #[cfg(target_pointer_width = "64")]
 macro_rules! unsupported_int_any {
     ($runner:ident, $typ:ty) => {
@@ -112,6 +135,10 @@ macro_rules! unsupported_int_any {
     };
 }
 
+/// Draws a fully arbitrary integer for a type the RNG cannot sample directly.
+///
+/// Falls back to a raw `next_u32` word cast to the target type, used for
+/// `usize`/`isize` on non-64-bit targets.
 #[cfg(not(target_pointer_width = "64"))]
 macro_rules! unsupported_int_any {
     ($runner:ident, $typ:ty) => {
@@ -119,6 +146,11 @@ macro_rules! unsupported_int_any {
     };
 }
 
+/// Defines the `Any` strategy type and its `ANY` constant for one integer
+/// type.
+///
+/// The generated `Any` produces completely arbitrary values (via `$int_any`)
+/// and shrinks them through the module's `BinarySearch` toward `0`.
 macro_rules! int_any {
     ($typ: ident, $int_any: ident) => {
         /// Type of the `ANY` constant.
@@ -140,29 +172,14 @@ macro_rules! int_any {
     };
 }
 
+/// Implements `Strategy` for every `Range*` shape over one numeric type.
+///
+/// A single invocation wires up `Range`, `RangeInclusive`, `RangeFrom`,
+/// `RangeTo`, and `RangeToInclusive`, so that (for example) `0..10` is directly
+/// usable as a strategy; each samples uniformly within its bounds and shrinks
+/// via `BinarySearch`. The leading selector chooses the sampling mode and the
+/// concrete uniform helpers.
 macro_rules! numeric_api {
-    ($typ:ident, $epsilon:expr) => {
-        numeric_api!($typ, $typ, $epsilon);
-    };
-    ($typ:ident, $sample_typ:ty, $epsilon:expr) => {
-        numeric_api!(@with_mode
-            generic,
-            $typ,
-            $sample_typ,
-            $epsilon,
-            sample_uniform,
-            sample_uniform_incl
-        );
-    };
-    ($typ:ident, $epsilon:expr, $uniform:ident, $incl:ident) => {
-        numeric_api!($typ, $typ, $epsilon, $uniform, $incl);
-    };
-    ($typ:ident, $sample_typ:ty, $epsilon:expr, $uniform:ident, $incl:ident) => {
-        numeric_api!(@with_mode generic, $typ, $sample_typ, $epsilon, $uniform, $incl);
-    };
-    (@plain $typ:ident, $epsilon:expr, $uniform:ident, $incl:ident) => {
-        numeric_api!(@with_mode plain, $typ, $typ, $epsilon, $uniform, $incl);
-    };
     (@with_mode
         $sample_mode:ident,
         $typ:ident,
@@ -293,6 +310,11 @@ macro_rules! numeric_api {
     };
 }
 
+/// Defines the complete strategy submodule for one signed integer type.
+///
+/// Emits the type's `pub mod` containing its `Any`/`ANY`, the toward-zero
+/// `BinarySearch` value tree (whose shrinking tracks magnitude across the sign
+/// boundary), and the `numeric_api!` range implementations.
 macro_rules! signed_integer_bin_search {
     ($typ:ident) => {
         signed_integer_bin_search!(@with_mode
@@ -333,6 +355,7 @@ macro_rules! signed_integer_bin_search {
             }
             impl BinarySearch {
                 /// Creates a new binary searcher starting at the given value.
+                #[allow(clippy::single_call_fn, reason = "seed the signed-integer binary-search shrinker at its initial generated value")]
                 pub fn new(start: $typ) -> Self {
                     BinarySearch {
                         lo: 0,
@@ -414,6 +437,10 @@ macro_rules! signed_integer_bin_search {
     };
 }
 
+/// Defines the complete strategy submodule for one unsigned integer type.
+///
+/// Like `signed_integer_bin_search!` but for unsigned types: the `BinarySearch`
+/// shrinks toward `0` (or a clamped lower bound) and adds `new_above`.
 macro_rules! unsigned_integer_bin_search {
     ($typ:ident) => {
         unsigned_integer_bin_search!(@with_mode
@@ -454,6 +481,7 @@ macro_rules! unsigned_integer_bin_search {
             }
             impl BinarySearch {
                 /// Creates a new binary searcher starting at the given value.
+                #[allow(clippy::single_call_fn, reason = "seed the unsigned-integer binary-search shrinker at its initial generated value")]
                 pub fn new(start: $typ) -> Self {
                     BinarySearch {
                         lo: 0,
@@ -474,6 +502,7 @@ macro_rules! unsigned_integer_bin_search {
 
                 /// Creates a new binary searcher which will not search below
                 /// the given `lo` value.
+                #[allow(clippy::single_call_fn, reason = "clamp the unsigned binary-search shrinker so it never searches below a floor value")]
                 pub fn new_above(lo: $typ, start: $typ) -> Self {
                     BinarySearch::new_clamped(lo, start, start)
                 }
@@ -567,6 +596,10 @@ bitflags! {
 }
 
 impl FloatTypes {
+    /// Fills in the implied classes an `Any` left unspecified.
+    ///
+    /// If no sign was requested, `POSITIVE` is added; if no value class was
+    /// requested, `NORMAL` is added, matching the documented `Any` defaults.
     fn normalise(mut self) -> Self {
         if !self.intersects(FloatTypes::POSITIVE | FloatTypes::NEGATIVE) {
             self |= FloatTypes::POSITIVE;
@@ -586,15 +619,26 @@ impl FloatTypes {
     }
 }
 
+/// Describes the IEEE 754 bit layout of a float type for `Any` generation.
+///
+/// Exposes the integer `Bits` representation plus the masks isolating the sign,
+/// exponent, and mantissa, letting the float strategies assemble a value of a
+/// chosen class by manipulating raw bits.
 trait FloatLayout
 where
     StandardUniform: Distribution<Self::Bits>,
 {
+    /// Unsigned integer type holding this float's raw bit pattern.
     type Bits: Copy;
 
+    /// Mask isolating the sign bit.
     const SIGN_MASK: Self::Bits;
+    /// Mask isolating the exponent field.
     const EXP_MASK: Self::Bits;
+    /// Exponent field of `1.0`, substituted when an edge exponent is
+    /// disallowed.
     const EXP_ZERO: Self::Bits;
+    /// Mask isolating the mantissa field.
     const MANTISSA_MASK: Self::Bits;
 }
 
@@ -627,6 +671,11 @@ impl FloatLayout for f64 {
     const MANTISSA_MASK: u64 = 0x000F_FFFF_FFFF_FFFF;
 }
 
+/// Defines the float-class `Any` strategy surface for one float type.
+///
+/// Emits the `Any` type, the per-class constants (`POSITIVE`, `NORMAL`,
+/// `INFINITE`, the NaN classes, `ANY`, …) that OR together, and the `Strategy`
+/// impl that samples a value of the chosen classes by masking random bits.
 macro_rules! float_any {
     ($typ:ident) => {
         /// Strategies which produce floating-point values from particular
@@ -877,6 +926,13 @@ macro_rules! float_any {
     }
 }
 
+/// Defines the complete strategy submodule for one float type.
+///
+/// Emits the type's `pub mod` containing its `float_any!` surface, the
+/// toward-zero `BinarySearch` value tree (non-finite values shrink straight to
+/// `0`, and shrinking stays within the originally allowed classes), and the
+/// `numeric_api!` range implementations. `$sample_typ` names the custom
+/// uniform sampler from `float_samplers`.
 macro_rules! float_bin_search {
     ($typ:ident, $sample_typ:ident) => {
         #[allow(missing_docs)]
@@ -915,6 +971,7 @@ macro_rules! float_bin_search {
                     }
                 }
 
+                #[allow(clippy::single_call_fn, reason = "restrict a float BinarySearch shrinker to a caller-chosen subset of FloatTypes")]
                 fn new_with_types(start: $typ, allowed: FloatTypes) -> Self {
                     BinarySearch {
                         lo: 0.0,
@@ -1055,7 +1112,15 @@ macro_rules! float_bin_search {
                 }
             }
 
-            numeric_api!($typ, $sample_typ, 0.0);
+            numeric_api!(
+                @with_mode
+                generic,
+                $typ,
+                $sample_typ,
+                0.0,
+                sample_uniform,
+                sample_uniform_incl
+            );
         }
     };
 }
@@ -1083,8 +1148,8 @@ mod test {
                 (0..=1i32).new_tree(&mut runner).ok(),
                 "inclusive range generates a value tree",
             )?;
-            let test = runner.run_one(tree, |v| {
-                if v == 1 {
+            let test = runner.run_one(tree, |candidate| {
+                if candidate == 1 {
                     Ok(())
                 } else {
                     Err(TestCaseError::fail("not the inclusive end"))
@@ -1106,8 +1171,8 @@ mod test {
                 (..=1u8).new_tree(&mut runner).ok(),
                 "inclusive-to range generates a value tree",
             )?;
-            let test = runner.run_one(tree, |v| {
-                if v == 1 {
+            let test = runner.run_one(tree, |candidate| {
+                if candidate == 1 {
                     Ok(())
                 } else {
                     Err(TestCaseError::fail("not the inclusive end"))
@@ -1152,13 +1217,13 @@ mod test {
 
         for start in -128..0 {
             for target in start + 1..1 {
-                ensure_converges(start as i8, |v| v > target)?;
+                ensure_converges(start as i8, |probe| probe > target)?;
             }
         }
 
         for start in 0..128 {
             for target in 0..start {
-                ensure_converges(start as i8, |v| v < target)?;
+                ensure_converges(start as i8, |probe| probe < target)?;
             }
         }
         Ok(())
@@ -1195,7 +1260,7 @@ mod test {
 
         for start in 0..255 {
             for target in 0..start {
-                ensure_converges(start as u8, |v| v <= target)?;
+                ensure_converges(start as u8, |probe| probe <= target)?;
             }
         }
         Ok(())
@@ -1217,9 +1282,9 @@ mod test {
             )?;
 
             while state.simplify() {
-                let v = state.current();
+                let simplified = state.current();
                 ensure(
-                    (-42..64).contains(&v),
+                    (-42..64).contains(&simplified),
                     "every simplified value stays in bounds",
                 )?;
             }
@@ -1320,12 +1385,12 @@ mod test {
 
     mod contract_sanity {
         macro_rules! contract_sanity {
-            ($t:tt) => {
+            ($t:tt, $forty_two:expr, $fifty_six:expr) => {
                 mod $t {
                     use crate::strategy::check_strategy_sanity;
 
-                    const FORTY_TWO: $t = 42 as $t;
-                    const FIFTY_SIX: $t = 56 as $t;
+                    const FORTY_TWO: $t = $forty_two;
+                    const FIFTY_SIX: $t = $fifty_six;
 
                     #[test]
                     fn range() {
@@ -1354,20 +1419,20 @@ mod test {
                 }
             };
         }
-        contract_sanity!(u8);
-        contract_sanity!(i8);
-        contract_sanity!(u16);
-        contract_sanity!(i16);
-        contract_sanity!(u32);
-        contract_sanity!(i32);
-        contract_sanity!(u64);
-        contract_sanity!(i64);
-        contract_sanity!(usize);
-        contract_sanity!(isize);
+        contract_sanity!(u8, 42, 56);
+        contract_sanity!(i8, 42, 56);
+        contract_sanity!(u16, 42, 56);
+        contract_sanity!(i16, 42, 56);
+        contract_sanity!(u32, 42, 56);
+        contract_sanity!(i32, 42, 56);
+        contract_sanity!(u64, 42, 56);
+        contract_sanity!(i64, 42, 56);
+        contract_sanity!(usize, 42, 56);
+        contract_sanity!(isize, 42, 56);
         #[cfg(feature = "f16")]
-        contract_sanity!(f16);
-        contract_sanity!(f32);
-        contract_sanity!(f64);
+        contract_sanity!(f16, 42.0, 56.0);
+        contract_sanity!(f32, 42.0, 56.0);
+        contract_sanity!(f64, 42.0, 56.0);
     }
 
     #[test]
@@ -1733,9 +1798,9 @@ mod test {
         crate::strict::ensure_property_with_config(
             strategy,
             context,
-            crate::test_runner::Config {
+            Config {
                 failure_persistence: None,
-                ..crate::test_runner::Config::with_cases(1024)
+                ..Config::with_cases(1024)
             },
             property,
         )
@@ -1830,7 +1895,7 @@ mod test {
         // through `catch_unwind` while the assertions themselves use the
         // strict vocabulary.
         macro_rules! panic_on_empty {
-            ($t:tt) => {
+            ($t:tt, $zero:expr, $one:expr) => {
                 mod $t {
                     use crate::strategy::Strategy;
                     use crate::test_runner::TestRunner;
@@ -1838,20 +1903,20 @@ mod test {
                     use std::string::String;
                     use strict_test_support::{TestFailure, ensure};
 
-                    const ZERO: $t = 0 as $t;
-                    const ONE: $t = 1 as $t;
+                    const ZERO: $t = $zero;
+                    const ONE: $t = $one;
 
                     #[test]
                     fn range() -> Result<(), TestFailure> {
                         ensure(
                             panic::catch_unwind(|| {
                                 let mut runner = TestRunner::deterministic();
-                                let _ = (ZERO..ZERO).new_tree(&mut runner);
+                                drop((ZERO..ZERO).new_tree(&mut runner));
                             })
                             .err()
-                            .and_then(|a| {
-                                a.downcast_ref::<String>().map(|s| {
-                                    s == "Invalid use of empty range 0..0."
+                            .and_then(|payload| {
+                                payload.downcast_ref::<String>().map(|message| {
+                                    message == "Invalid use of empty range 0..0."
                                 })
                             }) == Some(true),
                             "an empty range panics with the documented \
@@ -1864,14 +1929,15 @@ mod test {
                         ensure(
                             panic::catch_unwind(|| {
                                 let mut runner = TestRunner::deterministic();
-                                let _ =
+                                drop(
                                     core::ops::RangeInclusive::new(ONE, ZERO)
-                                        .new_tree(&mut runner);
+                                        .new_tree(&mut runner),
+                                );
                             })
                             .err()
-                            .and_then(|a| {
-                                a.downcast_ref::<String>().map(|s| {
-                                    s == "Invalid use of empty range 1..=0."
+                            .and_then(|payload| {
+                                payload.downcast_ref::<String>().map(|message| {
+                                    message == "Invalid use of empty range 1..=0."
                                 })
                             }) == Some(true),
                             "an empty inclusive range panics with the \
@@ -1881,19 +1947,19 @@ mod test {
                 }
             };
         }
-        panic_on_empty!(u8);
-        panic_on_empty!(i8);
-        panic_on_empty!(u16);
-        panic_on_empty!(i16);
-        panic_on_empty!(u32);
-        panic_on_empty!(i32);
-        panic_on_empty!(u64);
-        panic_on_empty!(i64);
-        panic_on_empty!(usize);
-        panic_on_empty!(isize);
+        panic_on_empty!(u8, 0, 1);
+        panic_on_empty!(i8, 0, 1);
+        panic_on_empty!(u16, 0, 1);
+        panic_on_empty!(i16, 0, 1);
+        panic_on_empty!(u32, 0, 1);
+        panic_on_empty!(i32, 0, 1);
+        panic_on_empty!(u64, 0, 1);
+        panic_on_empty!(i64, 0, 1);
+        panic_on_empty!(usize, 0, 1);
+        panic_on_empty!(isize, 0, 1);
         #[cfg(feature = "f16")]
-        panic_on_empty!(f16);
-        panic_on_empty!(f32);
-        panic_on_empty!(f64);
+        panic_on_empty!(f16, 0.0, 1.0);
+        panic_on_empty!(f32, 0.0, 1.0);
+        panic_on_empty!(f64, 0.0, 1.0);
     }
 }

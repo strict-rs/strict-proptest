@@ -18,9 +18,20 @@ use crate::strategy::*;
 
 arbitrary!(ParseBoolError; "".parse::<bool>().unwrap_err());
 
+/// One weighted arm of the `gen_el_seqs` union: a `Just` of a fixed
+/// invalid-UTF-8 tail byte slice.
 type ELSeq = WA<Just<&'static [u8]>>;
+/// The union over the four candidate invalid-UTF-8 tail sequences that
+/// `gen_el_seqs` picks between.
 type ELSeqs = TupleUnion<(ELSeq, ELSeq, ELSeq, ELSeq)>;
 
+/// Builds a strategy that picks one of four byte sequences forming an invalid
+/// UTF-8 tail, with `error_len` of `None`, `Some(1)`, `Some(2)`, or `Some(3)`
+/// respectively; used to construct arbitrary `Utf8Error` values.
+#[allow(
+    clippy::single_call_fn,
+    reason = "the four-arm invalid UTF-8 tail sequence union feeding the Utf8Error strategy"
+)]
 fn gen_el_seqs() -> ELSeqs {
     prop_oneof![
         Just(&[0xC2]),                   // None
@@ -32,15 +43,17 @@ fn gen_el_seqs() -> ELSeqs {
 
 arbitrary!(Utf8Error, SFnPtrMap<(StrategyFor<u16>, ELSeqs), Utf8Error>;
     static_map((any::<u16>(), gen_el_seqs()), |(vut, elseq)| {
-        let v = core::iter::repeat_n(b'_', vut as usize)
+        let bytes = core::iter::repeat_n(b'_', vut as usize)
                     .chain(elseq.iter().cloned())
                     .collect::<Vec<u8>>();
-        from_utf8(&v).unwrap_err()
+        from_utf8(&bytes).unwrap_err()
     })
 );
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         parse_bool_error => ParseBoolError,
         utf8_error => Utf8Error

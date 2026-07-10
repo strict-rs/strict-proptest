@@ -43,6 +43,8 @@ arbitrary!(FpCategory,
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     no_panic_test!(
         parse_float_error => ParseFloatError,
         parse_int_error => ParseIntError,

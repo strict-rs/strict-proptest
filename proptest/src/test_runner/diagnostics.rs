@@ -26,37 +26,72 @@ use std::string::String;
 pub(crate) enum RunnerDiagnostic {
     /// A `PROPTEST_*` env-var value failed to parse as its target type.
     EnvVarUnparsable {
+        /// The `PROPTEST_*` variable name whose value was rejected.
         var: &'static str,
+        /// The raw string that could not be parsed.
         value: String,
+        /// The human name of the type parsing expected.
         typ: &'static str,
+        /// The default value, kept in place of the bad input.
         default: String,
     },
     /// A `PROPTEST_*` env-var value was not valid Unicode.
-    EnvVarNotUnicode { var: &'static str, default: String },
+    EnvVarNotUnicode {
+        /// The `PROPTEST_*` variable name with the non-Unicode value.
+        var: &'static str,
+        /// The default value, kept in place of the bad input.
+        default: String,
+    },
     /// An unrecognized `PROPTEST_*` env-var was encountered.
-    EnvVarUnknown { var: String },
+    EnvVarUnknown {
+        /// The unrecognized `PROPTEST_*` variable name.
+        var: String,
+    },
     /// A persistence file exists but could not be opened for reading.
     PersistenceOpenFailed {
+        /// The persistence file that could not be opened, if known.
         path: Option<PathBuf>,
+        /// The underlying I/O error from the failed open.
         error: io::Error,
     },
     /// Appending a new seed record to the persistence file failed.
-    PersistenceAppendFailed { path: PathBuf, error: io::Error },
+    PersistenceAppendFailed {
+        /// The persistence file the append targeted.
+        path: PathBuf,
+        /// The underlying I/O error from the failed append.
+        error: io::Error,
+    },
     /// A failing seed was persisted; tells the user where, and how to
     /// replicate the record on a CI copy of the file.
     PersistenceSaved {
+        /// The persistence file the seed was written to.
         path: PathBuf,
+        /// Whether this save created the file (vs. appending).
         created: bool,
+        /// The replayable seed line to add to a CI copy of the file.
         seed: String,
     },
     /// A relative source path could not be made absolute by walking up
     /// from the current directory.
-    SourceNotAbsolutizable { source: PathBuf },
+    SourceNotAbsolutizable {
+        /// The relative source path that could not be absolutized.
+        source: PathBuf,
+    },
     /// The current directory itself could not be determined.
-    CwdUnresolvable { source: PathBuf, error: io::Error },
+    CwdUnresolvable {
+        /// The relative source path that was being resolved.
+        source: PathBuf,
+        /// The I/O error from querying the current directory.
+        error: io::Error,
+    },
     /// A persistence-file line did not parse as a seed record. `line`
     /// is 1-based, ready for display.
-    UnparsableSeedLine { path: PathBuf, line: usize },
+    UnparsableSeedLine {
+        /// The persistence file containing the bad line.
+        path: PathBuf,
+        /// The 1-based line number of the unparsable record.
+        line: usize,
+    },
     /// `SourceParallel` persistence found no `lib.rs`/`main.rs` root.
     SourceParallelRootless,
     /// `SourceParallel` persistence was configured without a source.
@@ -194,11 +229,15 @@ pub(crate) fn emit_verbose(args: fmt::Arguments<'_>) {
 /// report to, and a diagnostic must never panic the run it describes
 /// (which is exactly what `eprintln!` does on a closed stderr).
 fn write_best_effort(args: fmt::Arguments<'_>) {
-    let _ = write_line(&mut io::stderr().lock(), args);
+    drop(write_line(&mut io::stderr().lock(), args));
 }
 
 /// The seam's writer core, injectable so tests can capture the exact
 /// bytes and prove the error path stays panic-free.
+#[allow(
+    clippy::single_call_fn,
+    reason = "injectable writer core for the diagnostics seam so tests can capture the exact stderr bytes"
+)]
 fn write_line(
     writer: &mut dyn Write,
     args: fmt::Arguments<'_>,

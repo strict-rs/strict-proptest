@@ -29,11 +29,15 @@ pub type SequentialStrategy<State, Transition> = Sequential<
     BoxedStrategy<Transition>,
 >;
 
+/// Shared callback that builds a strategy for the initial reference state.
 type InitStateFn<StateStrategy> = Arc<dyn Fn() -> StateStrategy + Send + Sync>;
+/// Shared predicate that decides whether a transition is valid in a state.
 type PreconditionsFn<State, Transition> =
     Arc<dyn Fn(&State, &Transition) -> bool + Send + Sync>;
+/// Shared callback that builds candidate transition strategies for a state.
 type TransitionsFn<State, TransitionStrategy> =
     Arc<dyn Fn(&State) -> TransitionStrategy + Send + Sync>;
+/// Shared callback that advances the reference state after a transition.
 type NextFn<State, Transition> =
     Arc<dyn Fn(State, &Transition) -> State + Send + Sync>;
 
@@ -94,6 +98,10 @@ pub trait ReferenceStateMachine: 'static {
     /// filtering, which comes with some [disadvantages](https://altsysrq.github.io/proptest-book/proptest/tutorial/filtering.html).
     /// This means that pre-conditions that are hard to satisfy might slow down
     /// the test or even fail by exceeding the maximum rejection count.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "default reference-state-machine precondition gate that accepts every transition unfiltered"
+    )]
     fn preconditions(
         state: &Self::State,
         transition: &Self::Transition,
@@ -150,10 +158,15 @@ pub trait ReferenceStateMachine: 'static {
 /// For `complicate`, we attempt to undo the last shrink operation, if there was
 /// any.
 pub struct Sequential<State, Transition, StateStrategy, TransitionStrategy> {
+    /// Number of transitions generated for each state-machine case.
     size: SizeRange,
+    /// Strategy factory for the initial reference state.
     init_state: InitStateFn<StateStrategy>,
+    /// Predicate that guards generated and shrunken transitions.
     preconditions: PreconditionsFn<State, Transition>,
+    /// Strategy factory for transitions available from a reference state.
     transitions: TransitionsFn<State, TransitionStrategy>,
+    /// Reference-state transition function.
     next: NextFn<State, Transition>,
 }
 
@@ -165,6 +178,19 @@ where
     StateStrategy: 'static,
     TransitionStrategy: 'static,
 {
+    /// Constructs a sequential strategy from the reference model's building
+    /// blocks.
+    ///
+    /// `size` is the number or range of transitions to generate per case;
+    /// `init_state` produces the strategy for the initial reference state;
+    /// `preconditions` is the predicate a candidate transition must satisfy
+    /// in the current state; `transitions` produces the strategy for the next
+    /// transition given the current state; and `next` applies a transition to
+    /// advance the reference state.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "constructs the Sequential strategy from the reference models generation and transition callbacks"
+    )]
     pub fn new(
         size: SizeRange,
         init_state: impl Fn() -> StateStrategy + 'static + Send + Sync,
@@ -185,7 +211,7 @@ where
 impl<State, Transition, StateStrategy, TransitionStrategy> Debug
     for Sequential<State, Transition, StateStrategy, TransitionStrategy>
 {
-    fn fmt(&self, f: &mut Formatter) -> Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.debug_struct("Sequential")
             .field("size", &self.size)
             .finish()
@@ -233,8 +259,7 @@ impl<
             if (self.preconditions)(&state, &transition) {
                 transitions.push(transition_tree);
                 state = (self.next)(state, &transition);
-                acceptable_transitions
-                    .push((TransitionState::Accepted, transition));
+                acceptable_transitions.push((Accepted, transition));
             } else {
                 runner.reject_local("Pre-conditions were not satisfied")?;
             }
@@ -256,7 +281,7 @@ impl<
             max_ix,
             // On a failure, we start by shrinking transitions from the back
             // which is less likely to invalidate pre-conditions
-            shrink: Shrink::DeleteTransition(max_ix),
+            shrink: DeleteTransition(max_ix),
             last_shrink: None,
             seen_transitions_counter: Some(Default::default()),
         })
@@ -328,6 +353,33 @@ pub struct SequentialValueTree<
     /// shrinking and this field is set to `None` as it's no longer needed for
     /// shrinking.
     seen_transitions_counter: Option<Arc<AtomicUsize>>,
+}
+
+impl<State, Transition, StateValueTree, TransitionValueTree> Debug
+    for SequentialValueTree<
+        State,
+        Transition,
+        StateValueTree,
+        TransitionValueTree,
+    >
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        f.debug_struct("SequentialValueTree")
+            .field(
+                "is_initial_state_shrinkable",
+                &self.is_initial_state_shrinkable,
+            )
+            .field("transitions", &self.transitions.len())
+            .field("included_transitions", &self.included_transitions.count())
+            .field(
+                "shrinkable_transitions",
+                &self.shrinkable_transitions.count(),
+            )
+            .field("max_ix", &self.max_ix)
+            .field("shrink", &self.shrink)
+            .field("last_shrink", &self.last_shrink)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<
@@ -430,7 +482,7 @@ impl<
         while let Transition(ix) = self.shrink {
             if self.shrinkable_transitions.count() == 0 {
                 // Move on to shrinking the initial state
-                self.shrink = Shrink::InitialState;
+                self.shrink = InitialState;
                 break;
             }
 
@@ -723,13 +775,37 @@ mod test {
 
     use proptest::collection::hash_set;
     use proptest::strict::{self, TestFailure};
-    use strict_test_support::{ensure, ensure_eq, ensure_some};
+    use strict_test_support::{
+        ensure, ensure_contains, ensure_eq, ensure_some,
+    };
 
     use heap_state_machine::*;
     use std::collections::HashSet;
     // `use super::*` drags in the library's `fmt::Result` alias, which would
     // otherwise shadow the prelude `Result` in the test signatures below.
     use std::result::Result;
+
+    #[test]
+    fn sequential_value_tree_debug_reports_shrink_state()
+    -> Result<(), TestFailure> {
+        let value_tree = deterministic_sequential_value_tree()?;
+        let rendered = format!("{value_tree:?}");
+        ensure_contains(
+            &rendered,
+            "SequentialValueTree",
+            "the debug rendering names the value-tree type",
+        )?;
+        ensure_contains(
+            &rendered,
+            "shrink",
+            "the debug rendering exposes the current shrink cursor",
+        )?;
+        ensure_contains(
+            &rendered,
+            "included_transitions",
+            "the debug rendering exposes the included-transition count",
+        )
+    }
 
     /// A number of simplifications that can be applied in the `ValueTree`
     /// produced by [`deterministic_sequential_value_tree`]. It depends on the
@@ -786,6 +862,10 @@ mod test {
         )
     }
 
+    #[allow(
+        clippy::single_call_fn,
+        reason = "test body driving repeated simplify and complicate cycles while preconditions hold"
+    )]
     fn test_state_machine_sequential_value_tree_aux(
         complicate_ixs: HashSet<usize>,
     ) -> Result<(), TestFailure> {
@@ -855,6 +935,10 @@ mod test {
         )
     }
 
+    #[allow(
+        clippy::single_call_fn,
+        reason = "test body verifying the first simplification prunes the unseen transitions"
+    )]
     fn test_value_tree_initial_simplification_aux(
         len: usize,
     ) -> Result<(), TestFailure> {
@@ -897,7 +981,10 @@ mod test {
                 seen_before_complication.pop(),
                 "more than one seen transition leaves a last element",
             )?;
-            seen_before_complication.pop();
+            let _removed_before_last = ensure_some(
+                seen_before_complication.pop(),
+                "more than one seen transition leaves a predecessor to remove",
+            )?;
             seen_before_complication.push(last);
             ensure(
                 seen_before_complication == seen_after_first_complication,
@@ -944,9 +1031,9 @@ mod test {
             "current() with a non-zero seen counter must panic",
         )?;
 
-        let s = "Unexpected non-zero `seen_transitions_counter`";
+        let message = "Unexpected non-zero `seen_transitions_counter`";
         ensure(
-            payload.downcast_ref::<&str>() == Some(&s),
+            payload.downcast_ref::<&str>() == Some(&message),
             "the guard panic carries its documented message",
         )
     }
@@ -962,25 +1049,25 @@ mod test {
 
         use super::TRANSITIONS;
 
-        pub struct HeapStateMachine;
+        pub(super) struct HeapStateMachine;
 
-        pub type TestValueTree = SequentialValueTree<
+        pub(super) type TestValueTree = SequentialValueTree<
             TestState,
             TestTransition,
             <BoxedStrategy<TestState> as Strategy>::Tree,
             <BoxedStrategy<TestTransition> as Strategy>::Tree,
         >;
 
-        pub type TestState = Vec<i32>;
+        pub(super) type TestState = Vec<i32>;
 
         #[derive(Clone, Debug, PartialEq)]
-        pub enum TestTransition {
+        pub(super) enum TestTransition {
             PopNonEmpty,
             PopEmpty,
             Push(i32),
         }
 
-        pub fn deterministic_sequential_value_tree()
+        pub(super) fn deterministic_sequential_value_tree()
         -> Result<TestValueTree, strict_test_support::TestFailure> {
             let sequential =
                 <HeapStateMachine as ReferenceStateMachine>::sequential_strategy(
@@ -1025,10 +1112,10 @@ mod test {
             ) -> Self::State {
                 match transition {
                     TestTransition::PopEmpty => {
-                        state.pop();
+                        let _popped = state.pop();
                     }
                     TestTransition::PopNonEmpty => {
-                        state.pop();
+                        let _popped = state.pop();
                     }
                     TestTransition::Push(value) => state.push(*value),
                 }
@@ -1111,8 +1198,7 @@ mod test {
                 (): Self::SystemUnderTest,
                 ref_state: &FailIfLessThan,
                 transition: u32,
-            ) -> Result<Self::SystemUnderTest, proptest::strict::TestFailure>
-            {
+            ) -> Result<Self::SystemUnderTest, TestFailure> {
                 // Fail on any transition that is less than the ref state's limit.
                 let FailIfLessThan(limit) = ref_state;
                 ensure(
@@ -1336,14 +1422,20 @@ mod test {
                                 state.is_empty(),
                                 "PopEmpty is only generated on an empty heap",
                             )?;
-                            state.pop();
+                            ensure(
+                                state.pop().is_none(),
+                                "PopEmpty leaves an empty heap unchanged",
+                            )?;
                         }
                         TestTransition::PopNonEmpty => {
                             ensure(
                                 !state.is_empty(),
                                 "PopNonEmpty is only generated on a non-empty heap",
                             )?;
-                            state.pop();
+                            let _popped = ensure_some(
+                                state.pop(),
+                                "PopNonEmpty removes an element from a non-empty heap",
+                            )?;
                         }
                         TestTransition::Push(value) => state.push(value),
                     }

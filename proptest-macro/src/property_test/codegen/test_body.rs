@@ -11,6 +11,10 @@ use super::{nth_field_name, struct_name};
 /// expression is the `<proptest>::strict::ensure_property` (or
 /// `ensure_property_with_config`) call, whose verdict is the wrapper's return
 /// value
+#[allow(
+    clippy::single_call_fn,
+    reason = "the strict-runner block wrapping the original property body"
+)]
 pub(super) fn body(
     block: Block,
     args: &[Argument],

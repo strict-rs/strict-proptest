@@ -22,6 +22,13 @@ pub(crate) use self::f16::F16U;
 pub(crate) use self::f32::F32U;
 pub(crate) use self::f64::F64U;
 
+/// Defines a high-precision uniform float sampler module for one float type.
+///
+/// Emits a `pub mod` (named after `$typ`) providing a `FloatUniform`
+/// (`impl UniformSampler`) and the `$wrapper` newtype (`F32U`/`F64U`/`F16U`)
+/// that `num` samples through. The sampler recursively splits the range into
+/// equal-width intervals and descends until a single ULP remains, avoiding the
+/// overflow and precision loss of `rand`'s float `Uniform`.
 macro_rules! float_sampler {
     (
         $typ: ident,
@@ -29,7 +36,7 @@ macro_rules! float_sampler {
         $wrapper: ident
         $(, no_std_trait = $no_std_trait:path)?
     ) => {
-        pub mod $typ {
+        mod $typ {
             use rand::prelude::*;
             use rand::distr::uniform::{
                 SampleBorrow, SampleUniform, UniformSampler,
@@ -40,15 +47,15 @@ macro_rules! float_sampler {
             )?
             #[must_use]
             // Returns the previous float value. In other words the greatest value representable
-            // as a float such that `next_down(a) < a`. `-0.` is treated as `0.`.
-            fn next_down(a: $typ) -> $typ {
-                debug_assert!(a.is_finite() && a > $typ::MIN, "`next_down` invalid input: {}", a);
-                if a == (0.) {
+            // as a float such that `next_down(float) < float`. `-0.` is treated as `0.`.
+            fn next_down(float: $typ) -> $typ {
+                debug_assert!(float.is_finite() && float > $typ::MIN, "`next_down` invalid input: {}", float);
+                if float == (0.) {
                     -$typ::from_bits(1)
-                } else if a < 0. {
-                    $typ::from_bits(a.to_bits() + 1)
+                } else if float < 0. {
+                    $typ::from_bits(float.to_bits() + 1)
                 } else {
-                    $typ::from_bits(a.to_bits() - 1)
+                    $typ::from_bits(float.to_bits() - 1)
                 }
             }
 
@@ -56,9 +63,10 @@ macro_rules! float_sampler {
             // Returns the unit in last place using the definition by John Harrison.
             // This is the distance between `a` and the next closest float. Note that
             // `ulp(1) = $typ::EPSILON/2`.
-            fn ulp(a: $typ) -> $typ {
-                debug_assert!(a.is_finite() && a > $typ::MIN, "`ulp` invalid input: {}", a);
-                a.abs() - next_down(a.abs())
+            #[allow(clippy::single_call_fn, reason = "compute one unit-in-last-place step for the float uniform sampler's interval split")]
+            fn ulp(float: $typ) -> $typ {
+                debug_assert!(float.is_finite() && float > $typ::MIN, "`ulp` invalid input: {}", float);
+                float.abs() - next_down(float.abs())
             }
 
             #[derive(Copy, Clone, Debug)]
@@ -259,7 +267,7 @@ macro_rules! float_sampler {
 
             // Values greater than MAX_PRECISE_INT may be rounded when converted to float.
             const MAX_PRECISE_INT: $int_typ =
-                (2 as $int_typ).pow($typ::MANTISSA_DIGITS);
+                <$int_typ>::pow(2, $typ::MANTISSA_DIGITS);
 
             #[cfg(test)]
             mod test {
@@ -327,6 +335,7 @@ macro_rules! float_sampler {
                     )
                 }
 
+                #[allow(clippy::single_call_fn, reason = "test-only helper ordering a float pair before the uniform sampler round-trip check")]
                 fn sort((left, right): ($typ, $typ)) -> ($typ, $typ) {
                     if left < right {
                         (left, right)
@@ -354,7 +363,7 @@ macro_rules! float_sampler {
 
                 fn bounds() -> impl Strategy<Value = ($typ, $typ)> {
                     (finite(), finite())
-                        .prop_filter("Bounds can't be equal", |(a, b)| a != b)
+                        .prop_filter("Bounds can't be equal", |(left, right)| left != right)
                         .prop_map(sort)
                 }
 
@@ -371,9 +380,9 @@ macro_rules! float_sampler {
 
                     let samples = (0..100)
                         .map(|_| $typ::from(uniform.sample(&mut test_rng)));
-                    for s in samples {
+                    for sample in samples {
                         ensure(
-                            low <= s && s < high,
+                            low <= sample && sample < high,
                             "every sample stays within the half-open range",
                         )?;
                     }
@@ -412,9 +421,9 @@ macro_rules! float_sampler {
 
                     let samples = (0..100)
                         .map(|_| $typ::from(uniform.sample(&mut test_rng)));
-                    for s in samples {
+                    for sample in samples {
                         ensure(
-                            low <= s && s <= high,
+                            low <= sample && sample <= high,
                             "every sample stays within the inclusive range",
                         )?;
                     }
@@ -466,13 +475,14 @@ macro_rules! float_sampler {
                     use crate::strategy::{Strategy, ValueTree};
 
                     let mut runner = TestRunner::default();
+                    let mid: $typ = 1.5;
                     let tree = ensure_some(
-                        (1.5 as $typ ..= 1.5 as $typ).new_tree(&mut runner).ok(),
+                        (mid..=mid).new_tree(&mut runner).ok(),
                         "a single-point inclusive range generates a value tree",
                     )?;
                     ensure_eq(
                         &tree.current(),
-                        &(1.5 as $typ),
+                        &mid,
                         "the single-point strategy yields its point",
                     )
                 }
@@ -618,7 +628,7 @@ macro_rules! float_sampler {
                                 "at least one interval is sampled",
                             )?;
                             ensure(
-                                it.all(|g| g == interval_size),
+                                it.all(|width| width == interval_size),
                                 "every sampled interval has the same width",
                             )
                         },
