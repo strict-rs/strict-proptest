@@ -68,8 +68,7 @@ pub(super) fn is_strategy(attr: &Attribute) -> bool {
     let path_correct = attr
         .path()
         .get_ident()
-        .map(|ident| ident == "strategy")
-        .unwrap_or(false);
+        .is_some_and(|ident| ident == "strategy");
 
     let has_equals = matches!(&attr.meta, Meta::NameValue(_));
 

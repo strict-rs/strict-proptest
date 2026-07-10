@@ -19,11 +19,11 @@ use proptest::strict::{TestResult, ensure_property};
 use proptest_derive::Arbitrary;
 use strict_test_support::ensure;
 
-fn even(x: &usize) -> bool {
+const fn even(x: &usize) -> bool {
     x.is_multiple_of(2)
 }
 
-fn rem3(x: &usize) -> bool {
+const fn rem3(x: &usize) -> bool {
     x.is_multiple_of(3)
 }
 
@@ -32,7 +32,7 @@ struct Param(usize);
 
 impl Default for Param {
     fn default() -> Self {
-        Param(100)
+        Self(100)
     }
 }
 
@@ -93,7 +93,7 @@ struct T3(
     clippy::single_call_fn,
     reason = "test predicate keeping only the T4::V0 container variant"
 )]
-fn is_v0(candidate: &T4) -> bool {
+const fn is_v0(candidate: &T4) -> bool {
     matches!(candidate, T4::V0 { .. })
 }
 
@@ -111,7 +111,7 @@ enum T4 {
     clippy::single_call_fn,
     reason = "T5::V0 filter predicate accepting fields divisible by three"
 )]
-fn t5_v0_rem_3(candidate: &T5) -> bool {
+const fn t5_v0_rem_3(candidate: &T5) -> bool {
     if let T5::V0 { field } = candidate {
         rem3(field)
     } else {
@@ -123,7 +123,7 @@ fn t5_v0_rem_3(candidate: &T5) -> bool {
     clippy::single_call_fn,
     reason = "T5::V1 filter predicate accepting fields divisible by five"
 )]
-fn t5_v1_rem_5(candidate: &T5) -> bool {
+const fn t5_v1_rem_5(candidate: &T5) -> bool {
     if let T5::V1(field) = candidate {
         field.is_multiple_of(5)
     } else {
@@ -149,7 +149,7 @@ enum T5 {
     clippy::single_call_fn,
     reason = "T6::V0 filter predicate accepting fields divisible by three"
 )]
-fn t6_v0_rem_3(candidate: &T6) -> bool {
+const fn t6_v0_rem_3(candidate: &T6) -> bool {
     if let T6::V0 { field } = candidate {
         rem3(field)
     } else {
@@ -161,7 +161,7 @@ fn t6_v0_rem_3(candidate: &T6) -> bool {
     clippy::single_call_fn,
     reason = "T6::V1 filter predicate accepting fields divisible by five"
 )]
-fn t6_v1_rem_5(candidate: &T6) -> bool {
+const fn t6_v1_rem_5(candidate: &T6) -> bool {
     if let T6::V1(field) = candidate {
         field.is_multiple_of(5)
     } else {

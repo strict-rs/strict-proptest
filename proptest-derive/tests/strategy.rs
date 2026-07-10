@@ -62,7 +62,7 @@ enum T2 {
     },
 }
 
-fn ensure_consistency(start: usize, produced: usize) -> TestResult {
+const fn ensure_consistency(start: usize, produced: usize) -> TestResult {
     ensure(
         produced.is_multiple_of(2) && produced < 200 && produced >= (start * 2),
         "the custom strategy doubles a value from its start range",

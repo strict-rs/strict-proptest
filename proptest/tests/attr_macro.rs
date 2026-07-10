@@ -16,7 +16,7 @@
 use proptest::strict::TestResult;
 use strict_test_support::{ensure, ensure_contains, ensure_eq, ensure_some};
 
-/// Regression for https://github.com/proptest-rs/proptest/issues/601
+/// Regression for <https://github.com/proptest-rs/proptest/issues/601>
 ///
 /// `mut` must survive both on a plain ident argument and on an ident
 /// nested inside a tuple-destructuring pattern when the macro rewrites

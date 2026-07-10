@@ -55,7 +55,7 @@ struct T4 {
     clippy::single_call_fn,
     reason = "fn-path value expression that adds one to the params argument for T5"
 )]
-fn add(x: u8) -> u8 {
+const fn add(x: u8) -> u8 {
     x + 1
 }
 

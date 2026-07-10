@@ -98,7 +98,7 @@ pub trait StateMachineTest {
         #[cfg(feature = "std")]
         if config.verbose >= INFO_LOG {
             eprintln!();
-            eprintln!("Running a test case with {} transitions.", trans_len);
+            eprintln!("Running a test case with {trans_len} transitions.");
         }
         #[cfg(not(feature = "std"))]
         drop((config, trans_len));
@@ -272,14 +272,14 @@ mod tests {
             }
 
             fn transitions(
-                _: &Self::State,
+                (): &Self::State,
             ) -> proptest::strategy::BoxedStrategy<Self::Transition>
             {
                 use proptest::prelude::*;
                 Just(()).boxed()
             }
 
-            fn apply(_: Self::State, _: &Self::Transition) -> Self::State {}
+            fn apply((): Self::State, (): &Self::Transition) -> Self::State {}
         }
 
         impl crate::StateMachineTest for Test {
@@ -288,14 +288,14 @@ mod tests {
             type Reference = Self;
 
             fn init_test(
-                _: &<Self::Reference as crate::ReferenceStateMachine>::State,
+                (): &<Self::Reference as crate::ReferenceStateMachine>::State,
             ) -> Self::SystemUnderTest {
             }
 
             fn apply(
-                _: Self::SystemUnderTest,
-                _: &<Self::Reference as crate::ReferenceStateMachine>::State,
-                _: <Self::Reference as crate::ReferenceStateMachine>::Transition,
+                (): Self::SystemUnderTest,
+                (): &<Self::Reference as crate::ReferenceStateMachine>::State,
+                (): <Self::Reference as crate::ReferenceStateMachine>::Transition,
             ) -> Result<Self::SystemUnderTest, proptest::strict::TestFailure>
             {
                 Ok(())

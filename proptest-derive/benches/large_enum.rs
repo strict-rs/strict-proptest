@@ -51,7 +51,7 @@ enum LargeEnum1 {
 
 impl LargeEnum1 {
     /// Return the length of the active variant's `String` payload.
-    fn payload_len(&self) -> usize {
+    const fn payload_len(&self) -> usize {
         match self {
             Self::V1(payload)
             | Self::V2(payload)
@@ -112,7 +112,7 @@ enum LargeEnum2 {
 
 impl LargeEnum2 {
     /// Return the length of the nested payload selected by the active variant.
-    fn payload_len(&self) -> usize {
+    const fn payload_len(&self) -> usize {
         match self {
             Self::V1(payload)
             | Self::V2(payload)
@@ -167,11 +167,11 @@ fn enum_benchmark(harness: &mut Criterion) {
     let _harness = harness
         .bench_function("enum 1", |bencher| {
             let mut runner = TestRunner::default();
-            bencher.iter(|| black_box(enum1_bench(&mut runner)))
+            bencher.iter(|| black_box(enum1_bench(&mut runner)));
         })
         .bench_function("enum 2", |bencher| {
             let mut runner = TestRunner::default();
-            bencher.iter(|| black_box(enum2_bench(&mut runner)))
+            bencher.iter(|| black_box(enum2_bench(&mut runner)));
         });
 }
 

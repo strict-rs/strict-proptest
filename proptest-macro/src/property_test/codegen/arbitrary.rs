@@ -99,15 +99,15 @@ fn custom_strategies(
     let arg_strategies: TokenStream = args
         .iter()
         .map(|arg| {
-            arg.strategy
-                .as_ref()
-                .map(|expr| quote! {#expr,})
-                .unwrap_or_else(|| {
+            arg.strategy.as_ref().map_or_else(
+                || {
                     let ty = &arg.pat_ty.ty;
                     quote_spanned! {
                         ty.span() => #proptest::prelude::any::<#ty>(),
                     }
-                })
+                },
+                |expr| quote! {#expr,},
+            )
         })
         .collect();
 

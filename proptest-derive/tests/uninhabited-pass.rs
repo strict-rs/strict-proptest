@@ -91,7 +91,7 @@ enum UsePrj0 {
 }
 
 impl UsePrj0 {
-    fn projection(self) -> <! as Fun>::Prj {
+    const fn projection(self) -> <! as Fun>::Prj {
         let Self::V0(payload) = self;
         payload
     }
@@ -103,7 +103,7 @@ enum UsePrj1 {
 }
 
 impl UsePrj1 {
-    fn projection(self) -> <(!, usize, !) as Fun>::Prj {
+    const fn projection(self) -> <(!, usize, !) as Fun>::Prj {
         let Self::V0(payload) = self;
         payload
     }

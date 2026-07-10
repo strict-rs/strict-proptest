@@ -55,10 +55,10 @@ proptest! {
         prop_assert!(parse_date(&input).is_some());
     }
 
-    fn parses_date_back_to_original(y in 0u32..10_000,
-                                    month in 1u32..13, day in 1u32..32) {
+    fn parses_date_back_to_original(y in 0_u32..10_000,
+                                    month in 1_u32..13, day in 1_u32..32) {
         let (y2, m2, d2) = parse_date(
-            &format!("{:04}-{:02}-{:02}", y, month, day)).unwrap();
+            &format!("{y:04}-{month:02}-{day:02}")).unwrap();
         prop_assert_eq!((y, month, day), (y2, m2, d2));
     }
 }

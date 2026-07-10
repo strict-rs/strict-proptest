@@ -491,7 +491,7 @@ enum OneTwo {
 }
 
 impl OneTwo {
-    fn width(&self) -> usize {
+    const fn width(&self) -> usize {
         match self {
             Self::One(payload) => {
                 let _ = payload.count_ones();
@@ -513,7 +513,7 @@ enum ZeroOneTwo {
 }
 
 impl ZeroOneTwo {
-    fn width(&self) -> usize {
+    const fn width(&self) -> usize {
         match self {
             Self::Zero => 0,
             Self::One(payload) => {

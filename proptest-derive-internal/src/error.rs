@@ -135,11 +135,11 @@ pub(crate) fn if_present_on_unit_variant(
     }
 
     if attrs.params.is_set() {
-        params_on_unit_variant(ctx)
+        params_on_unit_variant(ctx);
     }
 
     if !attrs.filter.is_empty() {
-        filter_on_unit_variant(ctx)
+        filter_on_unit_variant(ctx);
     }
 }
 
@@ -153,11 +153,11 @@ pub(crate) fn if_present_on_unit_struct(
     attrs: &ParsedAttributes,
 ) {
     if attrs.params.is_set() {
-        params_on_unit_struct(ctx)
+        params_on_unit_struct(ctx);
     }
 
     if !attrs.filter.is_empty() {
-        filter_on_unit_struct(ctx)
+        filter_on_unit_struct(ctx);
     }
 }
 
@@ -168,7 +168,7 @@ pub(crate) fn if_skip_present(
     item_kind: &str,
 ) {
     if attrs.skip {
-        illegal_skip(ctx, item_kind)
+        illegal_skip(ctx, item_kind);
     }
 }
 
@@ -179,7 +179,7 @@ pub(crate) fn if_weight_present(
     item_kind: &str,
 ) {
     if attrs.weight.is_some() {
-        illegal_weight(ctx, item_kind)
+        illegal_weight(ctx, item_kind);
     }
 }
 
@@ -238,7 +238,7 @@ impl Context {
             0 => Ok(()),
             1 => Err(compile_error(&self.errors.pop().unwrap())),
             n => {
-                let mut msg = format!("{} errors:", n);
+                let mut msg = format!("{n} errors:");
                 for err in self.errors {
                     msg.push_str("\n\t# ");
                     msg.push_str(&err);
@@ -765,7 +765,7 @@ mod tests {
     {
         ::strict_test_support::ensure_eq(
             &mk_err_msg!(E0001, "This is a sample error message."),
-            &"[proptest_derive, E0001] during #[derive(Arbitrary)]:\nThis is a sample error message. Please see: https://proptest-rs.github.io/proptest/proptest-derive/errors.html#e0001 for more information.".to_string(),
+            &"[proptest_derive, E0001] during #[derive(Arbitrary)]:\nThis is a sample error message. Please see: https://proptest-rs.github.io/proptest/proptest-derive/errors.html#e0001 for more information.".to_owned(),
             "the composed error message carries the code, banner, and doc link",
         )
     }

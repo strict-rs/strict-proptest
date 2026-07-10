@@ -39,7 +39,7 @@ enum Foo {
 }
 
 impl Foo {
-    fn payload(&self) -> (usize, u8) {
+    const fn payload(&self) -> (usize, u8) {
         match self {
             Self::F0(left, right) => (*left, *right),
         }
@@ -55,7 +55,7 @@ enum Custom {
 }
 
 impl Custom {
-    fn payload(&self) -> Option<usize> {
+    const fn payload(&self) -> Option<usize> {
         match self {
             Self::Unit => None,
             Self::Fixed(payload) => Some(*payload),
@@ -78,7 +78,7 @@ enum Bobby {
 }
 
 impl Bobby {
-    fn payload(&self) -> usize {
+    const fn payload(&self) -> usize {
         match self {
             Self::Defaulted(payload)
             | Self::Valued(payload)
@@ -104,7 +104,7 @@ enum Quux {
 }
 
 impl Quux {
-    fn payload_score(&self) -> usize {
+    const fn payload_score(&self) -> usize {
         match self {
             Self::Bare(payload) => *payload,
             Self::Pair(payload, text) | Self::PinnedPair(payload, text) => {
@@ -138,7 +138,7 @@ fn foo_value_constructor_sets_payload() -> TestResult {
 #[test]
 fn a_custom_strategy_sets_c_payload() -> TestResult {
     ensure_property(
-        &any_with::<Custom>(0usize),
+        &any_with::<Custom>(0_usize),
         "a variant strategy pins the C payload",
         |value| {
             if let Some(payload) = value.payload() {

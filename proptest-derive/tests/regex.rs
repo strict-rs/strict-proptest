@@ -21,7 +21,7 @@ use proptest::string::StrategyFromRegex;
 use proptest_derive::Arbitrary;
 use strict_test_support::{ensure, ensure_ok};
 
-fn mk_regex() -> &'static str {
+const fn mk_regex() -> &'static str {
     "[0-9][0-9]"
 }
 

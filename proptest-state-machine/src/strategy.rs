@@ -514,7 +514,7 @@ impl<
             return self.simplify();
         }
 
-        if let InitialState = self.shrink {
+        if matches!(self.shrink, InitialState) {
             return self.simplify_initial_state();
         }
 
@@ -616,7 +616,7 @@ impl<
     /// index is taken from its current value.
     fn check_acceptable(&self, ix: Option<usize>, mut state: State) -> bool {
         let transitions = self.get_included_acceptable_transitions(ix);
-        for transition in transitions.iter() {
+        for transition in &transitions {
             let is_acceptable = (self.preconditions)(&state, transition);
             if is_acceptable {
                 state = (self.next)(state, transition);
@@ -670,7 +670,7 @@ impl<
     /// when the end is reached, because sometimes a transition might become
     /// acceptable only after a transition that comes before it in the sequence
     /// gets shrunk.
-    fn next_shrink_transition(&self, current_ix: usize) -> Shrink {
+    const fn next_shrink_transition(&self, current_ix: usize) -> Shrink {
         if current_ix == self.max_ix {
             // Either loop back to the start of the list...
             Transition(0)
@@ -875,7 +875,7 @@ mod test {
             |value_tree: &TestValueTree| -> Result<(), TestFailure> {
                 let (mut state, transitions, _seen_counter) =
                     value_tree.current();
-                for transition in transitions.into_iter() {
+                for transition in transitions {
                     // Every transition must satisfy the pre-conditions
                     ensure(
                         <HeapStateMachine as ReferenceStateMachine>::preconditions(
@@ -929,7 +929,7 @@ mod test {
     #[test]
     fn test_value_tree_initial_simplification() -> Result<(), TestFailure> {
         strict::ensure_property(
-            &(10usize..100),
+            &(10_usize..100),
             "the first simplification removes the unseen transitions",
             test_value_tree_initial_simplification_aux,
         )

@@ -153,7 +153,7 @@ pub(crate) fn extract_simple_path(path: &syn::Path) -> Option<&syn::Ident> {
 }
 
 /// Does the path have a leading `::`?
-pub(crate) fn path_is_global(path: &syn::Path) -> bool {
+pub(crate) const fn path_is_global(path: &syn::Path) -> bool {
     path.leading_colon.is_some()
 }
 

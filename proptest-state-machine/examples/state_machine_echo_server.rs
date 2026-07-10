@@ -126,7 +126,7 @@ struct TestClient {
 type ClientId = usize;
 
 impl ReferenceStateMachine for RefState {
-    type State = RefState;
+    type State = Self;
 
     type Transition = Transition;
 
@@ -155,7 +155,7 @@ impl ReferenceStateMachine for RefState {
             ]
             .boxed()
         } else {
-            let ids: Vec<_> = state.clients.iter().cloned().collect();
+            let ids: Vec<_> = state.clients.iter().copied().collect();
             let arb_id = proptest::sample::select(ids);
             prop_oneof![
                 Just(StartServer),
@@ -259,7 +259,7 @@ impl StateMachineTest for EchoServerTest {
                 state.server = Some(TestServer {
                     dialer,
                     listener_handle,
-                })
+                });
             }
             Transition::StopServer => {
                 let server = ensure_some(
@@ -279,18 +279,16 @@ impl StateMachineTest for EchoServerTest {
                         "The server is waiting for all the clients to \
                              stop..."
                     );
-                    for (id, client) in
-                        std::mem::take(&mut state.clients).into_iter()
-                    {
+                    for (id, client) in std::mem::take(&mut state.clients) {
                         // Ask the client to stop
                         client.dialer.handler.stop();
-                        println!("Asking client {} listener to stop.", id);
+                        println!("Asking client {id} listener to stop.");
                         // Wait for it to actually stop
                         ensure(
                             client.listener_handle.join().is_ok(),
                             "a client listener thread stops cleanly",
                         )?;
-                        println!("Client {} listener stopped.", id);
+                        println!("Client {id} listener stopped.");
                     }
                     println!("All clients have stopped.");
                 }
@@ -319,7 +317,7 @@ impl StateMachineTest for EchoServerTest {
                         // a send error only means the receiver was dropped
                         // because the test case is already over.
                         drop(msgs_send.send(msg));
-                    })
+                    });
                 });
 
                 ensure(
@@ -485,7 +483,7 @@ mod system_under_test {
             NetEvent::Connected(_, _) => (), // Only generated at connect() calls.
             NetEvent::Accepted(endpoint, _resource_id) => {
                 // Only connection oriented protocols will generate this event
-                println!("Client ({}) connected.", endpoint.addr(),);
+                println!("Client ({}) connected.", endpoint.addr());
             }
             NetEvent::Message(endpoint, msg_bytes) => {
                 let message: Msg =
@@ -563,7 +561,7 @@ mod system_under_test {
                             address.port()
                         );
                     } else {
-                        println!("Cannot connect to server at {server}.")
+                        println!("Cannot connect to server at {server}.");
                     }
                     is_connected.store(established, ATOMIC_ORDER);
                 }

@@ -38,10 +38,13 @@ pub(super) fn body(
             // `mut x: i32`, we have to generate `mut x`, not `x: mut x`
             //
             // See https://github.com/proptest-rs/proptest/issues/601
-            Pat::Ident(i) => match i.mutability {
-                Some(mutability) => quote!(#mutability #field_name,),
-                None => quote!(#field_name,),
-            },
+            Pat::Ident(i) => {
+                if let Some(mutability) = i.mutability {
+                    quote!(#mutability #field_name,)
+                } else {
+                    quote!(#field_name,)
+                }
+            }
             _ => quote!(#field_name: #pat,),
         }
     });

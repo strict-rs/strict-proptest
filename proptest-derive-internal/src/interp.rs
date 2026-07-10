@@ -39,7 +39,7 @@ fn parse_lit_int(mut digits: &str) -> Option<u128> {
         _ => unreachable!(),
     };
 
-    let mut magnitude = 0u128;
+    let mut magnitude = 0_u128;
     loop {
         let current_byte = byte(digits, 0);
         let digit = match current_byte {
@@ -58,7 +58,7 @@ fn parse_lit_int(mut digits: &str) -> Option<u128> {
         };
 
         if digit >= base {
-            panic!("Unexpected digit {:x} out of base range", digit);
+            panic!("Unexpected digit {digit:x} out of base range");
         }
 
         magnitude = magnitude.checked_mul(base)?.checked_add(digit)?;

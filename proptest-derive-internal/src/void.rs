@@ -104,7 +104,7 @@ struct Uninhabited(bool);
 
 impl Uninhabited {
     /// Set to uninhabited.
-    fn set(&mut self) {
+    const fn set(&mut self) {
         self.0 = true;
     }
 }

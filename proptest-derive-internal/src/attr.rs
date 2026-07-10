@@ -85,8 +85,8 @@ pub(crate) enum ParamsMode {
 
 impl ParamsMode {
     /// Returns `true` iff the mode was explicitly set.
-    pub(crate) fn is_set(&self) -> bool {
-        !matches!(self, ParamsMode::Passthrough)
+    pub(crate) const fn is_set(&self) -> bool {
+        !matches!(self, Self::Passthrough)
     }
 
     /// Converts the mode to an `Option` of an `Option` of a type
@@ -104,8 +104,8 @@ impl ParamsMode {
 
 impl StratMode {
     /// Returns `true` iff the mode was explicitly set.
-    pub(crate) fn is_set(&self) -> bool {
-        !matches!(self, StratMode::Arbitrary)
+    pub(crate) const fn is_set(&self) -> bool {
+        !matches!(self, Self::Arbitrary)
     }
 }
 
@@ -222,7 +222,9 @@ fn parse_accumulate(ctx: Ctx<'_>, attrs: &[Attribute]) -> ParseAcc {
             state = extract_modifiers(ctx, attr)
                 .into_iter()
                 // Accumulate attributes into a form for final processing.
-                .fold(state, |state, meta| dispatch_attribute(ctx, state, meta))
+                .fold(state, |state, meta| {
+                    dispatch_attribute(ctx, state, meta)
+                });
         }
     }
 
@@ -331,12 +333,12 @@ fn dispatch_unknown_mod(ctx: Ctx<'_>, name: &str) {
         "weights" | "weighted" => error::did_you_mean(ctx, name, "weight"),
         "strat" | "strategies" => error::did_you_mean(ctx, name, "strategy"),
         "values" | "valued" | "fix" | "fixed" => {
-            error::did_you_mean(ctx, name, "value")
+            error::did_you_mean(ctx, name, "value");
         }
         "regexes" | "regexp" | "re" => error::did_you_mean(ctx, name, "regex"),
         "param" | "parameters" => error::did_you_mean(ctx, name, "params"),
         "no_param" | "no_parameters" => {
-            error::did_you_mean(ctx, name, "no_params")
+            error::did_you_mean(ctx, name, "no_params");
         }
         name => error::unkown_modifier(ctx, name),
         // TODO: consider levenshtein distance.
@@ -355,7 +357,12 @@ fn dispatch_unknown_mod(ctx: Ctx<'_>, name: &str) {
     reason = "record a requested no_bound into the parse accumulator"
 )]
 fn parse_no_bound(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: Meta) {
-    parse_bare_modifier(ctx, &mut acc.no_bound, meta, error::no_bound_malformed)
+    parse_bare_modifier(
+        ctx,
+        &mut acc.no_bound,
+        meta,
+        error::no_bound_malformed,
+    );
 }
 
 //==============================================================================
@@ -370,7 +377,7 @@ fn parse_no_bound(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: Meta) {
     reason = "flag a skipped variant by recording skip into the parse accumulator"
 )]
 fn parse_skip(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: Meta) {
-    parse_bare_modifier(ctx, &mut acc.skip, meta, error::skip_malformed)
+    parse_bare_modifier(ctx, &mut acc.skip, meta, error::skip_malformed);
 }
 
 //==============================================================================
@@ -406,7 +413,7 @@ fn parse_weight(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: &Meta) {
     if let matched_weight @ Some(_) = weight {
         acc.weight = matched_weight;
     } else {
-        error::weight_malformed(ctx, meta)
+        error::weight_malformed(ctx, meta);
     }
 }
 
@@ -431,7 +438,7 @@ fn parse_filter(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: &Meta) {
     } {
         acc.filter.push(filter);
     } else {
-        error::filter_malformed(ctx, meta)
+        error::filter_malformed(ctx, meta);
     }
 }
 
@@ -458,7 +465,7 @@ fn parse_regex(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: &Meta) {
     } {
         acc.regex = expr;
     } else {
-        error::regex_malformed(ctx)
+        error::regex_malformed(ctx);
     }
 }
 
@@ -474,7 +481,7 @@ fn parse_regex(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: &Meta) {
     reason = "treat value = <expr> as a constant-producing strategy base"
 )]
 fn parse_value(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: &Meta) {
-    parse_strategy_base(ctx, &mut acc.value, meta)
+    parse_strategy_base(ctx, &mut acc.value, meta);
 }
 
 /// Parses an explicit strategy.
@@ -489,7 +496,7 @@ fn parse_value(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: &Meta) {
     reason = "treat strategy = <expr> as an explicit strategy base"
 )]
 fn parse_strategy(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: &Meta) {
-    parse_strategy_base(ctx, &mut acc.strategy, meta)
+    parse_strategy_base(ctx, &mut acc.strategy, meta);
 }
 
 /// Parses an explicit strategy. This is a helper.
@@ -509,7 +516,7 @@ fn parse_strategy_base(ctx: Ctx<'_>, loc: &mut Option<Expr>, meta: &Meta) {
     } {
         *loc = expr;
     } else {
-        error::strategy_malformed(ctx, meta)
+        error::strategy_malformed(ctx, meta);
     }
 }
 
@@ -553,8 +560,8 @@ fn parse_params_mode(
     Ok(match (no_params, ty_params) {
         (None, None) => ParamsMode::Passthrough,
         (None, Some(ty)) => ParamsMode::Specified(Box::new(ty)),
-        (Some(_), None) => ParamsMode::Default,
-        (Some(_), Some(_)) => error::overspecified_param(ctx)?,
+        (Some(()), None) => ParamsMode::Default,
+        (Some(()), Some(_)) => error::overspecified_param(ctx)?,
     })
 }
 
@@ -585,7 +592,7 @@ fn parse_params(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: Meta) {
     if let typ @ Some(_) = typ {
         acc.params = typ;
     } else {
-        error::param_malformed(ctx)
+        error::param_malformed(ctx);
     }
 }
 
@@ -602,7 +609,7 @@ fn parse_no_params(ctx: Ctx<'_>, acc: &mut ParseAcc, meta: Meta) {
         &mut acc.no_params,
         meta,
         error::no_params_malformed,
-    )
+    );
 }
 
 //==============================================================================
@@ -618,7 +625,7 @@ fn parse_bare_modifier(
 ) {
     error_if_set(ctx, loc, &meta);
 
-    if let Some(NormMeta::Plain) = normalize_meta(meta) {
+    if matches!(normalize_meta(meta), Some(NormMeta::Plain)) {
         *loc = Some(());
     } else {
         malformed(ctx);
@@ -628,7 +635,7 @@ fn parse_bare_modifier(
 /// Emits a "set again" error iff the given option `.is_some()`.
 fn error_if_set<T>(ctx: Ctx<'_>, loc: &Option<T>, meta: &Meta) {
     if loc.is_some() {
-        error::set_again(ctx, meta)
+        error::set_again(ctx, meta);
     }
 }
 
@@ -701,7 +708,7 @@ fn normalize_meta(meta: Meta) -> Option<NormMeta> {
 
             if let Ok(lit) = syn::parse2(ml.tokens.clone()) {
                 output = Some(NormMeta::Lit(lit));
-            } else if let Ok(ident) = syn::parse2(ml.tokens.clone()) {
+            } else if let Ok(ident) = syn::parse2(ml.tokens) {
                 output = Some(NormMeta::Word(ident));
             }
 

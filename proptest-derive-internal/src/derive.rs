@@ -46,8 +46,7 @@ pub(crate) fn impl_proptest_arbitrary(ast: DeriveInput) -> TokenStream {
         (_, Err(err)) => err,
         (Err(result), Ok(())) => panic!(
             "[proptest_derive]: internal error, this is a bug! \
-             result: {:?}",
-            result
+             result: {result:?}"
         ),
     }
 }
@@ -825,7 +824,7 @@ impl ParamAcc {
         clippy::single_call_fn,
         reason = "the empty ParamAcc accumulator that seeds Parameters folding"
     )]
-    fn empty() -> Self {
+    const fn empty() -> Self {
         Self {
             types: Params::empty(),
         }
@@ -883,7 +882,7 @@ impl<C> StratAcc<C> {
     }
 
     /// Returns `true` iff nothing has been accumulated yet.
-    fn is_empty(&self) -> bool {
+    const fn is_empty(&self) -> bool {
         self.types.is_empty()
     }
 }
@@ -906,10 +905,10 @@ impl StratAcc<(u32, Ctor)> {
             .ctors
             .iter()
             .map(|&(weight, _)| weight)
-            .try_fold(0u32, |acc, weight| acc.checked_add(weight))
+            .try_fold(0_u32, u32::checked_add)
             .is_none()
         {
-            error::weight_overflowing(ctx)
+            error::weight_overflowing(ctx);
         }
 
         pair_oneof(self.consume())

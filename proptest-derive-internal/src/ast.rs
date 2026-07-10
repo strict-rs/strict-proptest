@@ -75,7 +75,7 @@ pub(crate) type ImplParts = (Params, Strategy, Ctor);
 
 impl Impl {
     /// Constructs a new `Impl` from the parts as described on the type.
-    pub(crate) fn new(
+    pub(crate) const fn new(
         typ: syn::Ident,
         tracker: UseTracker,
         parts: ImplParts,
@@ -90,7 +90,7 @@ impl Impl {
     /// Linearises the impl into a sequence of tokens.
     /// This produces the actual Rust code for the impl.
     pub(crate) fn into_tokens(self, ctx: Ctx<'_>) -> DeriveResult<TokenStream> {
-        let Impl {
+        let Self {
             typ,
             mut tracker,
             parts: (params, strategy, ctor),
@@ -176,14 +176,20 @@ pub(crate) fn pair_any_with(ty: syn::Type, var: usize) -> StratPair {
 /// This is a temporary restriction. Once `impl Trait` is stabilized,
 /// the boxing and dynamic dispatch can be replaced with a statically
 /// dispatched anonymous type instead.
-pub(crate) fn pair_existential(ty: syn::Type, strat: syn::Expr) -> StratPair {
+pub(crate) const fn pair_existential(
+    ty: syn::Type,
+    strat: syn::Expr,
+) -> StratPair {
     (Strategy::Existential(ty), Ctor::Existential(strat))
 }
 
 /// The type and constructor for a strategy that always returns the value
 /// provided in the expression `value_expr`.
 /// This is statically dispatched since no erasure is needed or used.
-pub(crate) fn pair_value(ty: syn::Type, value_expr: syn::Expr) -> StratPair {
+pub(crate) const fn pair_value(
+    ty: syn::Type,
+    value_expr: syn::Expr,
+) -> StratPair {
     (Strategy::Value(ty), Ctor::Value(value_expr))
 }
 
@@ -198,7 +204,10 @@ pub(crate) fn pair_value_self(value_expr: syn::Expr) -> StratPair {
 }
 
 /// Erased strategy for a fixed value.
-pub(crate) fn pair_value_exist(ty: syn::Type, strat: syn::Expr) -> StratPair {
+pub(crate) const fn pair_value_exist(
+    ty: syn::Type,
+    strat: syn::Expr,
+) -> StratPair {
     (Strategy::Existential(ty), Ctor::ValueExistential(strat))
 }
 
@@ -281,12 +290,12 @@ pub struct Params(Vec<syn::Type>);
 impl Params {
     /// Construct an `empty` list of parameters.
     /// This is equivalent to the unit type `()`.
-    pub(crate) fn empty() -> Self {
-        Params(Vec::new())
+    pub(crate) const fn empty() -> Self {
+        Self(Vec::new())
     }
 
     /// Computes and returns the number of parameter types.
-    pub(crate) fn len(&self) -> usize {
+    pub(crate) const fn len(&self) -> usize {
         self.0.len()
     }
 }
@@ -299,7 +308,7 @@ impl From<Params> for syn::Type {
 }
 
 impl Add<syn::Type> for Params {
-    type Output = Params;
+    type Output = Self;
 
     fn add(mut self, rhs: syn::Type) -> Self::Output {
         self.0.push(rhs);
@@ -315,7 +324,7 @@ impl AddAssign<syn::Type> for Params {
 
 impl ToTokens for Params {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        NestedTuple(self.0.as_slice()).to_tokens(tokens)
+        NestedTuple(self.0.as_slice()).to_tokens(tokens);
     }
 }
 
@@ -352,14 +361,14 @@ pub(crate) enum Strategy {
     Value(syn::Type),
     /// Assuming a sequence of strategies, this models a mapping from that
     /// sequence to `Self`.
-    Map(Box<[Strategy]>),
+    Map(Box<[Self]>),
     /// Assuming a sequence of relative-weighted strategies, this models a
     /// weighted choice of those strategies. The resultant strategy will in
     /// other words randomly pick one strategy with probabilities based on the
     /// specified weights.
-    Union(Box<[Strategy]>),
+    Union(Box<[Self]>),
     /// A filtered strategy with `.prop_filter`.
-    Filter(Box<Strategy>, syn::Type),
+    Filter(Box<Self>, syn::Type),
 }
 
 /// Append the tokens of a `quote!` invocation to an existing `TokenStream`;
@@ -380,12 +389,8 @@ impl Strategy {
             Regex(ty) => vec![ty.clone()],
             Existential(ty) => vec![ty.clone()],
             Value(ty) => vec![ty.clone()],
-            Map(strats) => {
-                strats.iter().flat_map(|strat| strat.types()).collect()
-            }
-            Union(strats) => {
-                strats.iter().flat_map(|strat| strat.types()).collect()
-            }
+            Map(strats) => strats.iter().flat_map(Self::types).collect(),
+            Union(strats) => strats.iter().flat_map(Self::types).collect(),
             Filter(_, ty) => vec![ty.clone()],
         }
     }
@@ -415,7 +420,7 @@ impl ToTokens for Strategy {
                     ::proptest::strategy::Map< #strats,
                         fn( #field_tys ) -> Self
                     >
-                )
+                );
             }
             #[cfg(not(feature = "boxed_union"))]
             Union(strats) => union_strat_to_tokens(tokens, strats),
@@ -471,15 +476,15 @@ pub(crate) enum Ctor {
     /// A strategy that always produces the given expression but which is erased.
     ValueExistential(syn::Expr),
     /// A strategy that maps from a sequence of strategies into `Self`.
-    Map(Box<[Ctor]>, MapClosure),
+    Map(Box<[Self]>, MapClosure),
     /// A strategy that randomly selects one of the given relative-weighted
     /// strategies.
     Union(Box<[WeightedCtor]>),
     /// A let binding that moves to and declares the `ToReg` from the `FromReg`
     /// as well as the strategy that uses the `ToReg`.
-    Extract(Box<Ctor>, ToReg, FromReg),
+    Extract(Box<Self>, ToReg, FromReg),
     /// A filtered strategy with `.prop_filter`.
-    Filter(Box<Ctor>, syn::Expr),
+    Filter(Box<Self>, syn::Expr),
 }
 
 /// Wraps the given strategy producing expression with a move into
@@ -499,8 +504,8 @@ pub(crate) fn extract_api(ctor: Ctor, from: FromReg) -> Ctor {
 impl ToTokens for FromReg {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self {
-            FromReg::Top => call_site_ident(TOP_PARAM_NAME).to_tokens(tokens),
-            FromReg::Num(reg) => param(*reg).to_tokens(tokens),
+            Self::Top => call_site_ident(TOP_PARAM_NAME).to_tokens(tokens),
+            Self::Num(reg) => param(*reg).to_tokens(tokens),
         }
     }
 }
@@ -508,12 +513,12 @@ impl ToTokens for FromReg {
 impl ToTokens for ToReg {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match *self {
-            ToReg::Range(1) => param(0).to_tokens(tokens),
-            ToReg::Range(to) => {
+            Self::Range(1) => param(0).to_tokens(tokens),
+            Self::Range(to) => {
                 let params: Vec<_> = (0..to).map(param).collect();
-                NestedTuple(&params).to_tokens(tokens)
+                NestedTuple(&params).to_tokens(tokens);
             }
-            ToReg::Api => call_site_ident(API_PARAM_NAME).to_tokens(tokens),
+            Self::Api => call_site_ident(API_PARAM_NAME).to_tokens(tokens),
         }
     }
 }
@@ -872,7 +877,7 @@ fn extract(ctor: Ctor, to: ToReg, from: FromReg) -> Ctor {
 }
 
 /// Construct a `FreshVar` prefixed by `param_`.
-fn param<'a>(fv: usize) -> FreshVar<'a> {
+const fn param<'a>(fv: usize) -> FreshVar<'a> {
     fresh_var("param", fv)
 }
 
@@ -891,11 +896,11 @@ pub(crate) struct MapClosure(syn::Path, Vec<syn::Field>);
 
 impl ToTokens for MapClosure {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        fn tmp_var<'a>(idx: usize) -> FreshVar<'a> {
+        const fn tmp_var<'a>(idx: usize) -> FreshVar<'a> {
             fresh_var("tmp", idx)
         }
 
-        let MapClosure(path, fields) = self;
+        let Self(path, fields) = self;
         let count = fields.len();
         let tmps: Vec<_> = (0..count).map(tmp_var).collect();
         let inits = fields.iter().enumerate().map(|(idx, field)| {
@@ -918,7 +923,7 @@ impl ToTokens for MapClosure {
 
 /// Construct a `FreshVar` with the given `prefix` and the number it has in the
 /// count of temporaries for that prefix.
-fn fresh_var(prefix: &str, count: usize) -> FreshVar<'_> {
+const fn fresh_var(prefix: &str, count: usize) -> FreshVar<'_> {
     FreshVar { prefix, count }
 }
 
@@ -935,7 +940,7 @@ struct FreshVar<'a> {
 impl ToTokens for FreshVar<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let ident = format!("{}_{}", self.prefix, self.count);
-        call_site_ident(&ident).to_tokens(tokens)
+        call_site_ident(&ident).to_tokens(tokens);
     }
 }
 

@@ -112,7 +112,7 @@ impl StateMachineTest for MyHeap<i32> {
     fn init_test(
         _ref_state: &<Self::Reference as ReferenceStateMachine>::State,
     ) -> Self::SystemUnderTest {
-        MyHeap::new()
+        Self::new()
     }
 
     fn apply(
@@ -196,17 +196,17 @@ mod system_under_test {
             clippy::single_call_fn,
             reason = "the empty hand-rolled max-heap the example puts under test"
         )]
-        pub(crate) fn new() -> Self {
-            MyHeap { data: vec![] }
+        pub(crate) const fn new() -> Self {
+            Self { data: vec![] }
         }
 
         /// Return whether the heap contains no elements.
-        pub(crate) fn is_empty(&self) -> bool {
+        pub(crate) const fn is_empty(&self) -> bool {
             self.data.is_empty()
         }
 
         /// Return the number of elements currently stored in the heap.
-        pub(crate) fn len(&self) -> usize {
+        pub(crate) const fn len(&self) -> usize {
             self.data.len()
         }
 

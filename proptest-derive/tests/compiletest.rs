@@ -161,8 +161,8 @@ impl CargoArtifacts {
                 let hash = artifact_hash(&artifact, file_prefix, extension)?;
                 let fingerprint = self
                     .fingerprint_dir
-                    .join(format!("{}-{}", package, hash))
-                    .join(format!("lib-{}.json", lib_name));
+                    .join(format!("{package}-{hash}"))
+                    .join(format!("lib-{lib_name}.json"));
                 let fingerprint = fs::read_to_string(fingerprint).ok()?;
                 // A stale or malformed candidate fingerprint means "not this
                 // artifact", never an abort — skip it and keep scanning.
@@ -195,7 +195,7 @@ fn artifact_hash<'a>(
     if extension.is_empty() {
         return Some(file_name);
     }
-    file_name.strip_suffix(&format!(".{}", extension))
+    file_name.strip_suffix(&format!(".{extension}"))
 }
 
 fn json_u64(
@@ -282,7 +282,7 @@ fn run_mode(src: &'static str, mode: &'static str) -> Result<(), TestFailure> {
             "the compiletest mode string parses",
         )?,
         target_rustcflags: Some(rustc_flags()?),
-        src_base: format!("tests/{}", src).into(),
+        src_base: format!("tests/{src}").into(),
         ..ct::Config::default()
     };
     if let Ok(name) = env::var("TESTNAME") {

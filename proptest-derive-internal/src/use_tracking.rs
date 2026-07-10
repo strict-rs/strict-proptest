@@ -74,7 +74,7 @@ impl UseTracker {
     }
 
     /// Stop tracking. `.mark_used` will have no effect.
-    pub(crate) fn no_track(&mut self) {
+    pub(crate) const fn no_track(&mut self) {
         self.track = false;
     }
 
@@ -161,9 +161,9 @@ impl UseTracker {
             .zip(self.generics.type_params_mut())
             .for_each(|(&used, tv)| {
                 if used {
-                    tv.bounds.push(for_used.clone())
+                    tv.bounds.push(for_used.clone());
                 }
-            })
+            });
     }
 
     /// Consumes the (potentially) modified generics that the
@@ -227,9 +227,7 @@ fn matches_prj_tyvar(ut: &mut UseTracker, tpath: &syn::TypePath) -> bool {
             return sub_tp.qself.is_none()
                 && util::match_singleton(segs.iter().skip(qself.position))
                     .filter(|ps| ps.arguments.is_empty())
-                    .and_then(|_| util::extract_simple_path(&sub_tp.path))
-                    .filter(|&ident| ut.has_tyvar(ident))
-                    .is_some() // < $tyvar as? $path? > :: $path
+                    .and_then(|_| util::extract_simple_path(&sub_tp.path)).as_ref().is_some_and(|&ident| ut.has_tyvar(ident)) // < $tyvar as? $path? > :: $path
                 || matches_prj_tyvar(ut, sub_tp);
         }
 
@@ -278,7 +276,7 @@ fn adjust_simple_prj(tpath: &syn::TypePath) -> syn::TypePath {
 }
 
 /// Returns the underlying `TypePath` if `ty` is a path type, else `None`.
-fn extract_path(ty: &syn::Type) -> Option<&syn::TypePath> {
+const fn extract_path(ty: &syn::Type) -> Option<&syn::TypePath> {
     if let syn::Type::Path(tpath) = ty {
         Some(tpath)
     } else {
