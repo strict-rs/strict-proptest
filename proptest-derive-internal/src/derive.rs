@@ -11,12 +11,20 @@
 use proc_macro2::TokenStream;
 use syn::{DeriveInput, Expr, Field, Ident, Path, Type, Variant, parse_quote};
 
-use crate::ast::*;
-use crate::attr::{self, ParamsMode, ParsedAttributes, StratMode};
+use crate::ast::{
+    Ctor, FromReg, Impl, ImplParts, MapClosure, Params, StratPair, Strategy,
+    arbitrary_param, extract_all, extract_api, map_closure, pair_any,
+    pair_any_with, pair_existential, pair_existential_self, pair_filter,
+    pair_map, pair_oneof, pair_regex, pair_regex_self, pair_unit_self,
+    pair_value, pair_value_exist, pair_value_exist_self, pair_value_self,
+};
+use crate::attr::{
+    self, ParamsMode, ParsedAttributes, StratMode, TopParamsMode,
+};
 use crate::error::{self, Context, Ctx, DeriveResult};
-use crate::use_tracking::{UseMarkable, UseTracker};
-use crate::util::{fields_to_vec, is_unit_type, self_ty};
-use crate::void::IsUninhabited;
+use crate::use_tracking::{UseMarkable as _, UseTracker};
+use crate::util::{PayloadFields, is_unit_type, self_ty};
+use crate::void::IsUninhabited as _;
 
 //==============================================================================
 // API
@@ -29,25 +37,28 @@ use crate::void::IsUninhabited;
 /// tokens are returned; if any diagnostics were recorded, a `compile_error!`
 /// is emitted in their place so the downstream crate fails to compile.
 ///
-/// # Panics
-///
-/// Panics with an "internal error" message if the derivation aborts with a
-/// `Fatal` result without having recorded any diagnostic — that combination
-/// is always a bug in this crate.
+/// A `Fatal` result without a recorded diagnostic is surfaced as a
+/// `compile_error!`, keeping internal derive failures in the diagnostic
+/// channel rather than panicking.
 #[allow(
     clippy::single_call_fn,
     reason = "crate entry point running the derive pipeline and collapsing recorded diagnostics"
 )]
 pub(crate) fn impl_proptest_arbitrary(ast: DeriveInput) -> TokenStream {
+    fn internal_error_tokens() -> TokenStream {
+        let message = "[proptest_derive]: internal error, this is a bug! \
+                       derive returned Fatal without a recorded diagnostic";
+        quote::quote! {
+            compile_error!(#message);
+        }
+    }
+
     let mut ctx = Context::default();
     let result = derive_proptest_arbitrary(&mut ctx, ast);
     match (result, ctx.check()) {
         (Ok(derive), Ok(())) => derive,
         (_, Err(err)) => err,
-        (Err(result), Ok(())) => panic!(
-            "[proptest_derive]: internal error, this is a bug! \
-             result: {result:?}"
-        ),
+        (Err(_), Ok(())) => internal_error_tokens(),
     }
 }
 
@@ -67,7 +78,7 @@ struct DeriveData<B> {
 
 /// The pieces of a kept (non-skipped, inhabited) enum variant: its relative
 /// weight, name, fields, and parsed attributes.
-type VariantParts = (u32, Ident, Vec<Field>, ParsedAttributes);
+type VariantParts = (u32, Ident, PayloadFields, ParsedAttributes);
 
 /// Entry point for deriving `Arbitrary`.
 #[allow(
@@ -78,8 +89,6 @@ fn derive_proptest_arbitrary(
     ctx: Ctx<'_>,
     ast: DeriveInput,
 ) -> DeriveResult<TokenStream> {
-    use syn::Data::*;
-
     // Deny lifetimes on type.
     error::if_has_lifetimes(ctx, &ast);
 
@@ -95,17 +104,17 @@ fn derive_proptest_arbitrary(
     // Compile into our own high level IR for the impl:
     let the_impl = match ast.data {
         // Deal with structs:
-        Struct(struct_data) => derive_struct(
+        syn::Data::Struct(struct_data) => derive_struct(
             ctx,
             DeriveData {
                 tracker,
                 attrs,
                 ident: ast.ident,
-                body: fields_to_vec(struct_data.fields),
+                body: PayloadFields::from(struct_data.fields).into_vec(),
             },
         ),
         // Deal with enums:
-        Enum(enum_data) => derive_enum(
+        syn::Data::Enum(enum_data) => derive_enum(
             ctx,
             DeriveData {
                 tracker,
@@ -115,7 +124,7 @@ fn derive_proptest_arbitrary(
             },
         ),
         // Unions are not supported:
-        _ => error::not_struct_or_enum(ctx)?,
+        syn::Data::Union(_) => error::not_struct_or_enum(ctx)?,
     }?;
 
     // Linearise the IR into Rust code:
@@ -167,28 +176,29 @@ fn derive_struct(
 
         // The complexity of the logic depends mostly now on whether
         // parameters were set directly on the type or not.
-        let parts = if let Some(param_ty) = ast.attrs.params.into_option() {
-            // Parameters was set on the struct itself, the logic is simpler.
-            add_top_params(
-                param_ty,
-                derive_product_has_params(
+        let parts =
+            if let Some(param_mode) = ast.attrs.params.into_top_params_mode() {
+                // Parameters was set on the struct itself, the logic is simpler.
+                add_top_params(
+                    param_mode,
+                    derive_product_has_params(
+                        ctx,
+                        &mut ast.tracker,
+                        error::STRUCT_FIELD,
+                        closure,
+                        ast.body,
+                    )?,
+                )
+            } else {
+                // We need considerably more complex logic.
+                derive_product_no_params(
                     ctx,
                     &mut ast.tracker,
-                    error::STRUCT_FIELD,
-                    closure,
                     ast.body,
-                )?,
-            )
-        } else {
-            // We need considerably more complex logic.
-            derive_product_no_params(
-                ctx,
-                &mut ast.tracker,
-                ast.body,
-                error::STRUCT_FIELD,
-            )?
-            .finish(closure)
-        };
+                    error::STRUCT_FIELD,
+                )?
+                .finish(closure)
+            };
 
         // Possibly apply filter:
         add_top_filter(ast.attrs.filter, parts)
@@ -200,29 +210,35 @@ fn derive_struct(
 
 /// Apply the filter at the top level if provided.
 fn add_top_filter(filter: Vec<Expr>, parts: ImplParts) -> ImplParts {
-    let (params, strat, ctor) = parts;
-    let (strat, ctor) = add_filter_self(filter, (strat, ctor));
-    (params, strat, ctor)
+    let (params, base_strat, base_ctor) = parts;
+    let (filtered_strat, filtered_ctor) =
+        add_filter_self(filter, (base_strat, base_ctor));
+    (params, filtered_strat, filtered_ctor)
 }
 
 /// Apply a filter with `Self` as the input type to the predicate.
 fn add_filter_self(filter: Vec<Expr>, pair: StratPair) -> StratPair {
-    pair_filter(filter, self_ty(), pair)
+    pair_filter(filter, &self_ty(), pair)
 }
 
 /// Determine the `Parameters` part. We've already handled everything else.
 /// After this, we have all parts needed for an impl. If `None` is given,
 /// then the unit type `()` will be used for `Parameters`.
 fn add_top_params(
-    param_ty: Option<Type>,
+    param_mode: TopParamsMode,
     (strat, ctor): StratPair,
 ) -> ImplParts {
     let params = Params::empty();
-    if let Some(params_ty) = param_ty {
-        // We need to add `let params = _top;`.
-        (params + params_ty, strat, extract_api(ctor, FromReg::Top))
-    } else {
-        (params, strat, ctor)
+    match param_mode {
+        TopParamsMode::Specified(params_ty) => {
+            // We need to add `let params = _top;`.
+            (
+                params.with_type(*params_ty),
+                strat,
+                extract_api(ctor, FromReg::Top),
+            )
+        }
+        TopParamsMode::Default => (params, strat, ctor),
     }
 }
 
@@ -252,9 +268,10 @@ fn derive_product_has_params(
 
             // Determine the strategy for this field and add it to acc.
             let ty = field.ty.clone();
-            let pair = product_handle_default_params(ut, ty, attrs.strategy);
-            let pair = pair_filter(attrs.filter, field.ty, pair);
-            Ok(acc.add(pair))
+            let base_pair =
+                product_handle_default_params(ut, ty, attrs.strategy);
+            let filtered_pair = pair_filter(attrs.filter, &field.ty, base_pair);
+            Ok(acc.add(filtered_pair))
         })
         .map(|acc| acc.finish(closure))
 }
@@ -293,7 +310,7 @@ fn derive_product_no_params(
     // that produces the strategy. We then just return that accumulator
     // and let the caller of this function determine what to do with it.
     let acc = PartsAcc::new(fields.len());
-    fields.into_iter().try_fold(acc, |mut acc, field| {
+    fields.into_iter().try_fold(acc, |mut product_acc, field| {
         let attrs = attr::parse_attributes(ctx, &field.attrs)?;
 
         // Deny attributes that are only for enum variants:
@@ -301,65 +318,66 @@ fn derive_product_no_params(
 
         let ty = field.ty;
 
-        let strat = pair_filter(
-            attrs.filter,
-            ty.clone(),
-            match attrs.params {
-                // Parameters were not set on the field:
-                ParamsMode::Passthrough => match attrs.strategy {
-                    // Specific strategy - use the given expr and erase the type:
-                    StratMode::Strategy(strat) => pair_existential(ty, strat),
-                    // Specific value - use the given expr:
-                    StratMode::Value(value_expr) => pair_value(ty, value_expr),
-                    // Specific regex - dispatch to `_regex` function:
-                    StratMode::Regex(regex) => pair_regex(ty, regex),
-                    // Use Arbitrary for the given type and mark the type as used:
-                    StratMode::Arbitrary => {
-                        ty.mark_uses(ut);
-
-                        // We use the Parameters type of the field's type.
-                        let pref = acc.add_param(arbitrary_param(&ty));
-                        pair_any_with(ty, pref)
-                    }
-                },
-                // no_params set on the field:
-                ParamsMode::Default => {
-                    product_handle_default_params(ut, ty, attrs.strategy)
+        let pair = match attrs.params {
+            // Parameters were not set on the field:
+            ParamsMode::Passthrough => match attrs.strategy {
+                // Specific strategy - use the given expr and erase the type:
+                StratMode::Strategy(strat) => {
+                    pair_existential(ty.clone(), strat)
                 }
-                // params(<type>) set on the field:
-                ParamsMode::Specified(params_ty) => {
-                    // We need to extract the param as the binding `params`:
-                    extract_nparam(
-                        &mut acc,
-                        *params_ty,
-                        match attrs.strategy {
-                            // Specific strategy - use the given expr and erase the type:
-                            StratMode::Strategy(strat) => {
-                                pair_existential(ty, strat)
-                            }
-                            // Specific value - use the given expr in a closure and erase:
-                            StratMode::Value(value_expr) => {
-                                pair_value_exist(ty, value_expr)
-                            }
-                            // Logic error by user; Pointless to specify params and
-                            // regex because the params can never be used in the regex.
-                            StratMode::Regex(regex) => {
-                                error::cant_set_param_and_regex(ctx, item_kind);
-                                pair_regex(ty, regex)
-                            }
-                            // Logic error by user.
-                            // Pointless to specify params and not the strategy. Bail!
-                            StratMode::Arbitrary => {
-                                error::cant_set_param_but_not_strat(
-                                    ctx, &ty, item_kind,
-                                )?
-                            }
-                        },
-                    )
+                // Specific value - use the given expr:
+                StratMode::Value(value_expr) => {
+                    pair_value(ty.clone(), value_expr)
+                }
+                // Specific regex - dispatch to `_regex` function:
+                StratMode::Regex(regex) => pair_regex(ty.clone(), regex),
+                // Use Arbitrary for the given type and mark the type as used:
+                StratMode::Arbitrary => {
+                    ty.mark_uses(ut);
+
+                    // We use the Parameters type of the field's type.
+                    let pref = product_acc.add_param(arbitrary_param(&ty));
+                    pair_any_with(ty.clone(), pref)
                 }
             },
-        );
-        Ok(acc.add_strat(strat))
+            // no_params set on the field:
+            ParamsMode::Default => {
+                product_handle_default_params(ut, ty.clone(), attrs.strategy)
+            }
+            // params(<type>) set on the field:
+            ParamsMode::Specified(params_ty) => {
+                // We need to extract the param as the binding `params`:
+                extract_nparam(
+                    &mut product_acc,
+                    *params_ty,
+                    match attrs.strategy {
+                        // Specific strategy - use the given expr and erase the type:
+                        StratMode::Strategy(strat) => {
+                            pair_existential(ty.clone(), strat)
+                        }
+                        // Specific value - use the given expr in a closure and erase:
+                        StratMode::Value(value_expr) => {
+                            pair_value_exist(ty.clone(), value_expr)
+                        }
+                        // Logic error by user; Pointless to specify params and
+                        // regex because the params can never be used in the regex.
+                        StratMode::Regex(regex) => {
+                            error::cant_set_param_and_regex(ctx, item_kind);
+                            pair_regex(ty.clone(), regex)
+                        }
+                        // Logic error by user.
+                        // Pointless to specify params and not the strategy. Bail!
+                        StratMode::Arbitrary => {
+                            error::cant_set_param_but_not_strat(
+                                ctx, &ty, item_kind,
+                            )?
+                        }
+                    },
+                )
+            }
+        };
+        let strat = pair_filter(attrs.filter, &ty, pair);
+        Ok(product_acc.add_strat(strat))
     })
 }
 
@@ -410,18 +428,25 @@ fn derive_enum(
 
     // The complexity of the logic depends mostly now on whether
     // parameters were set directly on the type or not.
-    let parts = if let Some(sty) = ast.attrs.params.into_option() {
-        // The logic is much simpler in this branch.
-        derive_enum_has_params(ctx, &mut ast.tracker, &ast.ident, ast.body, sty)
-    } else {
-        // And considerably more complex here.
-        derive_enum_no_params(ctx, &mut ast.tracker, &ast.ident, ast.body)
-    }?;
+    let enum_parts =
+        if let Some(top_params) = ast.attrs.params.into_top_params_mode() {
+            // The logic is much simpler in this branch.
+            derive_enum_has_params(
+                ctx,
+                &mut ast.tracker,
+                &ast.ident,
+                ast.body,
+                top_params,
+            )
+        } else {
+            // And considerably more complex here.
+            derive_enum_no_params(ctx, &mut ast.tracker, &ast.ident, ast.body)
+        }?;
 
-    let parts = add_top_filter(ast.attrs.filter, parts);
+    let filtered_parts = add_top_filter(ast.attrs.filter, enum_parts);
 
     // We're done!
-    Ok(Impl::new(ast.ident, ast.tracker, parts))
+    Ok(Impl::new(ast.ident, ast.tracker, filtered_parts))
 }
 
 /// Deriving for a enum on which `params` or `no_params` was NOT set directly.
@@ -441,16 +466,21 @@ fn derive_enum_no_params(
     // Fold into the accumulator the strategies for each variant:
     for variant in variants {
         if let Some((weight, ident, fields, attrs)) =
-            keep_inhabited_variant(ctx, _self, variant)?
+            keep_inhabited_variant(ctx, variant)?
         {
             let path = parse_quote!( #_self::#ident );
             let (strat, ctor) = if fields.is_empty() {
                 // Unit variant:
-                pair_unit_variant(ctx, &attrs, path)
+                pair_unit_variant(ctx, &attrs, &path)
             } else {
                 // Not a unit variant:
                 derive_variant_with_fields(
-                    ctx, ut, path, attrs, fields, &mut acc,
+                    ctx,
+                    ut,
+                    path,
+                    attrs,
+                    fields.into_vec(),
+                    &mut acc,
                 )?
             };
             acc = acc.add_strat((strat, (weight, ctor)));
@@ -488,7 +518,7 @@ fn derive_variant_with_fields<C>(
 ) -> DeriveResult<StratPair> {
     let filter = attrs.filter.clone();
 
-    let pair = match attrs.params {
+    let base_pair = match attrs.params {
         // Parameters were not set on the variant:
         ParamsMode::Passthrough => match attrs.strategy {
             // Specific strategy - use the given expr and erase the type:
@@ -549,8 +579,8 @@ fn derive_variant_with_fields<C>(
             },
         ),
     };
-    let pair = add_filter_self(filter, pair);
-    Ok(pair)
+    let filtered_pair = add_filter_self(filter, base_pair);
+    Ok(filtered_pair)
 }
 
 /// Derive for a variant on which params were not set and on which no explicit
@@ -650,26 +680,30 @@ fn derive_enum_has_params(
     ut: &mut UseTracker,
     _self: &Ident,
     variants: Vec<Variant>,
-    sty: Option<Type>,
+    top_params: TopParamsMode,
 ) -> DeriveResult<ImplParts> {
     // Initialize the accumulator:
     let mut acc = StratAcc::new(variants.len());
 
     // Fold into the accumulator the strategies for each variant:
     for variant in variants {
-        let parts = keep_inhabited_variant(ctx, _self, variant)?;
+        let parts = keep_inhabited_variant(ctx, variant)?;
         if let Some((weight, ident, fields, attrs)) = parts {
             let path = parse_quote!( #_self::#ident );
             let (strat, ctor) = if fields.is_empty() {
                 // Unit variant:
-                pair_unit_variant(ctx, &attrs, path)
+                pair_unit_variant(ctx, &attrs, &path)
             } else {
                 // Not a unit variant:
                 let filter = attrs.filter.clone();
                 add_filter_self(
                     filter,
                     variant_handle_default_params(
-                        ctx, ut, path, attrs, fields,
+                        ctx,
+                        ut,
+                        path,
+                        attrs,
+                        fields.into_vec(),
                     )?,
                 )
             };
@@ -679,23 +713,22 @@ fn derive_enum_has_params(
 
     ensure_union_has_strategies(ctx, &acc);
 
-    Ok(add_top_params(sty, acc.finish(ctx)))
+    Ok(add_top_params(top_params, acc.finish(ctx)))
 }
 
 /// Filters out uninhabited and variants that we've been ordered to skip.
 fn keep_inhabited_variant(
     ctx: Ctx<'_>,
-    _self: &Ident,
     variant: Variant,
 ) -> DeriveResult<Option<VariantParts>> {
     let attrs = attr::parse_attributes(ctx, &variant.attrs)?;
-    let fields = fields_to_vec(variant.fields);
+    let fields = PayloadFields::from(variant.fields);
 
     if attrs.skip {
         // We've been ordered to skip this variant!
         // Check that all other attributes are not set.
         ensure_has_only_skip_attr(ctx, &attrs, error::ENUM_VARIANT);
-        fields.into_iter().try_for_each(|field| {
+        fields.into_vec().into_iter().try_for_each(|field| {
             let f_attrs = attr::parse_attributes(ctx, &field.attrs)?;
             error::if_skip_present(ctx, &f_attrs, error::ENUM_VARIANT_FIELD);
             ensure_has_only_skip_attr(ctx, &f_attrs, error::ENUM_VARIANT_FIELD);
@@ -706,7 +739,7 @@ fn keep_inhabited_variant(
     }
 
     // If the variant is uninhabited, we can't generate it, so skip it.
-    if (&*fields).is_uninhabited() {
+    if fields.as_slice().is_uninhabited() {
         return Ok(None);
     }
 
@@ -743,10 +776,10 @@ fn ensure_has_only_skip_attr(
 fn pair_unit_variant(
     ctx: Ctx<'_>,
     attrs: &ParsedAttributes,
-    v_path: Path,
+    v_path: &Path,
 ) -> StratPair {
     error::if_present_on_unit_variant(ctx, attrs);
-    pair_unit_self(&v_path)
+    pair_unit_self(v_path)
 }
 
 //==============================================================================
@@ -833,7 +866,7 @@ impl ParamAcc {
     /// Adds a type to the accumulator and returns the type count before adding.
     fn add(&mut self, ty: Type) -> usize {
         let var = self.types.len();
-        self.types += ty;
+        self.types.push_type(ty);
         var
     }
 

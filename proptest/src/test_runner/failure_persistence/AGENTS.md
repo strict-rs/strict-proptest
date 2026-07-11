@@ -4,14 +4,12 @@ This file provides guidance to coding agents when working with code in this repo
 
 Scope: `proptest/src/test_runner/failure_persistence/` — pluggable storage for minimized failing seeds so a failure replays deterministically before any novel cases on the next run. The backend is selected through `Config::failure_persistence` and driven by the runner; for the rest of the driver see the parent `test_runner/AGENTS.md`, and for shared conventions the workspace-root `AGENTS.md`.
 
-## The `FailurePersistence` trait (`mod.rs`)
+## The `FailurePersistence` trait (`failure_persistence.rs`)
 
-`FailurePersistence: Send + Sync + fmt::Debug` is the backend abstraction. The live API is the `*2`-suffixed pair:
+`FailurePersistence: Send + Sync + fmt::Debug` is the backend abstraction. The live API is the current seed-format pair:
 
 - `load_persisted_failures2(source_file: Option<&'static str>) -> Vec<PersistedSeed>` — the seeds to replay for a given source file.
 - `save_persisted_failure2(&mut self, source_file, seed: PersistedSeed, shrunken_value: &dyn fmt::Debug)` — record one new failing seed; `shrunken_value` is the minimized value, used only for the human-readable comment.
-
-The un-suffixed `load_persisted_failures` / `save_persisted_failure` are `#[deprecated]`, `panic!` by default, and only speak legacy 16-byte XorShift seeds (`[u8; 16]`) — they predate the multi-algorithm `Seed`. The default `*2` impls bridge to them (load wraps each `[u8; 16]` as `Seed::XorShift`; save delegates only when the seed is XorShift), so a pre-existing backend that overrode only the deprecated methods keeps working. New backends override the `*2` methods and leave the deprecated ones alone.
 
 Trait-object plumbing — these three have no default and every impl must provide them:
 
@@ -49,12 +47,12 @@ On-disk (`file.rs` only), each seed line is `<seed> # shrinks to <Debug>` — th
 
 `MapFailurePersistence` (`map.rs`, no_std / `alloc`) — `pub map: BTreeMap<&'static str, BTreeSet<PersistedSeed>>`, keyed by source file. In-memory only; `save` silently drops a `None` source, and the `BTreeSet` dedups identical seeds. Intended for accumulating failures across several `TestRunner` instances for external or batched reporting.
 
-`NoopFailurePersistence` (`noop.rs`) — load returns empty, save does nothing. Note it is a *private*, `#[allow(dead_code)]` struct that `mod.rs` does not re-export (only `file` and `map` are `pub use`d), so it is not reachable from outside the crate; to actually disable persistence set `Config.failure_persistence = None` (or use `FileFailurePersistence::Off`).
+Persistence is disabled by setting `Config.failure_persistence = None` or, for the file backend, by choosing `FileFailurePersistence::Off`.
 
 ## Feature gating & no_std
 
-- `mod file;` and its glob re-export are `#[cfg(feature = "std")]` (and carry a `doc(cfg)` attribute for docsrs), so `FileFailurePersistence` only exists with `std`. `map` and `noop` always compile.
-- `mod.rs`, `map.rs`, and `noop.rs` import `Box` / `Vec` / `fmt` / `BTreeMap` / `BTreeSet` from `crate::std_facade`, never `std`/`alloc`, to stay no_std-clean. `file.rs` is the one file here that names `std::` directly — that is fine precisely because the whole module is `std`-gated.
+- `mod file;` and its glob re-export are `#[cfg(feature = "std")]` (and carry a `doc(cfg)` attribute for docsrs), so `FileFailurePersistence` only exists with `std`. `map` always compiles.
+- `failure_persistence.rs` and `map.rs` import `Box` / `Vec` / `fmt` / `BTreeMap` / `BTreeSet` from `crate::std_facade`, never `std`/`alloc`, to stay no-`std`-clean. `file.rs` is the one file here that names `std::` directly — that is fine precisely because the whole module is `std`-gated.
 
 ## Gotchas
 

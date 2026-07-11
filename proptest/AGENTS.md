@@ -18,7 +18,7 @@ Scope: `proptest/` — the core property-testing library crate (`proptest` v1.11
 Default set: `["std", "fork", "timeout", "bit-set", "strict-test"]`. The complete set, with what each pulls in and how they chain:
 
 - `std` — standard-library support; pulls `rand/std`, `rand/sys_rng`, the `regex-syntax` dep, and `num-traits/std`. Gates the `path`/`string`/`range_subset` modules and the `_std` arbitrary tier.
-- `no_std` — `core`-only configuration (used with `--no-default-features`); pulls `num-traits/libm`, needed for `mul_add`.
+- `libm` — enables `num-traits/libm` so float math such as `mul_add` works without `std`; use `--no-default-features` for the actual no-`std` build mode.
 - `alloc` — empty toggle that turns on allocator-backed APIs in a `no_std` build (`Vec`, `String`, maps — resolved through `std_facade`).
 - `fork` — process-isolate each test case via `rusty-fork`; pulls `rusty-fork` + `tempfile` and **requires `std`**.
 - `timeout` — per-case time limits; pulls `rusty-fork/timeout` and **requires `fork`**.
@@ -39,7 +39,7 @@ Always on: `bitflags`, `unarray`, `num-traits`, `rand` (with its `alloc` feature
 ## Generated docs
 
 - `README.md` is **generated — don't hand-edit it.** `gen-readme.sh` concatenates `readme-prologue.md`, the awk-transformed `../book/src/{intro,getting-started,vs-quickcheck,limitations}.md`, and `readme-antelogue.md`. Edit those sources, then regenerate. The repo-root `README.md` is a symlink to this crate's `README.md`.
-- `gen-docs.sh` is a maintainer-only rustdoc publisher (absolute paths into a local GH-Pages checkout); its `nostd` mode builds `--no-default-features --features=no_std,alloc,unstable` on nightly. Not part of normal dev.
+- `gen-docs.sh` is a maintainer-only rustdoc publisher (absolute paths into a local GH-Pages checkout); its `nostd` mode builds `--no-default-features --features=libm,alloc,unstable` on nightly. Not part of normal dev.
 - `[package.metadata.docs.rs]` sets `all-features = true` and `rustdoc-args = ["--cfg", "docsrs"]`, which lights up the `#[doc(cfg(...))]` feature badges. `Cargo.toml` also `exclude`s `/gen-*.sh` and `/readme-*.md` from the published crate.
 
 ## Most-used commands
@@ -50,7 +50,7 @@ Full matrix is in the root `AGENTS.md`; the ones you'll reach for most here:
 cargo test  -p proptest                 # whole core suite (inline #[cfg(test)] modules)
 cargo test  -p proptest simple_example  # filter by name substring
 cargo test  -p proptest --test attr_macro --features attr-macro  # the integration target
-cargo build -p proptest --no-default-features --features std     # a no_std-leaning build check
+cargo build -p proptest --no-default-features --features std     # a no-`std`-leaning build check
 ```
 
 ## Gotcha

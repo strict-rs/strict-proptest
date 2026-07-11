@@ -10,22 +10,30 @@
 //! Arbitrary implementations for `std::ffi`.
 
 use crate::std_facade::{Box, String, Vec};
-use std::ffi::*;
+use core::iter::repeat_n;
+use std::ffi::{
+    CStr, CString, FromBytesWithNulError, IntoStringError, OsStr, OsString,
+};
 use std::ops::RangeInclusive;
 
-use crate::arbitrary::*;
-use crate::collection::*;
+use crate::arbitrary::{Arbitrary, SMapped, StrategyFor, any, any_with};
+use crate::collection::{SizeRange, VecStrategy, vec};
 use crate::strategy::statics::static_map;
-use crate::strategy::*;
+use crate::strategy::{BoxedStrategy, FilterMap, MapInto, Strategy as _};
 
 use super::string::not_utf8_bytes;
 
 std_arbitrary_with_params!(CString,
-    SFnPtrMap<VecStrategy<RangeInclusive<u8>>, Self>, SizeRange;
-    args => static_map(vec(1..=u8::MAX, args), |vec| {
-        // Could use: Self::from_vec_unchecked(vec) safely.
-        Self::new(vec).unwrap()
-    })
+    FilterMap<VecStrategy<RangeInclusive<u8>>, fn(Vec<u8>) -> Option<Self>>,
+    SizeRange;
+    args => {
+        let mapper: fn(Vec<u8>) -> Option<Self> =
+            |bytes| CString::new(bytes).ok();
+        vec(1..=u8::MAX, args).prop_filter_map(
+            "CString bytes must not contain an interior nul",
+            mapper,
+        )
+    }
 );
 
 std_arbitrary_with_params!(OsString, MapInto<StrategyFor<String>, Self>,
@@ -66,24 +74,37 @@ arbitrary!(FromBytesWithNulError, SMapped<Option<u16>, Self>; {
         // We make some assumptions about the internal structure of
         // FromBytesWithNulError. However, these assumptions do not
         // involve any non-public API.
-        if let Some(pos) = opt_pos {
-            let pos = pos as usize;
-            // Allocate pos + 2 so that we never reallocate:
-            let mut bytes = Vec::<u8>::with_capacity(pos + 2);
-            bytes.extend(core::iter::repeat_n(1, pos));
-            bytes.push(0);
-            bytes.push(1);
-            CStr::from_bytes_with_nul(bytes.as_slice()).unwrap_err()
-        } else {
-            CStr::from_bytes_with_nul(b"").unwrap_err()
+        loop {
+            if let Some(error) = opt_pos.map_or_else(
+                || CStr::from_bytes_with_nul(b"").err(),
+                |pos| {
+                    let nul_position = usize::from(pos);
+                    // Allocate pos + 2 so that we never reallocate:
+                    let mut bytes =
+                        Vec::<u8>::with_capacity(nul_position + 2);
+                    bytes.extend(repeat_n(1, nul_position));
+                    bytes.push(0);
+                    bytes.push(1);
+                    CStr::from_bytes_with_nul(bytes.as_slice()).err()
+                },
+            ) {
+                break error;
+            }
         }
     })
 });
 
-arbitrary!(IntoStringError, SFnPtrMap<BoxedStrategy<Vec<u8>>, Self>;
-    static_map(not_utf8_bytes(false).boxed(), |bytes|
-        CString::new(bytes).unwrap().into_string().unwrap_err()
-    )
+arbitrary!(
+    IntoStringError,
+    FilterMap<BoxedStrategy<Vec<u8>>, fn(Vec<u8>) -> Option<Self>>;
+    {
+        let mapper: fn(Vec<u8>) -> Option<Self> =
+            |bytes| CString::new(bytes).ok()?.into_string().err();
+        not_utf8_bytes(false).boxed().prop_filter_map(
+            "bytes must form a nul-free CString with invalid UTF-8",
+            mapper,
+        )
+    }
 );
 
 #[cfg(test)]
@@ -93,7 +114,7 @@ mod test {
     use super::*;
     use crate::arbitrary::any_with;
     use crate::collection::size_range;
-    use crate::strategy::{Strategy, ValueTree};
+    use crate::strategy::ValueTree as _;
     use crate::test_runner::TestRunner;
 
     no_panic_test!(

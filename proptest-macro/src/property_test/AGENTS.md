@@ -4,7 +4,7 @@ This file provides guidance to coding agents when working with code in this repo
 
 Scope: `proptest-macro/src/property_test/` — the parse / validate / options front end of the `#[property_test]` attribute macro (code generation lives in `codegen/`). For build/test commands and crate dependencies see the parent `proptest-macro/AGENTS.md`; for workspace-wide conventions see the workspace-root `AGENTS.md`.
 
-## Pipeline (`mod.rs`)
+## Pipeline (`property_test.rs`)
 
 `property_test(attr, item) -> TokenStream` is the module entry and a four-step pipeline:
 
@@ -58,6 +58,6 @@ The per-argument override threads across three files: `validate` permits/strips 
 
 ## Tests (`tests/`)
 
-`tests/snapshot_tests.rs` (declared by `tests/mod.rs`) is an `insta` snapshot suite. Its `snapshot_test!` macro `parse_quote!`s an inline fn, runs it through `codegen::generate(input, Options::default())`, formats the output with `prettyplease::unparse`, and `insta::assert_snapshot!`s it; expansions land in `tests/snapshots/*.snap`. Note it drives the **codegen stage directly with default options** — it bypasses `mod.rs`'s `validate` and option parsing. Three cases: `basic_derive_example` (no `#[strategy]` overrides), plus `custom_strategy` and `mix_custom_and_default_strategies` (both use `#[strategy = ...]`); the latter two are the snapshot coverage of the custom-strategy expansion that `codegen/`'s own `test_data` fixtures don't exercise.
+`tests/snapshot_tests.rs` (declared by `tests.rs`) is an `insta` snapshot suite. Its `snapshot_test!` macro `parse_quote!`s an inline fn, runs it through `codegen::generate(input, Options::default())`, formats the output with `prettyplease::unparse`, and `insta::assert_snapshot!`s it; expansions land in `tests/snapshots/*.snap`. Note it drives the **codegen stage directly with default options** — it bypasses `property_test.rs`'s `validate` and option parsing. Three cases: `basic_derive_example` (no `#[strategy]` overrides), plus `custom_strategy` and `mix_custom_and_default_strategies` (both use `#[strategy = ...]`); the latter two are the snapshot coverage of the custom-strategy expansion that `codegen/`'s own `test_data` fixtures don't exercise.
 
 Run `cargo test -p proptest-macro`, then `cargo insta review` to inspect/accept changed snapshots (review deliberately, don't blind-accept). This suite is distinct from the `snapshot_tests` module *inside* `codegen/` (driven by its own `test_data/*.rs` fixtures) — see `codegen/AGENTS.md`.

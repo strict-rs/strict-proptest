@@ -13,16 +13,19 @@
 //! is, the input collection is not itself a strategy, but is rather fixed when
 //! the strategy is created.
 
-use crate::std_facade::{Arc, Cow, Vec};
+use crate::std_facade::{Arc, Cow, Vec, string::ToString as _};
+use core::error::Error;
 use core::fmt;
-use core::ops::Range;
 
-use rand::RngExt;
+use rand::RngExt as _;
 
 use crate::bits::{self, BitSetValueTree, SampledBitSetStrategy, VarBitSet};
+use crate::collection::EmptySizeRange as CollectionEmptySizeRange;
 use crate::num;
-use crate::strategy::*;
-use crate::test_runner::*;
+#[cfg(test)]
+use crate::strategy::check_strategy_sanity;
+use crate::strategy::{NewTree, Strategy, ValueTree, statics};
+use crate::test_runner::{Reason, TestRng, TestRunner};
 
 /// Re-exported to make usage more ergonomic.
 pub use crate::collection::{SizeRange, size_range};
@@ -38,19 +41,34 @@ pub use crate::collection::{SizeRange, size_range};
 ///
 /// `values` may be a static slice or a `Vec`.
 ///
-/// ## Panics
-///
-/// Panics if the maximum size implied by `size` is larger than the size of
-/// `values`.
-///
-/// Panics if `size` is a zero-length range.
+/// Invalid size ranges are reported as a generation failure from
+/// [`Strategy::new_tree`]. Use [`try_subsequence`] when the caller needs eager
+/// typed validation.
+#[allow(
+    clippy::single_call_fn,
+    reason = "public fixed-collection subsequence strategy constructor retained for the sample module API"
+)]
 pub fn subsequence<T: Clone + 'static>(
     values: impl Into<Cow<'static, [T]>>,
     size: impl Into<SizeRange>,
 ) -> Subsequence<T> {
-    match try_subsequence(values, size) {
-        Ok(strategy) => strategy,
-        Err(error) => panic!("{}", error),
+    let source_values = values.into();
+    let len = source_values.len();
+    let size_range = size.into();
+    let bit_strategy = if let Err(error) = size_range.ensure_nonempty() {
+        Err(SubsequenceError::EmptySizeRange(error))
+    } else if size_range.end_incl() > len {
+        Err(SubsequenceError::TooLarge {
+            size_end_incl: size_range.end_incl(),
+            len,
+        })
+    } else {
+        Ok(bits::sampled_var_bitset(size_range, 0..len))
+    };
+
+    Subsequence {
+        values: Arc::new(source_values),
+        bit_strategy,
     }
 }
 
@@ -59,7 +77,7 @@ pub fn subsequence<T: Clone + 'static>(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SubsequenceError {
     /// The requested size range is empty.
-    EmptySizeRange(crate::collection::EmptySizeRange),
+    EmptySizeRange(CollectionEmptySizeRange),
     /// The requested maximum subsequence size exceeds the input length.
     TooLarge {
         /// Inclusive maximum of the requested size range.
@@ -71,18 +89,18 @@ pub enum SubsequenceError {
 
 impl fmt::Display for SubsequenceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match *self {
             Self::EmptySizeRange(inner) => inner.fmt(f),
             Self::TooLarge { size_end_incl, len } => write!(
                 f,
-                "Maximum size of subsequence {} exceeds length of input {}",
-                size_end_incl, len
+                "Maximum size of subsequence {size_end_incl} exceeds length \
+                 of input {len}"
             ),
         }
     }
 }
 
-impl core::error::Error for SubsequenceError {}
+impl Error for SubsequenceError {}
 
 /// Fallible form of [`subsequence`]: returns a typed error instead of
 /// panicking when `size` is an empty range or exceeds the input length.
@@ -100,22 +118,11 @@ pub fn try_subsequence<T: Clone + 'static>(
     values: impl Into<Cow<'static, [T]>>,
     size: impl Into<SizeRange>,
 ) -> Result<Subsequence<T>, SubsequenceError> {
-    let values = values.into();
-    let len = values.len();
-    let size = size.into();
-
-    size.ensure_nonempty()
-        .map_err(SubsequenceError::EmptySizeRange)?;
-    if size.end_incl() > len {
-        return Err(SubsequenceError::TooLarge {
-            size_end_incl: size.end_incl(),
-            len,
-        });
+    let strategy = subsequence(values, size);
+    match strategy.bit_strategy.as_ref() {
+        Ok(_) => Ok(strategy),
+        Err(error) => Err(*error),
     }
-    Ok(Subsequence {
-        values: Arc::new(values),
-        bit_strategy: bits::varsize::sampled(size, 0..len),
-    })
 }
 
 /// Strategy to generate `Vec`s by sampling a subsequence from another
@@ -128,7 +135,7 @@ pub struct Subsequence<T: Clone + 'static> {
     /// Shared source collection that generated subsequences draw from.
     values: Arc<Cow<'static, [T]>>,
     /// Chooses which indices of `values` a generated subsequence keeps.
-    bit_strategy: SampledBitSetStrategy<VarBitSet>,
+    bit_strategy: Result<SampledBitSetStrategy<VarBitSet>, SubsequenceError>,
 }
 
 impl<T: fmt::Debug + Clone + 'static> Strategy for Subsequence<T> {
@@ -136,9 +143,13 @@ impl<T: fmt::Debug + Clone + 'static> Strategy for Subsequence<T> {
     type Value = Vec<T>;
 
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+        let bit_strategy = self
+            .bit_strategy
+            .as_ref()
+            .map_err(|error| Reason::from(error.to_string()))?;
         Ok(SubsequenceValueTree {
             values: Arc::clone(&self.values),
-            inner: self.bit_strategy.new_tree(runner)?,
+            inner: bit_strategy.new_tree(runner)?,
         })
     }
 }
@@ -174,34 +185,86 @@ impl<T: fmt::Debug + Clone + 'static> ValueTree for SubsequenceValueTree<T> {
     }
 }
 
-/// `MapFn` turning a chosen index into the element at that index.
+/// Strategy to produce one value from a fixed collection of options.
 ///
-/// Backs `Select` by mapping the sampled `usize` onto a clone of the value
-/// at that position in the captured collection.
-#[derive(Debug, Clone)]
-struct SelectMapFn<T: Clone + 'static>(Arc<Cow<'static, [T]>>);
+/// Created by the [`select`] function in the same module.
+#[derive(Clone, Debug)]
+#[must_use = "strategies do nothing unless used"]
+pub struct Select<T: Clone + fmt::Debug + 'static> {
+    /// Shared source collection that generated values are sampled from.
+    values: Arc<Cow<'static, [T]>>,
+}
 
-impl<T: fmt::Debug + Clone + 'static> statics::MapFn<usize> for SelectMapFn<T> {
-    type Output = T;
+/// `ValueTree` corresponding to [`Select`].
+#[derive(Clone, Debug)]
+pub struct SelectValueTree<T: Clone + fmt::Debug + 'static> {
+    /// Shared source collection that generated values are sampled from.
+    values: Arc<Cow<'static, [T]>>,
+    /// Shrink state for the selected collection index.
+    index: num::usize::BinarySearch,
+    /// Current selected value, cached so impossible invalid states do not need
+    /// to synthesize a replacement value.
+    current: T,
+}
 
-    fn apply(&self, ix: usize) -> T {
-        self.0[ix].clone()
+impl<T: Clone + fmt::Debug + 'static> Strategy for Select<T> {
+    type Tree = SelectValueTree<T>;
+    type Value = T;
+
+    fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+        let len = self.values.len();
+        if len == 0 {
+            return Err(EmptySelection.to_string().into());
+        }
+
+        let index = (0..len).new_tree(runner)?;
+        let current =
+            self.values.get(index.current()).cloned().ok_or_else(|| {
+                Reason::from("selected index was out of range")
+            })?;
+
+        Ok(SelectValueTree {
+            values: Arc::clone(&self.values),
+            index,
+            current,
+        })
     }
 }
 
-opaque_strategy_wrapper! {
-    /// Strategy to produce one value from a fixed collection of options.
-    ///
-    /// Created by the `select()` in the same module.
-    #[derive(Clone, Debug)]
-    pub struct Select[<T>][where T : Clone + fmt::Debug + 'static](
-        statics::Map<Range<usize>, SelectMapFn<T>>)
-        -> SelectValueTree<T>;
-    /// `ValueTree` corresponding to `Select`.
-    #[derive(Clone, Debug)]
-    pub struct SelectValueTree[<T>][where T : Clone + fmt::Debug + 'static](
-        statics::Map<num::usize::BinarySearch, SelectMapFn<T>>)
-        -> T;
+impl<T: Clone + fmt::Debug + 'static> SelectValueTree<T> {
+    /// Refresh the cached current value from the current selected index.
+    fn refresh_current(&mut self) -> bool {
+        let Some(current) = self.values.get(self.index.current()).cloned()
+        else {
+            return false;
+        };
+        self.current = current;
+        true
+    }
+}
+
+impl<T: Clone + fmt::Debug + 'static> ValueTree for SelectValueTree<T> {
+    type Value = T;
+
+    fn current(&self) -> T {
+        self.current.clone()
+    }
+
+    fn simplify(&mut self) -> bool {
+        if self.index.simplify() {
+            self.refresh_current()
+        } else {
+            false
+        }
+    }
+
+    fn complicate(&mut self) -> bool {
+        if self.index.complicate() {
+            self.refresh_current()
+        } else {
+            false
+        }
+    }
 }
 
 /// Create a strategy which uniformly selects one value from `values`.
@@ -217,16 +280,18 @@ opaque_strategy_wrapper! {
 /// [`Index`](struct.Index.html) for a more efficient way to select values than
 /// using `prop_flat_map()`.
 ///
-/// ## Panics
-///
-/// Panics if `values` is empty. Use [`try_select`] to handle that case with
-/// a typed error instead.
+/// Empty collections are reported as a generation failure from
+/// [`Strategy::new_tree`]. Use [`try_select`] when the caller needs eager
+/// typed validation.
+#[allow(
+    clippy::single_call_fn,
+    reason = "public fixed-collection uniform selection strategy constructor retained for the sample module API"
+)]
 pub fn select<T: Clone + fmt::Debug + 'static>(
     values: impl Into<Cow<'static, [T]>>,
 ) -> Select<T> {
-    match try_select(values) {
-        Ok(strategy) => strategy,
-        Err(error) => panic!("{}", error),
+    Select {
+        values: Arc::new(values.into()),
     }
 }
 
@@ -240,7 +305,7 @@ impl fmt::Display for EmptySelection {
     }
 }
 
-impl core::error::Error for EmptySelection {}
+impl Error for EmptySelection {}
 
 /// Fallible form of [`select`]: returns a typed error instead of panicking
 /// when `values` is empty.
@@ -255,16 +320,12 @@ impl core::error::Error for EmptySelection {}
 pub fn try_select<T: Clone + fmt::Debug + 'static>(
     values: impl Into<Cow<'static, [T]>>,
 ) -> Result<Select<T>, EmptySelection> {
-    let cow = values.into();
-
-    if cow.is_empty() {
-        return Err(EmptySelection);
+    let strategy = select(values);
+    if strategy.values.is_empty() {
+        Err(EmptySelection)
+    } else {
+        Ok(strategy)
     }
-
-    Ok(Select(statics::Map::new(
-        0..cow.len(),
-        SelectMapFn(Arc::new(cow)),
-    )))
 }
 
 /// A stand-in for an index into a slice or similar collection or conceptually
@@ -306,8 +367,12 @@ pub fn try_select<T: Clone + fmt::Debug + 'static>(
 ///         // We now have Vec<String> of ten to twenty names, and a Vec<Index>
 ///         // of five to ten indices and can combine them however we like.
 ///         for index in &indices {
-///             println!("Accessing item by index: {}", names[index.index(names.len())]);
-///             println!("Accessing item by convenience method: {}", index.get(&names));
+///             if let Some(ix) = index.index(names.len()) {
+///                 println!("Accessing item by index: {}", names[ix]);
+///             }
+///             if let Some(name) = index.get(&names) {
+///                 println!("Accessing item by convenience method: {}", name);
+///             }
 ///         }
 ///         // Test stuff...
 ///     }
@@ -318,22 +383,68 @@ pub fn try_select<T: Clone + fmt::Debug + 'static>(
 #[derive(Clone, Copy, Debug)]
 pub struct Index(usize);
 
+/// Convert a `usize` into `u128` inside `const fn` without casts.
+const fn usize_to_u128(word: usize) -> u128 {
+    #[cfg(target_pointer_width = "16")]
+    {
+        let [b0, b1] = word.to_le_bytes();
+        u128::from_le_bytes([b0, b1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    {
+        let [b0, b1, b2, b3] = word.to_le_bytes();
+        u128::from_le_bytes([
+            b0, b1, b2, b3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ])
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    {
+        let [b0, b1, b2, b3, b4, b5, b6, b7] = word.to_le_bytes();
+        u128::from_le_bytes([
+            b0, b1, b2, b3, b4, b5, b6, b7, 0, 0, 0, 0, 0, 0, 0, 0,
+        ])
+    }
+}
+
+/// Read the low `usize` word from a `u128` inside `const fn` without casts.
+#[allow(
+    clippy::single_call_fn,
+    reason = "name the pointer-width-specific low-word extraction used by deferred index scaling"
+)]
+const fn low_usize_from_u128(wide: u128) -> usize {
+    #[cfg(target_pointer_width = "16")]
+    {
+        let [b0, b1, ..] = wide.to_le_bytes();
+        usize::from_le_bytes([b0, b1])
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    {
+        let [b0, b1, b2, b3, ..] = wide.to_le_bytes();
+        usize::from_le_bytes([b0, b1, b2, b3])
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    {
+        let [b0, b1, b2, b3, b4, b5, b6, b7, ..] = wide.to_le_bytes();
+        usize::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7])
+    }
+}
+
 impl Index {
     /// Return the real index that would be used to index a collection of size `size`.
     ///
-    /// ## Panics
-    ///
-    /// Panics if `size == 0`. [`Index::try_index`] is the fallible form.
-    pub fn index(&self, size: usize) -> usize {
-        match self.try_index(size) {
-            Some(index) => index,
-            None => panic!("Attempt to use `Index` with 0-size collection"),
-        }
+    /// Returns `None` if `size == 0`.
+    #[must_use]
+    pub const fn index(self, size: usize) -> Option<usize> {
+        self.try_index(size)
     }
 
-    /// Fallible form of [`Index::index`]: returns `None` instead of panicking
-    /// when `size == 0`.
-    pub fn try_index(&self, size: usize) -> Option<usize> {
+    /// Fallible form of [`Index::index`].
+    #[must_use]
+    pub const fn try_index(self, size: usize) -> Option<usize> {
         if size == 0 {
             return None;
         }
@@ -341,33 +452,34 @@ impl Index {
         // No platforms currently have `usize` wider than 64 bits, so `u128` is
         // sufficient to hold the result of a full multiply, letting us do a
         // simple fixed-point multiply.
-        Some(
-            (((size as u128) * (self.0 as u128)) >> (size_of::<usize>() * 8))
-                as usize,
-        )
+        let scaled = usize_to_u128(size).saturating_mul(usize_to_u128(self.0));
+        Some(low_usize_from_u128(scaled >> usize::BITS))
     }
 
     /// Return a reference to the element in `slice` that this `Index` refers to.
     ///
-    /// A shortcut for `&slice[index.index(slice.len())]`.
-    pub fn get<'a, T>(&self, slice: &'a [T]) -> &'a T {
-        &slice[self.index(slice.len())]
+    /// A shortcut for `slice.get(index.index(slice.len())?)`.
+    #[must_use]
+    pub fn get<T>(self, slice: &[T]) -> Option<&T> {
+        let ix = self.index(slice.len())?;
+        slice.get(ix)
     }
 
     /// Return a mutable reference to the element in `slice` that this `Index`
     /// refers to.
     ///
-    /// A shortcut for `&mut slice[index.index(slice.len())]`.
-    pub fn get_mut<'a, T>(&self, slice: &'a mut [T]) -> &'a mut T {
-        let ix = self.index(slice.len());
-        &mut slice[ix]
+    /// A shortcut for `slice.get_mut(index.index(slice.len())?)`.
+    #[must_use]
+    pub fn get_mut<T>(self, slice: &mut [T]) -> Option<&mut T> {
+        let ix = self.index(slice.len())?;
+        slice.get_mut(ix)
     }
 }
 
 // This impl is handy for generic code over any type that exposes an internal `Index` -- with it,
 // a plain `Index` can be passed in as well.
-impl AsRef<Index> for Index {
-    fn as_ref(&self) -> &Index {
+impl AsRef<Self> for Index {
+    fn as_ref(&self) -> &Self {
         self
     }
 }
@@ -399,8 +511,8 @@ impl IndexStrategy {
         clippy::single_call_fn,
         reason = "the deferred-bound Index strategy that backs any::<Index>()"
     )]
-    pub(crate) fn new() -> Self {
-        IndexStrategy(statics::Map::new(num::usize::ANY, UsizeToIndex))
+    pub(crate) const fn new() -> Self {
+        Self(statics::Map::new(num::usize::ANY, UsizeToIndex))
     }
 }
 
@@ -432,7 +544,9 @@ impl IndexStrategy {
 ///         names in prop::collection::hash_set("[a-z]+", 10..20),
 ///         selector in any::<prop::sample::Selector>()
 ///     ) {
-///         println!("Selected name: {}", selector.select(&names));
+///         if let Some(name) = selector.select(&names) {
+///             println!("Selected name: {}", name);
+///         }
 ///         // Test stuff...
 ///     }
 /// }
@@ -474,8 +588,8 @@ impl SelectorStrategy {
         clippy::single_call_fn,
         reason = "the iterator-selection strategy that backs any::<Selector>()"
     )]
-    pub(crate) fn new() -> Self {
-        SelectorStrategy
+    pub(crate) const fn new() -> Self {
+        Self
     }
 }
 
@@ -497,7 +611,8 @@ impl ValueTree for SelectorValueTree {
     fn current(&self) -> Selector {
         Selector {
             rng: self.rng.clone(),
-            bias_increment: u64::MAX - self.reverse_bias_increment.current(),
+            bias_increment: u64::MAX
+                .saturating_sub(self.reverse_bias_increment.current()),
         }
     }
 
@@ -518,11 +633,9 @@ impl Selector {
     ///
     /// `it` is always iterated completely.
     ///
-    /// ## Panics
-    ///
-    /// Panics if `it` has no elements.
-    pub fn select<T: IntoIterator>(&self, it: T) -> T::Item {
-        self.try_select(it).expect("select from empty iterator")
+    /// Returns `None` if `it` is empty.
+    pub fn select<T: IntoIterator>(&self, it: T) -> Option<T::Item> {
+        self.try_select(it)
     }
 
     /// Pick a random element from iterable `it`.
@@ -534,7 +647,7 @@ impl Selector {
     ///
     /// `it` is always iterated completely.
     pub fn try_select<T: IntoIterator>(&self, it: T) -> Option<T::Item> {
-        let mut bias = 0u64;
+        let mut bias = 0_u64;
         let mut min_score = 0;
         let mut best = None;
         let mut rng = self.rng.clone();
@@ -581,7 +694,7 @@ mod test {
     #[test]
     fn try_constructors_accept_valid_inputs() -> Result<(), TestFailure> {
         let subsequence_strategy = ensure_some(
-            try_subsequence(vec![1u8, 2, 3, 4], 1..3).ok(),
+            try_subsequence(vec![1_u8, 2, 3, 4], 1..3).ok(),
             "try_subsequence accepts a size range within the input length",
         )?;
         let mut runner = TestRunner::deterministic();
@@ -595,7 +708,7 @@ mod test {
             "the sampled subsequence honors the size range",
         )?;
         let select_strategy = ensure_some(
-            try_select(vec![7u8, 8, 9]).ok(),
+            try_select(vec![7_u8, 8, 9]).ok(),
             "try_select accepts a non-empty collection",
         )?;
         let selected = ensure_some(
@@ -604,17 +717,20 @@ mod test {
         )?
         .current();
         ensure(
-            [7u8, 8, 9].contains(&selected),
+            [7_u8, 8, 9].contains(&selected),
             "the selected value comes from the input collection",
         )?;
-        let index = Index(usize::MAX / 2);
+        let index = Index(usize::MAX.div_euclid(2));
         ensure_eq(
             &ensure_some(
                 index.try_index(10),
                 "try_index accepts a non-zero collection size",
             )?,
-            &index.index(10),
-            "try_index agrees with the panicking form on valid sizes",
+            &ensure_some(
+                index.index(10),
+                "index accepts a non-zero collection size",
+            )?,
+            "index agrees with try_index on valid sizes",
         )
     }
 
@@ -622,14 +738,14 @@ mod test {
     fn try_constructors_reject_invalid_inputs() -> Result<(), TestFailure> {
         ensure(
             matches!(
-                try_subsequence(vec![1u8, 2, 3], 2..2),
+                try_subsequence(vec![1_u8, 2, 3], 2..2),
                 Err(SubsequenceError::EmptySizeRange(_))
             ),
             "try_subsequence rejects an empty size range",
         )?;
         ensure_eq(
             &ensure_some(
-                try_subsequence(vec![1u8, 2, 3], 1..=5).err(),
+                try_subsequence(vec![1_u8, 2, 3], 1..=5).err(),
                 "try_subsequence rejects a size range beyond the input",
             )?,
             &SubsequenceError::TooLarge {
@@ -675,21 +791,27 @@ mod test {
             // Chose distinct items
             ensure_eq(
                 &value.len(),
-                &value.iter().cloned().collect::<BTreeSet<_>>().len(),
+                &value.iter().copied().collect::<BTreeSet<_>>().len(),
                 "the subsequence contains only distinct items",
             )?;
             // Values are in correct order
             let mut sorted = value.clone();
-            sorted.sort();
+            sorted.sort_unstable();
             ensure(
                 sorted == value,
                 "the subsequence preserves the source order",
             )?;
 
-            size_counts[value.len()] += 1;
+            *ensure_some(
+                size_counts.get_mut(value.len()),
+                "the subsequence size has a count slot",
+            )? += 1;
 
-            for value in value {
-                value_counts[value] += 1;
+            for selected_value in value {
+                *ensure_some(
+                    value_counts.get_mut(selected_value),
+                    "the selected value has a count slot",
+                )? += 1;
             }
         }
 
@@ -701,7 +823,7 @@ mod test {
             )?;
         }
 
-        for &pick_count in value_counts.iter() {
+        for &pick_count in &value_counts {
             ensure(
                 (1024..1500).contains(&pick_count),
                 "each value is chosen a plausible number of times",
@@ -738,14 +860,18 @@ mod test {
         let input = select(values);
 
         for _ in 0..1024 {
-            counts[ensure_some(
+            let selected = ensure_some(
                 input.new_tree(&mut runner).ok(),
                 "select strategy generates a value tree",
             )?
-            .current()] += 1;
+            .current();
+            *ensure_some(
+                counts.get_mut(selected),
+                "the selected value has a count slot",
+            )? += 1;
         }
 
-        for &count in counts.iter() {
+        for &count in &counts {
             ensure(
                 (64..256).contains(&count),
                 "each value is generated a plausible number of times",
@@ -755,13 +881,13 @@ mod test {
     }
 
     #[test]
-    fn test_sample_sanity() {
-        check_strategy_sanity(subsequence(vec![0, 1, 2, 3, 4], 1..3), None);
+    fn test_sample_sanity() -> Result<(), Reason> {
+        check_strategy_sanity(subsequence(vec![0, 1, 2, 3, 4], 1..3), None)
     }
 
     #[test]
-    fn test_select_sanity() {
-        check_strategy_sanity(select(vec![0, 1, 2, 3, 4]), None);
+    fn test_select_sanity() -> Result<(), Reason> {
+        check_strategy_sanity(select(vec![0, 1, 2, 3, 4]), None)
     }
 
     #[test]
@@ -781,7 +907,7 @@ mod test {
 
     #[test]
     fn subseq_full_vec_works() -> Result<(), TestFailure> {
-        let source = vec![1u32, 2u32, 3u32];
+        let source = vec![1_u32, 2_u32, 3_u32];
         let mut runner = TestRunner::deterministic();
         let input = subsequence(source.clone(), 3);
         ensure(
@@ -807,13 +933,22 @@ mod test {
                 input.new_tree(&mut runner).ok(),
                 "index strategy generates a value tree",
             )?;
-            let _was_new = seen.insert(*tree.current().get(&col));
+            let generated_index = tree.current();
+            let selected = ensure_some(
+                generated_index.get(&col),
+                "index selects a value",
+            )?;
+            let _was_new = seen.insert(*selected);
 
             while tree.simplify() {}
 
+            let simplified_index = tree.current();
             ensure_eq(
                 &"foo",
-                &*tree.current().get(&col),
+                ensure_some(
+                    simplified_index.get(&col),
+                    "simplified index selects a value",
+                )?,
                 "a fully simplified index lands on the first element",
             )?;
         }
@@ -837,13 +972,22 @@ mod test {
                 input.new_tree(&mut runner).ok(),
                 "selector strategy generates a value tree",
             )?;
-            let _was_new = seen.insert(*tree.current().select(&col));
+            let generated_selector = tree.current();
+            let selected = ensure_some(
+                generated_selector.select(&col),
+                "selector selects a value",
+            )?;
+            let _was_new = seen.insert(*selected);
 
             while tree.simplify() {}
 
+            let simplified_selector = tree.current();
             ensure_eq(
                 &"bar",
-                &*tree.current().select(&col),
+                ensure_some(
+                    simplified_selector.select(&col),
+                    "simplified selector selects a value",
+                )?,
                 "a fully simplified selector lands on the first ordered \
                  element",
             )?;

@@ -9,22 +9,35 @@
 
 //! Arbitrary implementations for `std::net`.
 
-use std::net::*;
+#[cfg(feature = "unstable")]
+use std::net::Ipv6MulticastScope;
+use std::net::{
+    AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr,
+    SocketAddrV4, SocketAddrV6,
+};
 
-use crate::arbitrary::*;
+use crate::arbitrary::{SMapped, StrategyFor, any};
 use crate::strategy::statics::static_map;
-use crate::strategy::*;
+use crate::strategy::{
+    Just, MapInto, Strategy as _, TupleUnion, WeightedStrategy,
+};
 
 // TODO: Can we design a workable semantic for PBT wrt. actual networking
 // connections?
 
-arbitrary!(AddrParseError; "".parse::<Ipv4Addr>().unwrap_err());
+arbitrary!(AddrParseError; {
+    loop {
+        if let Err(error) = "".parse::<Ipv4Addr>() {
+            break error;
+        }
+    }
+});
 
 arbitrary!(Ipv4Addr,
     TupleUnion<(
-        WA<Just<Self>>,
-        WA<Just<Self>>,
-        WA<MapInto<StrategyFor<u32>, Self>>
+        WeightedStrategy<Just<Self>>,
+        WeightedStrategy<Just<Self>>,
+        WeightedStrategy<MapInto<StrategyFor<u32>, Self>>
     )>;
     prop_oneof![
         1  => Just(Self::new(0, 0, 0, 0)),
@@ -35,8 +48,8 @@ arbitrary!(Ipv4Addr,
 
 arbitrary!(Ipv6Addr,
     TupleUnion<(
-        WA<SMapped<Ipv4Addr, Self>>,
-        WA<MapInto<StrategyFor<[u16; 8]>, Self>>
+        WeightedStrategy<SMapped<Ipv4Addr, Self>>,
+        WeightedStrategy<MapInto<StrategyFor<[u16; 8]>, Self>>
     )>;
     prop_oneof![
         2 => static_map(any::<Ipv4Addr>(), |ip| ip.to_ipv6_mapped()),
@@ -54,8 +67,8 @@ arbitrary!(SocketAddrV6, SMapped<(Ipv6Addr, u16, u32, u32), Self>;
 );
 
 arbitrary!(IpAddr,
-    TupleUnion<(WA<MapInto<StrategyFor<Ipv4Addr>, Self>>,
-                WA<MapInto<StrategyFor<Ipv6Addr>, Self>>)>;
+    TupleUnion<(WeightedStrategy<MapInto<StrategyFor<Ipv4Addr>, Self>>,
+                WeightedStrategy<MapInto<StrategyFor<Ipv6Addr>, Self>>)>;
     prop_oneof![
         any::<Ipv4Addr>().prop_map_into(),
         any::<Ipv6Addr>().prop_map_into()
@@ -63,15 +76,15 @@ arbitrary!(IpAddr,
 );
 
 arbitrary!(Shutdown,
-    TupleUnion<(WA<Just<Self>>, WA<Just<Self>>, WA<Just<Self>>)>;
+    TupleUnion<(WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>)>;
     {
-        use std::net::Shutdown::*;
+        use std::net::Shutdown::{Both, Read, Write};
         prop_oneof![Just(Both), Just(Read), Just(Write)]
     }
 );
 arbitrary!(SocketAddr,
-    TupleUnion<(WA<MapInto<StrategyFor<SocketAddrV4>, Self>>,
-                WA<MapInto<StrategyFor<SocketAddrV6>, Self>>)>;
+    TupleUnion<(WeightedStrategy<MapInto<StrategyFor<SocketAddrV4>, Self>>,
+                WeightedStrategy<MapInto<StrategyFor<SocketAddrV6>, Self>>)>;
     prop_oneof![
         any::<SocketAddrV4>().prop_map_into(),
         any::<SocketAddrV6>().prop_map_into()
@@ -80,11 +93,14 @@ arbitrary!(SocketAddr,
 
 #[cfg(feature = "unstable")]
 arbitrary!(Ipv6MulticastScope,
-    TupleUnion<(WA<Just<Self>>, WA<Just<Self>>, WA<Just<Self>>,
-                WA<Just<Self>>, WA<Just<Self>>, WA<Just<Self>>,
-                WA<Just<Self>>)>;
+    TupleUnion<(WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>,
+                WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>,
+                WeightedStrategy<Just<Self>>)>;
     {
-        use std::net::Ipv6MulticastScope::*;
+        use std::net::Ipv6MulticastScope::{
+            AdminLocal, Global, InterfaceLocal, LinkLocal, OrganizationLocal,
+            RealmLocal, SiteLocal,
+        };
         prop_oneof![
             Just(InterfaceLocal),
             Just(LinkLocal),

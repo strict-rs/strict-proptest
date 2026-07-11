@@ -11,13 +11,13 @@
 
 use core::cmp::{Ordering, Reverse};
 
-use crate::strategy::{Just, TupleUnion, WA};
+use crate::strategy::{Just, TupleUnion, WeightedStrategy};
 
 wrap_ctor!(Reverse, Reverse);
 
 /// One weighted arm of the `Ordering` union: a `Just` of a single variant.
-type Wajo = WA<Just<Ordering>>;
-arbitrary!(Ordering, TupleUnion<(Wajo, Wajo, Wajo)>;
+type WeightedOrdering = WeightedStrategy<Just<Ordering>>;
+arbitrary!(Ordering, TupleUnion<(WeightedOrdering, WeightedOrdering, WeightedOrdering)>;
     prop_oneof![
         Just(Ordering::Equal),
         Just(Ordering::Less),

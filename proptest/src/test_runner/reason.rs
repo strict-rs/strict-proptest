@@ -8,6 +8,8 @@
 // except according to those terms.
 
 use crate::std_facade::{Box, Cow, String, fmt};
+#[cfg(feature = "std")]
+use std::error::Error;
 
 /// The reason for why something, such as a generated value, was rejected.
 ///
@@ -24,6 +26,7 @@ impl Reason {
     ///
     /// The message is intended for human consumption, and is not guaranteed to
     /// have any format in particular.
+    #[must_use]
     pub fn message(&self) -> &str {
         self.0.as_ref()
     }
@@ -31,19 +34,19 @@ impl Reason {
 
 impl From<&'static str> for Reason {
     fn from(message: &'static str) -> Self {
-        Reason(message.into())
+        Self(message.into())
     }
 }
 
 impl From<String> for Reason {
     fn from(message: String) -> Self {
-        Reason(message.into())
+        Self(message.into())
     }
 }
 
 impl From<Box<str>> for Reason {
     fn from(message: Box<str>) -> Self {
-        Reason(String::from(message).into())
+        Self(String::from(message).into())
     }
 }
 
@@ -52,3 +55,6 @@ impl fmt::Display for Reason {
         fmt::Display::fmt(self.message(), f)
     }
 }
+
+#[cfg(feature = "std")]
+impl Error for Reason {}

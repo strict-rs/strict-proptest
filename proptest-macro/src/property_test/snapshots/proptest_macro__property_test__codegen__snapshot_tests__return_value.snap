@@ -1,5 +1,6 @@
 ---
-source: proptest-macro/src/property_test/codegen/mod.rs
+source: proptest-macro/src/property_test/codegen.rs
+assertion_line: 257
 expression: formatted
 ---
 #[test]

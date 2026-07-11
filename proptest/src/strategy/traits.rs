@@ -7,10 +7,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{Arc, Box, Rc, fmt, vec};
+use crate::std_facade::{Arc, Box, Rc, fmt, format, vec};
 
-use crate::strategy::*;
-use crate::test_runner::*;
+use crate::strategy::{
+    Filter, FilterMap, Flatten, IndFlatten, IndFlattenMap, Map, MapInto,
+    Perturb, Recursive, Shuffle, Shuffleable, Union,
+};
+use crate::test_runner::{Config, Reason, TestRng, TestRunner};
 
 //==============================================================================
 // Traits
@@ -126,11 +129,11 @@ pub trait Strategy: fmt::Debug {
     ///   # /*
     ///   #[test]
     ///   # */
-    ///   fn test_something(a in (0i32..10).prop_perturb(
+    ///   fn test_something(a in (0_i32..10).prop_perturb(
     ///       // Perturb the integer `a` (range 0..10) to a pair of that
     ///       // integer and another that's ± 10 of it.
     ///       // Note that this particular case would be better implemented as
-    ///       // `(0i32..10, -10i32..10).prop_map(|(a, b)| (a, a + b))`
+    ///       // `(0_i32..10, -10_i32..10).prop_map(|(a, b)| (a, a + b))`
     ///       // but is shown here for simplicity.
     ///       |centre, mut rng| (centre, centre + rng.random_range(-10..10))))
     ///   {
@@ -354,12 +357,16 @@ pub trait Strategy: fmt::Debug {
     /// number of local rejections allowed is much higher than the number of
     /// whole-input rejections.
     ///
+    /// The mapped output must be cloneable so rejected shrink attempts can keep
+    /// reporting the most recent accepted output and keep
+    /// `ValueTree::current()` infallible.
+    ///
     /// `whence` is used to record where and why the rejection occurred.
     #[allow(
         clippy::single_call_fn,
         reason = "forward the Strategy::prop_filter_map trait method to the FilterMap combinator constructor"
     )]
-    fn prop_filter_map<F: Fn(Self::Value) -> Option<O>, O: fmt::Debug>(
+    fn prop_filter_map<F: Fn(Self::Value) -> Option<O>, O: Clone + fmt::Debug>(
         self,
         whence: impl Into<Reason>,
         fun: F,
@@ -541,6 +548,10 @@ pub trait Strategy: fmt::Debug {
     ///
     /// Strategies of this type afford cheap shallow cloning via reference
     /// counting by using an `Arc` internally.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public Send + Sync type-erasure strategy combinator retained for the Strategy API"
+    )]
     fn sboxed(self) -> SBoxedStrategy<Self::Value>
     where
         Self: Sized + Send + Sync + 'static,
@@ -731,13 +742,13 @@ pub struct SBoxedStrategy<T>(
 
 impl<T> Clone for BoxedStrategy<T> {
     fn clone(&self) -> Self {
-        BoxedStrategy(Arc::clone(&self.0))
+        Self(Arc::clone(&self.0))
     }
 }
 
 impl<T> Clone for SBoxedStrategy<T> {
     fn clone(&self) -> Self {
-        SBoxedStrategy(Arc::clone(&self.0))
+        Self(Arc::clone(&self.0))
     }
 }
 
@@ -818,15 +829,15 @@ pub struct CheckStrategySanityOptions {
     /// Defaults to false. Useful for testing behaviors around error handling.
     pub error_on_local_rejects: bool,
 
-    // Needs to be public for FRU syntax.
-    #[allow(missing_docs)]
+    /// Hidden extension slot that keeps struct update syntax available while
+    /// allowing more sanity-check options to be added later.
     #[doc(hidden)]
     pub _non_exhaustive: (),
 }
 
 impl Default for CheckStrategySanityOptions {
     fn default() -> Self {
-        CheckStrategySanityOptions {
+        Self {
             strict_complicate_after_simplify: true,
             error_on_local_rejects: false,
             _non_exhaustive: (),
@@ -834,28 +845,31 @@ impl Default for CheckStrategySanityOptions {
     }
 }
 
-/// Drive a fresh clone of `state` to its shrink fixed point, panicking once
-/// `simplify()`/`complicate()` keep reporting change past 65536 steps — a
-/// near-certain infinite loop in the strategy's shrink state machine.
+/// Drive a fresh clone of `state` to its shrink fixed point.
 #[allow(
     clippy::single_call_fn,
     reason = "drive a cloned value tree to its shrink fixed point, panicking on a runaway loop"
 )]
-fn assert_shrink_converges<V: ValueTree + Clone + fmt::Debug>(state: &V) {
-    let mut state = state.clone();
-    let mut count = 0;
-    while state.simplify() || state.complicate() {
-        count += 1;
-        if count > 65536 {
-            panic!("Failed to converge on any value. State:\n{:#?}", state);
+fn assert_shrink_converges<V: ValueTree + Clone + fmt::Debug>(
+    state: &V,
+) -> Result<(), Reason> {
+    let mut shrink_state = state.clone();
+    let mut count = 0_u32;
+    while shrink_state.simplify() || shrink_state.complicate() {
+        count = count.saturating_add(1);
+        if count > 65_536 {
+            return Err(format!(
+                "Failed to converge on any value. State:\n{shrink_state:#?}"
+            )
+            .into());
         }
     }
+    Ok(())
 }
 
 /// Complicate `complicated` until it reports no further change, returning
 /// the last state that still reported a change and the number of
-/// complications applied; panics past 65536 complications (a possible
-/// infinite loop), citing `full_state` in the message.
+/// complications applied.
 #[allow(
     clippy::single_call_fn,
     reason = "repeatedly complicate a value tree to its ceiling, returning the last stable state"
@@ -863,29 +877,238 @@ fn assert_shrink_converges<V: ValueTree + Clone + fmt::Debug>(state: &V) {
 fn complicate_to_fixed_point<V: ValueTree + Clone + fmt::Debug>(
     complicated: &mut V,
     full_state: &V,
-) -> (V, u32) {
+) -> Result<(V, u32), Reason> {
     let mut prev_complicated = complicated.clone();
-    let mut num_complications = 0u32;
+    let mut num_complications = 0_u32;
     loop {
         if !complicated.complicate() {
             break;
         }
         prev_complicated = complicated.clone();
-        num_complications += 1;
+        num_complications = num_complications.saturating_add(1);
 
         if num_complications > 65_536 {
-            panic!(
+            return Err(format!(
                 "complicate() returned true over 65536 times in a \
                  row; aborting due to possible infinite loop. \
                  If this is not an infinite loop, it may be \
                  necessary to reconsider how shrinking is \
                  implemented or use a simpler test strategy. \
-                 Internal state:\n{:#?}",
-                full_state
-            );
+                 Internal state:\n{full_state:#?}"
+            )
+            .into());
         }
     }
-    (prev_complicated, num_complications)
+    Ok((prev_complicated, num_complications))
+}
+
+/// Return whether `candidate` is not equal to itself, as with floating-point
+/// NaN.
+fn is_non_reflexive<T: PartialEq>(candidate: &T) -> bool {
+    !candidate.eq(candidate)
+}
+
+/// Compare two generated values, accepting the NaN-like case where both sides
+/// are non-reflexive.
+fn sanity_values_match<T: PartialEq>(left: &T, right: &T) -> bool {
+    left == right || (is_non_reflexive(left) && is_non_reflexive(right))
+}
+
+/// Generate one strategy value tree for the sanity checker.
+#[allow(
+    clippy::single_call_fn,
+    reason = "name the generation phase of check_strategy_sanity and its retry contract"
+)]
+fn generate_sanity_state<S: Strategy>(
+    strategy: &S,
+    runner: &mut TestRunner,
+) -> Result<S::Tree, Reason> {
+    let mut gen_tries = 0_u32;
+    loop {
+        let err = match strategy.new_tree(runner) {
+            Ok(tree) => return Ok(tree),
+            Err(reason) => reason,
+        };
+
+        gen_tries = gen_tries.saturating_add(1);
+        if gen_tries > 100 {
+            return Err(format!(
+                "Strategy passed to check_strategy_sanity failed \
+                 to generate a value over 100 times in a row; \
+                 last failure reason: {err}"
+            )
+            .into());
+        }
+    }
+}
+
+/// Check one generated value tree against the simplify/complicate contract.
+#[allow(
+    clippy::single_call_fn,
+    reason = "name the per-state simplify and complicate contract checked by check_strategy_sanity"
+)]
+fn check_sanity_state<V>(
+    mut state: V,
+    sanity_options: CheckStrategySanityOptions,
+) -> Result<(), Reason>
+where
+    V: ValueTree + Clone + fmt::Debug,
+    V::Value: PartialEq,
+{
+    macro_rules! ensure_same {
+        ($a:expr, $b:expr, $($stuff:tt)*) => {{
+            let left = $a;
+            let right = $b;
+            if !sanity_values_match(&left, &right) {
+                return Err(format!($($stuff)*).into());
+            }
+        }};
+    }
+
+    assert_shrink_converges(&state)?;
+
+    let mut num_simplifies = 0_u32;
+    let mut before_simplified;
+    loop {
+        before_simplified = state.clone();
+        if !state.simplify() {
+            break;
+        }
+
+        let mut complicated = state.clone();
+        let before_complicated = state.clone();
+        if sanity_options.strict_complicate_after_simplify
+            && !complicated.complicate()
+        {
+            return Err(format!(
+                "complicate() returned false immediately after \
+                 simplify() returned true. internal state after \
+                 {num_simplifies} calls to simplify():\n\
+                 {before_simplified:#?}\n\
+                 simplified to:\n\
+                 {state:#?}\n\
+                 complicated to:\n\
+                 {complicated:#?}"
+            )
+            .into());
+        }
+
+        let (prev_complicated, num_complications) =
+            complicate_to_fixed_point(&mut complicated, &state)?;
+        let total_complications = num_complications.saturating_add(1);
+
+        ensure_same!(
+            before_simplified.current(),
+            complicated.current(),
+            "Calling simplify(), then complicate() until it \
+             returned false, did not return to the value before \
+             simplify. Internal state after {num_simplifies} calls to \
+             simplify:\n{before_simplified:#?}\n\
+             Internal state after another call to simplify:\n\
+             {before_complicated:#?}\n\
+             Internal state after {total_complications} subsequent calls to \
+             complicate:\n{complicated:#?}"
+        );
+
+        verify_complicate_fixed_point(&mut complicated, &prev_complicated)?;
+
+        num_simplifies = num_simplifies.saturating_add(1);
+        if num_simplifies > 65_536 {
+            return Err(format!(
+                "simplify() returned true over 65536 times in a row, \
+                 aborting due to possible infinite loop. If this is not \
+                 an infinite loop, it may be necessary to reconsider \
+                 how shrinking is implemented or use a simpler test \
+                 strategy. Internal state:\n{state:#?}"
+            )
+            .into());
+        }
+    }
+
+    verify_simplify_fixed_point(&mut state, &before_simplified)
+}
+
+/// Verify that repeated `complicate()` calls stay fixed after reaching the
+/// fixed point.
+#[allow(
+    clippy::single_call_fn,
+    reason = "name the complicate fixed-point rule enforced by check_strategy_sanity"
+)]
+fn verify_complicate_fixed_point<V>(
+    complicated: &mut V,
+    prev_complicated: &V,
+) -> Result<(), Reason>
+where
+    V: ValueTree + Clone + fmt::Debug,
+    V::Value: PartialEq,
+{
+    for iter in 1_u32..16 {
+        let left = prev_complicated.current();
+        let right = complicated.current();
+        if !sanity_values_match(&left, &right) {
+            return Err(format!(
+                "complicate() returned false but changed the output \
+                 value anyway. Old internal state:\n{prev_complicated:#?}\n\
+                 New internal state after {iter} calls to complicate:\n\
+                 {complicated:#?}"
+            )
+            .into());
+        }
+
+        let attempts = iter.saturating_add(1);
+        if complicated.complicate() {
+            return Err(format!(
+                "complicate() returned true after having returned \
+                 false;\nInternal state before:\n{prev_complicated:#?}\n\
+                 Internal state after calling complicate() {attempts} \
+                 times:\n{complicated:#?}"
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+/// Verify that repeated `simplify()` calls stay fixed after reaching the
+/// fixed point.
+#[allow(
+    clippy::single_call_fn,
+    reason = "name the simplify fixed-point rule enforced by check_strategy_sanity"
+)]
+fn verify_simplify_fixed_point<V>(
+    state: &mut V,
+    before_simplified: &V,
+) -> Result<(), Reason>
+where
+    V: ValueTree + Clone + fmt::Debug,
+    V::Value: PartialEq,
+{
+    for iter in 0_u32..16 {
+        let left = before_simplified.current();
+        let right = state.current();
+        if !sanity_values_match(&left, &right) {
+            return Err(format!(
+                "simplify() returned false but changed the output \
+                 value anyway. Previous internal state:\n\
+                 {before_simplified:#?}\n\
+                 New internal state after calling simplify() {iter} \
+                 times:\n{state:#?}"
+            )
+            .into());
+        }
+
+        if state.simplify() {
+            let attempts = iter.saturating_add(1);
+            return Err(format!(
+                "simplify() returned true after having returned false. \
+                 Previous internal state:\n{before_simplified:#?}\n\
+                 New internal state after calling simplify() {attempts} \
+                 times:\n{state:#?}"
+            )
+            .into());
+        }
+    }
+    Ok(())
 }
 
 /// Run some tests on the given `Strategy` to ensure that it upholds the
@@ -903,202 +1126,36 @@ fn complicate_to_fixed_point<V: ValueTree + Clone + fmt::Debug>(
 /// This can work with fallible strategies, but limits how many times it will
 /// retry failures.
 ///
-/// ## Panics
+/// ## Errors
 ///
-/// Panics if the strategy violates the `simplify`/`complicate` contract (any
-/// of the internal consistency checks fail), if it fails to generate a value
-/// 100 times in a row, or if shrinking fails to converge, meaning `simplify()`
-/// or `complicate()` keep reporting a change more than 65536 times in a row.
+/// Returns [`Reason`] if the strategy violates the `simplify`/`complicate`
+/// contract (any of the internal consistency checks fail), if it fails to
+/// generate a value 100 times in a row, or if shrinking fails to converge,
+/// meaning `simplify()` or `complicate()` keep reporting a change more than
+/// 65536 times in a row.
 pub fn check_strategy_sanity<S: Strategy>(
     strategy: S,
     options: Option<CheckStrategySanityOptions>,
-) where
+) -> Result<(), Reason>
+where
     S::Tree: Clone + fmt::Debug,
     S::Value: PartialEq,
 {
-    // Like assert_eq!, but also pass if both values do not equal themselves.
-    // This allows the test to work correctly with things like NaN.
-    macro_rules! assert_same {
-        ($a:expr, $b:expr, $($stuff:tt)*) => { {
-            let left = $a;
-            let right = $b;
-            if left == left || right == right {
-                assert_eq!(left, right, $($stuff)*);
-            }
-        } }
-    }
-
-    let options = options.unwrap_or_default();
-    let mut config = Config::default();
-    if options.error_on_local_rejects {
+    let sanity_options = options.unwrap_or_default();
+    let mut config = Config {
+        failure_persistence: None,
+        ..Config::default()
+    };
+    if sanity_options.error_on_local_rejects {
         config.max_local_rejects = 0;
     }
     let mut runner = TestRunner::new(config);
 
     for _ in 0..1024 {
-        let mut gen_tries = 0;
-        let mut state;
-        loop {
-            let err = match strategy.new_tree(&mut runner) {
-                Ok(tree) => {
-                    state = tree;
-                    break;
-                }
-                Err(reason) => reason,
-            };
-
-            gen_tries += 1;
-            if gen_tries > 100 {
-                panic!(
-                    "Strategy passed to check_strategy_sanity failed \
-                     to generate a value over 100 times in a row; \
-                     last failure reason: {}",
-                    err
-                );
-            }
-        }
-
-        assert_shrink_converges(&state);
-
-        let mut num_simplifies = 0;
-        let mut before_simplified;
-        loop {
-            before_simplified = state.clone();
-            if !state.simplify() {
-                break;
-            }
-
-            let mut complicated = state.clone();
-            let before_complicated = state.clone();
-            if options.strict_complicate_after_simplify {
-                assert!(
-                    complicated.complicate(),
-                    "complicate() returned false immediately after \
-                     simplify() returned true. internal state after \
-                     {} calls to simplify():\n\
-                     {:#?}\n\
-                     simplified to:\n\
-                     {:#?}\n\
-                     complicated to:\n\
-                     {:#?}",
-                    num_simplifies,
-                    before_simplified,
-                    state,
-                    complicated
-                );
-            }
-
-            let (prev_complicated, num_complications) =
-                complicate_to_fixed_point(&mut complicated, &state);
-
-            assert_same!(
-                before_simplified.current(),
-                complicated.current(),
-                "Calling simplify(), then complicate() until it \
-                 returned false, did not return to the value before \
-                 simplify. Expected:\n\
-                 {:#?}\n\
-                 Actual:\n\
-                 {:#?}\n\
-                 Internal state after {} calls to simplify():\n\
-                 {:#?}\n\
-                 Internal state after another call to simplify():\n\
-                 {:#?}\n\
-                 Internal state after {} subsequent calls to \
-                 complicate():\n\
-                 {:#?}",
-                before_simplified.current(),
-                complicated.current(),
-                num_simplifies,
-                before_simplified,
-                before_complicated,
-                num_complications + 1,
-                complicated
-            );
-
-            for iter in 1..16 {
-                assert_same!(
-                    prev_complicated.current(),
-                    complicated.current(),
-                    "complicate() returned false but changed the output \
-                     value anyway.\n\
-                     Old value:\n\
-                     {:#?}\n\
-                     New value:\n\
-                     {:#?}\n\
-                     Old internal state:\n\
-                     {:#?}\n\
-                     New internal state after {} calls to complicate()\
-                     including the :\n\
-                     {:#?}",
-                    prev_complicated.current(),
-                    complicated.current(),
-                    prev_complicated,
-                    iter,
-                    complicated
-                );
-
-                assert!(
-                    !complicated.complicate(),
-                    "complicate() returned true after having returned \
-                     false;\n\
-                     Internal state before:\n{:#?}\n\
-                     Internal state after calling complicate() {} times:\n\
-                     {:#?}",
-                    prev_complicated,
-                    iter + 1,
-                    complicated
-                );
-            }
-
-            num_simplifies += 1;
-            if num_simplifies > 65_536 {
-                panic!(
-                    "simplify() returned true over 65536 times in a row, \
-                     aborting due to possible infinite loop. If this is not \
-                     an infinite loop, it may be necessary to reconsider \
-                     how shrinking is implemented or use a simpler test \
-                     strategy. Internal state:\n{:#?}",
-                    state
-                );
-            }
-        }
-
-        for iter in 0..16 {
-            assert_same!(
-                before_simplified.current(),
-                state.current(),
-                "simplify() returned false but changed the output \
-                 value anyway.\n\
-                 Old value:\n\
-                 {:#?}\n\
-                 New value:\n\
-                 {:#?}\n\
-                 Previous internal state:\n\
-                 {:#?}\n\
-                 New internal state after calling simplify() {} times:\n\
-                 {:#?}",
-                before_simplified.current(),
-                state.current(),
-                before_simplified,
-                iter,
-                state
-            );
-
-            if state.simplify() {
-                panic!(
-                    "simplify() returned true after having returned false. \
-                     Previous internal state:\n\
-                     {:#?}\n\
-                     New internal state after calling simplify() {} times:\n\
-                     {:#?}",
-                    before_simplified,
-                    iter + 1,
-                    state
-                );
-            }
-        }
+        let state = generate_sanity_state(&strategy, &mut runner)?;
+        check_sanity_state(state, sanity_options)?;
     }
+    Ok(())
 }
 
 #[cfg(test)]

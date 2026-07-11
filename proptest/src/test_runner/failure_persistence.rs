@@ -19,8 +19,6 @@ use core::str::FromStr;
 mod file;
 /// The in-memory `BTreeMap`-backed backend (`MapFailurePersistence`).
 mod map;
-/// The private no-op backend (`NoopFailurePersistence`).
-mod noop;
 
 #[cfg(feature = "std")]
 pub use self::file::*;
@@ -49,74 +47,24 @@ impl FromStr for PersistedSeed {
     }
 }
 
-/// Provides external persistence for historical test failures by storing seeds.
-///
-/// **Note**: Implementing `load_persisted_failures` and
-/// `save_persisted_failures` is **deprecated** and these methods will be
-/// removed in proptest 0.10.0. Instead, implement `load_persisted_failures2`
-/// and `save_persisted_failures2`.
+/// Provides external persistence for historical test failures by storing
+/// current-format persisted seeds.
 pub trait FailurePersistence: Send + Sync + fmt::Debug {
     /// Supply seeds associated with the given `source_file` that may be used
     /// by a `TestRunner`'s random number generator in order to consistently
     /// recreate a previously-failing `Strategy`-provided value.
-    ///
-    /// The default implementation is **for backwards compatibility**. It
-    /// delegates to `load_persisted_failures` and converts the results into
-    /// XorShift seeds.
-    #[allow(deprecated)]
     fn load_persisted_failures2(
         &self,
         source_file: Option<&'static str>,
-    ) -> Vec<PersistedSeed> {
-        self.load_persisted_failures(source_file)
-            .into_iter()
-            .map(|seed| PersistedSeed(Seed::XorShift(seed)))
-            .collect()
-    }
-
-    /// Use `load_persisted_failures2` instead.
-    ///
-    /// This function inadvertently exposes the implementation of seeds prior
-    /// to Proptest 0.9.1 and only works with XorShift seeds.
-    #[deprecated]
-    #[allow(unused_variables)]
-    fn load_persisted_failures(
-        &self,
-        source_file: Option<&'static str>,
-    ) -> Vec<[u8; 16]> {
-        panic!("load_persisted_failures2 not implemented");
-    }
+    ) -> Vec<PersistedSeed>;
 
     /// Store a new failure-generating seed associated with the given `source_file`.
-    ///
-    /// The default implementation is **for backwards compatibility**. It
-    /// delegates to `save_persisted_failure` if `seed` is a XorShift seed.
-    #[allow(deprecated)]
     fn save_persisted_failure2(
         &mut self,
         source_file: Option<&'static str>,
         seed: PersistedSeed,
         shrunken_value: &dyn fmt::Debug,
-    ) {
-        if let Seed::XorShift(seed) = seed.0 {
-            self.save_persisted_failure(source_file, seed, shrunken_value);
-        }
-    }
-
-    /// Use `save_persisted_failures2` instead.
-    ///
-    /// This function inadvertently exposes the implementation of seeds prior
-    /// to Proptest 0.9.1 and only works with XorShift seeds.
-    #[deprecated]
-    #[allow(unused_variables)]
-    fn save_persisted_failure(
-        &mut self,
-        source_file: Option<&'static str>,
-        seed: [u8; 16],
-        shrunken_value: &dyn fmt::Debug,
-    ) {
-        panic!("save_persisted_failure2 not implemented");
-    }
+    );
 
     /// Delegate method for producing a trait object usable with `Clone`
     fn box_clone(&self) -> Box<dyn FailurePersistence>;
@@ -137,7 +85,7 @@ impl<'b> PartialEq<dyn FailurePersistence + 'b>
 }
 
 impl Clone for Box<dyn FailurePersistence> {
-    fn clone(&self) -> Box<dyn FailurePersistence> {
+    fn clone(&self) -> Self {
         self.box_clone()
     }
 }

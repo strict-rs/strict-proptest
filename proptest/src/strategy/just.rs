@@ -83,7 +83,7 @@ impl<T, F: Fn() -> T> LazyJust<T, F> {
     /// that produces the value.
     ///
     /// **It is important that the function used be pure.**
-    pub fn new(function: F) -> Self {
+    pub const fn new(function: F) -> Self {
         Self { function }
     }
 }

@@ -17,11 +17,6 @@
 #![forbid(future_incompatible)]
 #![deny(missing_docs, bare_trait_objects)]
 #![no_std]
-#![allow(
-    clippy::doc_markdown,
-    // We have a lot of these lints for associated types... And we don't care.
-    clippy::type_complexity
-)]
 #![cfg_attr(
     feature = "unstable",
     feature(allocator_api, coroutine_trait, never_type)
@@ -40,6 +35,8 @@ extern crate std;
 
 #[cfg(all(feature = "alloc", not(feature = "std")))]
 extern crate alloc;
+
+pub extern crate self as proptest;
 
 #[macro_use]
 mod product_tuple;
@@ -82,11 +79,30 @@ pub mod prelude;
 #[cfg(feature = "attr-macro")]
 pub use proptest_macro::property_test;
 
-#[cfg(feature = "attr-macro")]
-#[test]
-fn compile_tests() -> Result<(), trybuild::TryBuildError> {
-    let mut cases = trybuild::TestCases::new();
-    cases.pass("tests/pass/*.rs");
-    cases.compile_fail("tests/fail/*.rs");
-    cases.run()
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "attr-macro")]
+    #[test]
+    fn compile_tests() -> Result<(), trybuild::TryBuildError> {
+        let mut cases = trybuild::TestCases::new();
+        cases.pass("tests/pass/*.rs");
+        cases.compile_fail("tests/fail/*.rs");
+        cases.run()
+    }
+
+    #[test]
+    fn sugar_macro_compile_tests() -> Result<(), trybuild::TryBuildError> {
+        let mut cases = trybuild::TestCases::new();
+        cases.pass("tests/sugar/pass/*.rs");
+        cases.compile_fail("tests/sugar/fail/*.rs");
+        cases.run()
+    }
+
+    #[test]
+    fn prelude_compile_tests() -> Result<(), trybuild::TryBuildError> {
+        let mut cases = trybuild::TestCases::new();
+        cases.pass("tests/prelude/pass/*.rs");
+        cases.compile_fail("tests/prelude/fail/*.rs");
+        cases.run()
+    }
 }

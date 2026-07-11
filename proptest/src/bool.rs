@@ -9,10 +9,12 @@
 
 //! Strategies for generating `bool` values.
 
-use crate::strategy::*;
-use crate::test_runner::*;
+#[cfg(test)]
+use crate::strategy::check_strategy_sanity;
+use crate::strategy::{NewTree, Strategy, ValueTree};
+use crate::test_runner::TestRunner;
 
-use rand::RngExt;
+use rand::RngExt as _;
 
 /// The type of the `ANY` constant.
 #[derive(Clone, Copy, Debug)]
@@ -36,7 +38,7 @@ impl Strategy for Any {
 /// (1.0 = always true, 0.0 = always false).
 ///
 /// Shrinks `true` to `false`.
-pub fn weighted(probability: f64) -> Weighted {
+pub const fn weighted(probability: f64) -> Weighted {
     Weighted(probability)
 }
 
@@ -77,8 +79,8 @@ enum ShrinkState {
 
 impl BoolValueTree {
     /// Creates a tree holding `current` with a fresh, untouched shrink state.
-    fn new(current: bool) -> Self {
-        BoolValueTree {
+    const fn new(current: bool) -> Self {
+        Self {
             current,
             state: ShrinkState::Untouched,
         }
@@ -125,13 +127,15 @@ impl ValueTree for BoolValueTree {
 
 #[cfg(test)]
 mod test {
+    use crate::test_runner::Reason;
+
     use strict_test_support::{TestFailure, ensure_all};
 
     use super::*;
 
     #[test]
-    fn test_sanity() {
-        check_strategy_sanity(ANY, None);
+    fn test_sanity() -> Result<(), Reason> {
+        check_strategy_sanity(ANY, None)
     }
 
     #[test]

@@ -71,6 +71,7 @@ pub trait Arbitrary: Sized + fmt::Debug {
     /// [`Strategy`]: ../strategy/trait.Strategy.html
     /// [`X::arbitrary_with(Default::default())`]:
     ///     trait.Arbitrary.html#tymethod.arbitrary_with
+    #[must_use]
     fn arbitrary() -> Self::Strategy {
         Self::arbitrary_with(Default::default())
     }

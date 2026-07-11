@@ -10,9 +10,9 @@
 //! Arbitrary implementations for `std::time`.
 
 use core::ops::Range;
-use std::time::*;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::arbitrary::*;
+use crate::arbitrary::{SMapped, any};
 use crate::num;
 use crate::strategy::statics::{self, static_map};
 
@@ -30,12 +30,14 @@ arbitrary!(
     // seconds counter.
     SystemTime, statics::Map<(num::i32::Any, Range<u32>),
                              fn ((i32, u32)) -> SystemTime>;
-    static_map((num::i32::ANY, 0..1_000_000_000u32),
+    static_map((num::i32::ANY, 0..1_000_000_000_u32),
                 |(sec, ns)| {
+                    let duration =
+                        Duration::new(u64::from(sec.unsigned_abs()), ns);
                     if sec >= 0 {
-                        UNIX_EPOCH + Duration::new(sec as u64, ns)
+                        UNIX_EPOCH.checked_add(duration).unwrap_or(UNIX_EPOCH)
                     } else {
-                        UNIX_EPOCH - Duration::new((-(sec as i64)) as u64, ns)
+                        UNIX_EPOCH.checked_sub(duration).unwrap_or(UNIX_EPOCH)
                     }
                 })
 );

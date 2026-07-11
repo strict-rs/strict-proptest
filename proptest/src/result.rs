@@ -26,14 +26,17 @@
 //! "maybe err" since the success case results in an easier to understand code
 //! path.
 
-#![allow(clippy::expl_impl_clone_on_copy)]
-
 use core::fmt;
 use core::marker::PhantomData;
 
-use crate::std_facade::Arc;
-use crate::strategy::*;
-use crate::test_runner::*;
+use crate::std_facade::Rc;
+#[cfg(test)]
+use crate::strategy::check_strategy_sanity;
+use crate::strategy::{
+    LazyValueTree, NewTree, Strategy, TupleUnion, TupleUnionActive2,
+    TupleUnionValueTree, ValueTree, WeightedStrategy, float_to_weight, statics,
+};
+use crate::test_runner::TestRunner;
 
 // Re-export the type for easier usage.
 pub use crate::option::{Probability, prob};
@@ -46,10 +49,9 @@ pub use crate::option::{Probability, prob};
 struct WrapOk<T, E>(PhantomData<T>, PhantomData<E>);
 impl<T, E> Clone for WrapOk<T, E> {
     fn clone(&self) -> Self {
-        *self
+        Self(PhantomData, PhantomData)
     }
 }
-impl<T, E> Copy for WrapOk<T, E> {}
 impl<T, E> fmt::Debug for WrapOk<T, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "WrapOk")
@@ -69,10 +71,9 @@ impl<T: fmt::Debug, E: fmt::Debug> statics::MapFn<T> for WrapOk<T, E> {
 struct WrapErr<T, E>(PhantomData<T>, PhantomData<E>);
 impl<T, E> Clone for WrapErr<T, E> {
     fn clone(&self) -> Self {
-        *self
+        Self(PhantomData, PhantomData)
     }
 }
-impl<T, E> Copy for WrapErr<T, E> {}
 impl<T, E> fmt::Debug for WrapErr<T, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "WrapErr")
@@ -101,14 +102,17 @@ opaque_strategy_wrapper! {
     /// Shrinks to `Err`.
     #[derive(Clone)]
     pub struct MaybeOk[<T, E>][where T : Strategy, E : Strategy]
-        (TupleUnion<(WA<MapErr<T, E>>, WA<MapOk<T, E>>)>)
+        (TupleUnion<(WeightedStrategy<MapErr<T, E>>, WeightedStrategy<MapOk<T, E>>)>)
         -> MaybeOkValueTree<T, E>;
     /// `ValueTree` type corresponding to `MaybeOk`.
     pub struct MaybeOkValueTree[<T, E>][where T : Strategy, E : Strategy]
         (TupleUnionValueTree<(
-            LazyValueTree<statics::Map<E, WrapErr<T::Value, E::Value>>>,
+            Option<LazyValueTree<statics::Map<E, WrapErr<T::Value, E::Value>>>>,
             Option<LazyValueTree<statics::Map<T, WrapOk<T::Value, E::Value>>>>,
-        )>)
+        ), TupleUnionActive2<
+            <statics::Map<E, WrapErr<T::Value, E::Value>> as Strategy>::Tree,
+            <statics::Map<T, WrapOk<T::Value, E::Value>> as Strategy>::Tree,
+        >>)
         -> Result<T::Value, E::Value>;
 }
 
@@ -119,14 +123,17 @@ opaque_strategy_wrapper! {
     /// Shrinks to `Ok`.
     #[derive(Clone)]
     pub struct MaybeErr[<T, E>][where T : Strategy, E : Strategy]
-        (TupleUnion<(WA<MapOk<T, E>>, WA<MapErr<T, E>>)>)
+        (TupleUnion<(WeightedStrategy<MapOk<T, E>>, WeightedStrategy<MapErr<T, E>>)>)
         -> MaybeErrValueTree<T, E>;
     /// `ValueTree` type corresponding to `MaybeErr`.
     pub struct MaybeErrValueTree[<T, E>][where T : Strategy, E : Strategy]
         (TupleUnionValueTree<(
-            LazyValueTree<statics::Map<T, WrapOk<T::Value, E::Value>>>,
+            Option<LazyValueTree<statics::Map<T, WrapOk<T::Value, E::Value>>>>,
             Option<LazyValueTree<statics::Map<E, WrapErr<T::Value, E::Value>>>>,
-        )>)
+        ), TupleUnionActive2<
+            <statics::Map<T, WrapOk<T::Value, E::Value>> as Strategy>::Tree,
+            <statics::Map<E, WrapErr<T::Value, E::Value>> as Strategy>::Tree,
+        >>)
         -> Result<T::Value, E::Value>;
 }
 
@@ -152,7 +159,7 @@ where
     E::Tree: Clone,
 {
     fn clone(&self) -> Self {
-        MaybeOkValueTree(self.0.clone())
+        Self(self.0.clone())
     }
 }
 
@@ -172,7 +179,7 @@ where
     E::Tree: Clone,
 {
     fn clone(&self) -> Self {
-        MaybeErrValueTree(self.0.clone())
+        Self(self.0.clone())
     }
 }
 
@@ -217,14 +224,14 @@ pub fn maybe_ok_weighted<T: Strategy, E: Strategy>(
     MaybeOk(TupleUnion::new((
         (
             err_weight,
-            Arc::new(statics::Map::new(
+            Rc::new(statics::Map::new(
                 err_strategy,
                 WrapErr(PhantomData, PhantomData),
             )),
         ),
         (
             ok_weight,
-            Arc::new(statics::Map::new(
+            Rc::new(statics::Map::new(
                 ok_strategy,
                 WrapOk(PhantomData, PhantomData),
             )),
@@ -267,14 +274,14 @@ pub fn maybe_err_weighted<T: Strategy, E: Strategy>(
     MaybeErr(TupleUnion::new((
         (
             ok_weight,
-            Arc::new(statics::Map::new(
+            Rc::new(statics::Map::new(
                 ok_strategy,
                 WrapOk(PhantomData, PhantomData),
             )),
         ),
         (
             err_weight,
-            Arc::new(statics::Map::new(
+            Rc::new(statics::Map::new(
                 err_strategy,
                 WrapErr(PhantomData, PhantomData),
             )),
@@ -284,75 +291,117 @@ pub fn maybe_err_weighted<T: Strategy, E: Strategy>(
 
 #[cfg(test)]
 mod test {
+    use crate::test_runner::{Reason, test_runner_without_persistence};
+
     use strict_test_support::{TestFailure, ensure, ensure_some};
 
     use super::*;
+    use crate::strategy::Just;
 
     fn count_ok_of_1000(
         strategy: impl Strategy<Value = Result<(), ()>>,
     ) -> Result<u32, TestFailure> {
         let mut runner = TestRunner::deterministic();
-        let mut count = 0;
+        let mut count = 0_u32;
         for _ in 0..1000 {
-            count += ensure_some(
+            let generated = ensure_some(
                 strategy.new_tree(&mut runner).ok(),
                 "result strategy generates a value tree",
-            )?
-            .current()
-            .is_ok() as u32;
+            )?;
+            count =
+                count.saturating_add(u32::from(generated.current().is_ok()));
         }
 
         Ok(count)
     }
 
+    #[allow(
+        clippy::single_call_fn,
+        reason = "the result shrink test names the maybe_err direction toward Ok"
+    )]
+    fn ensure_maybe_err_case_shrinks_to_ok<V>(
+        val: &mut V,
+    ) -> Result<(), TestFailure>
+    where
+        V: ValueTree<Value = Result<(), ()>>,
+    {
+        if val.current().is_ok() {
+            ensure(!val.simplify(), "an Ok case cannot simplify")?;
+            return ensure(val.current().is_ok(), "the case stays Ok");
+        }
+
+        ensure(val.simplify(), "an Err case simplifies")?;
+        ensure(val.current().is_ok(), "maybe_err shrinks toward Ok")
+    }
+
+    #[allow(
+        clippy::single_call_fn,
+        reason = "the result shrink test names the maybe_ok direction toward Err"
+    )]
+    fn ensure_maybe_ok_case_shrinks_to_err<V>(
+        val: &mut V,
+    ) -> Result<(), TestFailure>
+    where
+        V: ValueTree<Value = Result<(), ()>>,
+    {
+        if val.current().is_err() {
+            ensure(!val.simplify(), "an Err case cannot simplify")?;
+            return ensure(val.current().is_err(), "the case stays Err");
+        }
+
+        ensure(val.simplify(), "an Ok case simplifies")?;
+        ensure(val.current().is_err(), "maybe_ok shrinks toward Err")
+    }
+
     #[test]
     fn probability_defaults_to_0p5() -> Result<(), TestFailure> {
-        let count = count_ok_of_1000(maybe_err(Just(()), Just(())))?;
+        let default_err_weight =
+            count_ok_of_1000(maybe_err(Just(()), Just(())))?;
         ensure(
-            count > 400 && count < 600,
+            default_err_weight > 400 && default_err_weight < 600,
             "maybe_err defaults to a balanced split",
         )?;
-        let count = count_ok_of_1000(maybe_ok(Just(()), Just(())))?;
+        let default_ok_weight = count_ok_of_1000(maybe_ok(Just(()), Just(())))?;
         ensure(
-            count > 400 && count < 600,
+            default_ok_weight > 400 && default_ok_weight < 600,
             "maybe_ok defaults to a balanced split",
         )
     }
 
     #[test]
     fn probability_handled_correctly() -> Result<(), TestFailure> {
-        let count =
+        let mostly_ok_from_low_err =
             count_ok_of_1000(maybe_err_weighted(0.1, Just(()), Just(())))?;
         ensure(
-            count > 800 && count < 950,
+            mostly_ok_from_low_err > 800 && mostly_ok_from_low_err < 950,
             "a 0.1 err weight yields mostly Ok",
         )?;
 
-        let count =
+        let mostly_err_from_high_err =
             count_ok_of_1000(maybe_err_weighted(0.9, Just(()), Just(())))?;
         ensure(
-            count > 50 && count < 150,
+            mostly_err_from_high_err > 50 && mostly_err_from_high_err < 150,
             "a 0.9 err weight yields mostly Err",
         )?;
 
-        let count =
+        let mostly_ok_from_high_ok =
             count_ok_of_1000(maybe_ok_weighted(0.9, Just(()), Just(())))?;
         ensure(
-            count > 800 && count < 950,
+            mostly_ok_from_high_ok > 800 && mostly_ok_from_high_ok < 950,
             "a 0.9 ok weight yields mostly Ok",
         )?;
 
-        let count =
+        let mostly_err_from_low_ok =
             count_ok_of_1000(maybe_ok_weighted(0.1, Just(()), Just(())))?;
         ensure(
-            count > 50 && count < 150,
+            mostly_err_from_low_ok > 50 && mostly_err_from_low_ok < 150,
             "a 0.1 ok weight yields mostly Err",
         )
     }
 
     #[test]
     fn shrink_to_correct_case() -> Result<(), TestFailure> {
-        let mut runner = TestRunner::default();
+        let mut runner = test_runner_without_persistence();
         {
             let input = maybe_err(Just(()), Just(()));
             for _ in 0..64 {
@@ -360,16 +409,7 @@ mod test {
                     input.new_tree(&mut runner).ok(),
                     "maybe_err strategy generates a value tree",
                 )?;
-                if val.current().is_ok() {
-                    ensure(!val.simplify(), "an Ok case cannot simplify")?;
-                    ensure(val.current().is_ok(), "the case stays Ok")?;
-                } else {
-                    ensure(val.simplify(), "an Err case simplifies")?;
-                    ensure(
-                        val.current().is_ok(),
-                        "maybe_err shrinks toward Ok",
-                    )?;
-                }
+                ensure_maybe_err_case_shrinks_to_ok(&mut val)?;
             }
         }
         {
@@ -379,24 +419,15 @@ mod test {
                     input.new_tree(&mut runner).ok(),
                     "maybe_ok strategy generates a value tree",
                 )?;
-                if val.current().is_err() {
-                    ensure(!val.simplify(), "an Err case cannot simplify")?;
-                    ensure(val.current().is_err(), "the case stays Err")?;
-                } else {
-                    ensure(val.simplify(), "an Ok case simplifies")?;
-                    ensure(
-                        val.current().is_err(),
-                        "maybe_ok shrinks toward Err",
-                    )?;
-                }
+                ensure_maybe_ok_case_shrinks_to_err(&mut val)?;
             }
         }
         Ok(())
     }
 
     #[test]
-    fn test_sanity() {
-        check_strategy_sanity(maybe_ok(0i32..100i32, 0i32..100i32), None);
-        check_strategy_sanity(maybe_err(0i32..100i32, 0i32..100i32), None);
+    fn test_sanity() -> Result<(), Reason> {
+        check_strategy_sanity(maybe_ok(0_i32..100_i32, 0_i32..100_i32), None)?;
+        check_strategy_sanity(maybe_err(0_i32..100_i32, 0_i32..100_i32), None)
     }
 }

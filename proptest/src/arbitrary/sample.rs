@@ -15,7 +15,7 @@ impl Arbitrary for Index {
 
     type Strategy = IndexStrategy;
 
-    fn arbitrary_with(_: ()) -> IndexStrategy {
+    fn arbitrary_with((): ()) -> IndexStrategy {
         IndexStrategy::new()
     }
 }
@@ -25,7 +25,7 @@ impl Arbitrary for Selector {
 
     type Strategy = SelectorStrategy;
 
-    fn arbitrary_with(_: ()) -> SelectorStrategy {
+    fn arbitrary_with((): ()) -> SelectorStrategy {
         SelectorStrategy::new()
     }
 }

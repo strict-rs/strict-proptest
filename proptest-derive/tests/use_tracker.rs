@@ -15,47 +15,50 @@
 //! the generated `Arbitrary` bound, so the impl resolves without bounding
 //! `U`. This exercises `src/use_tracking.rs`.
 
-use std::marker::PhantomData;
+#[cfg(test)]
+mod tests {
+    use std::marker::PhantomData;
 
-use proptest::prelude::Arbitrary;
-use proptest_derive::Arbitrary;
-use strict_test_support::{TestFailure, ensure};
+    use proptest::prelude::Arbitrary;
+    use proptest_derive::Arbitrary;
+    use strict_test_support::{TestFailure, ensure};
 
-#[derive(Debug)]
-struct NotArbitrary;
+    #[derive(Debug)]
+    struct NotArbitrary;
 
-#[derive(Debug, Arbitrary)]
-// Generic types are not in alphabetical order on purpose.
-struct Foo<V, T, U> {
-    first: V,
-    second: T,
-    phantom: PhantomData<U>,
-}
-
-impl<V, T, U> Foo<V, T, U> {
-    fn into_parts(self) -> (V, T) {
-        (self.first, self.second)
+    #[derive(Debug, Arbitrary)]
+    // Generic types are not in alphabetical order on purpose.
+    struct Foo<V, T, U> {
+        first: V,
+        second: T,
+        phantom: PhantomData<U>,
     }
-}
 
-#[test]
-fn foo_fields_are_available_without_u_arbitrary_bound()
--> Result<(), TestFailure> {
-    let foo = Foo {
-        first: 1,
-        second: 2,
-        phantom: PhantomData::<NotArbitrary>,
-    };
+    impl<V, T, U> Foo<V, T, U> {
+        fn into_parts(self) -> (V, T) {
+            (self.first, self.second)
+        }
+    }
 
-    ensure(
-        foo.into_parts() == (1, 2),
-        "the non-phantom fields round-trip without a bound on U",
-    )
-}
+    #[test]
+    fn foo_fields_are_available_without_u_arbitrary_bound()
+    -> Result<(), TestFailure> {
+        let foo = Foo {
+            first: 1,
+            second: 2,
+            phantom: PhantomData::<NotArbitrary>,
+        };
 
-#[test]
-fn asserting_arbitrary() {
-    fn assert_arbitrary<T: Arbitrary>() {}
+        ensure(
+            foo.into_parts() == (1, 2),
+            "the non-phantom fields round-trip without a bound on U",
+        )
+    }
 
-    assert_arbitrary::<Foo<i32, i32, NotArbitrary>>();
+    #[test]
+    fn asserting_arbitrary() {
+        fn assert_arbitrary<T: Arbitrary>() {}
+
+        assert_arbitrary::<Foo<i32, i32, NotArbitrary>>();
+    }
 }

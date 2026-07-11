@@ -16,6 +16,11 @@ use crate::strategy::statics::static_map;
 
 // TODO: other parts (figure out workable semantics).
 
+/// Construct a `DirBuilder` configured with the requested recursive flag.
+#[allow(
+    clippy::single_call_fn,
+    reason = "construct a DirBuilder from the generated recursive flag and share that runtime contract with tests"
+)]
 fn configured_dir_builder(recursive: bool) -> DirBuilder {
     let mut db = DirBuilder::new();
     let _builder = db.recursive(recursive);

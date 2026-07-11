@@ -28,7 +28,9 @@ cargo +nightly test -p proptest-derive-internal
 cargo +nightly test -p proptest-derive-internal --features boxed_union
 ```
 
-The compile-fail UI suite, the per-feature integration tests, and the `large_enum` benchmark exercise the *real* `#[derive(Arbitrary)]` macro and therefore live in `proptest-derive`, not here.
+This crate owns derive-pipeline tests that can be expressed without invoking a downstream crate: `syn` parsing, field normalization, attribute interpretation, bound inference, and token expansion snapshots. Unusual Rust syntax that the derive must accept, such as distinct zero-payload enum variant forms, belongs here as quoted input or parser data plus targeted expansion snapshots; do not push that coverage into broad runtime integration fixtures or compile-diagnostic fixtures just because those files already compile or fail under `rustc`.
+
+The compile-diagnostic UI suite, the per-feature integration tests, and the `large_enum` benchmark exercise the *real* `#[derive(Arbitrary)]` macro and therefore live in `proptest-derive`, not here. Those suites are for full macro/rustc integration behavior only; parser or normalization intent should stay in this implementation crate.
 
 ## Changelog & conventions
 

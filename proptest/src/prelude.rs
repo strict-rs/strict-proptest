@@ -25,11 +25,9 @@ pub use crate::test_runner::Config as ProptestConfig;
 pub use crate::test_runner::{ProptestResultExt, TestCaseError};
 pub use crate::{
     prop_assert, prop_assert_eq, prop_assert_ne, prop_assume, prop_compose,
-    prop_oneof, proptest,
+    prop_compose_ffi, prop_oneof, proptest,
 };
 
-#[allow(deprecated)]
-pub use rand::rand_core::RngCore;
 pub use rand::{Rng, RngExt};
 
 /// Re-exports the entire public API of proptest under the name `prop`.

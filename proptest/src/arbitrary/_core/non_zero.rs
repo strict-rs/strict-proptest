@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use core::convert::TryFrom;
+use core::convert::TryFrom as _;
 use core::num::{
     NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroIsize, NonZeroU8,
     NonZeroU16, NonZeroU32, NonZeroU64, NonZeroUsize,
@@ -16,7 +16,7 @@ use core::num::{
 use core::num::{NonZeroI128, NonZeroU128};
 
 use crate::arbitrary::{Arbitrary, StrategyFor, any};
-use crate::strategy::{FilterMap, Strategy};
+use crate::strategy::{FilterMap, Strategy as _};
 
 /// Implements `Arbitrary` for a `NonZero` integer type over its primitive.
 ///
@@ -58,21 +58,28 @@ non_zero_impl!(NonZeroIsize, isize);
 
 #[cfg(test)]
 mod test {
+    use core::num::{
+        NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroIsize, NonZeroU8,
+        NonZeroU16, NonZeroU32, NonZeroU64, NonZeroUsize,
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    use core::num::{NonZeroI128, NonZeroU128};
+
     no_panic_test!(
-        u8 => core::num::NonZeroU8,
-        u16 => core::num::NonZeroU16,
-        u32 => core::num::NonZeroU32,
-        u64 => core::num::NonZeroU64,
-        usize => core::num::NonZeroUsize,
-        i8 => core::num::NonZeroI8,
-        i16 => core::num::NonZeroI16,
-        i32 => core::num::NonZeroI32,
-        i64 => core::num::NonZeroI64,
-        isize => core::num::NonZeroIsize
+        u8 => NonZeroU8,
+        u16 => NonZeroU16,
+        u32 => NonZeroU32,
+        u64 => NonZeroU64,
+        usize => NonZeroUsize,
+        i8 => NonZeroI8,
+        i16 => NonZeroI16,
+        i32 => NonZeroI32,
+        i64 => NonZeroI64,
+        isize => NonZeroIsize
     );
     #[cfg(not(target_arch = "wasm32"))]
     no_panic_test!(
-        u128 => core::num::NonZeroU128,
-        i128 => core::num::NonZeroI128
+        u128 => NonZeroU128,
+        i128 => NonZeroI128
     );
 }

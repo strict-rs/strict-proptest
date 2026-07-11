@@ -42,19 +42,19 @@ fn no_custom_strategies(
     options: &Options,
 ) -> TokenStream {
     let proptest = options.true_proptest_path();
-    let arg_types = args.iter().map(|arg| {
+    let arg_type_fields = args.iter().map(|arg| {
         let ty = &arg.pat_ty.ty;
         quote!(#ty,)
     });
 
-    let arg_types = quote! { #(#arg_types)* };
+    let arg_types = quote! { #(#arg_type_fields)* };
 
-    let arg_names = args.iter().enumerate().map(|(index, _arg)| {
-        let name = nth_field_name(args, index);
+    let arg_name_fields = args.iter().enumerate().map(|(index, arg)| {
+        let name = field_name_for_arg(arg, index);
         quote!(#name,)
     });
 
-    let arg_names = quote! { #(#arg_names)* };
+    let arg_names = quote! { #(#arg_name_fields)* };
 
     let strategy_type = quote! {
         #proptest::strategy::Map<#proptest::arbitrary::StrategyFor<(#arg_types)>, fn((#arg_types)) -> Self>
@@ -65,7 +65,7 @@ fn no_custom_strategies(
         #proptest::prelude::any::<(#arg_types)>().prop_map(|(#arg_names)| Self { #arg_names })
     };
 
-    arbitrary_shared(fn_name, strategy_type, strategy_expr, options)
+    arbitrary_shared(fn_name, &strategy_type, &strategy_expr, options)
 }
 
 /// Generate the boxed `Arbitrary` impl when at least one argument carries a
@@ -114,12 +114,11 @@ fn custom_strategies(
     let arg_names: TokenStream = args
         .iter()
         .enumerate()
-        .map(|(index, _arg)| {
-            let name = nth_field_name(args, index);
+        .map(|(index, arg)| {
+            let name = field_name_for_arg(arg, index);
             quote!(#name,)
         })
         .collect();
-    let arg_names = &arg_names;
 
     let strategy_expr = quote! {
         use #proptest::strategy::Strategy;
@@ -129,14 +128,14 @@ fn custom_strategies(
     let strategy_type = quote! {
         #proptest::strategy::BoxedStrategy<Self>
     };
-    arbitrary_shared(fn_name, strategy_type, strategy_expr, options)
+    arbitrary_shared(fn_name, &strategy_type, &strategy_expr, options)
 }
 
 /// shared code between both boxed and unboxed paths
 fn arbitrary_shared(
     fn_name: &Ident,
-    strategy_type: TokenStream,
-    strategy_expr: TokenStream,
+    strategy_type: &TokenStream,
+    strategy_expr: &TokenStream,
     options: &Options,
 ) -> TokenStream {
     let proptest = options.true_proptest_path();

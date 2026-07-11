@@ -16,7 +16,7 @@ use core::hash::{BuildHasherDefault, Hasher};
 // NOTE: don't impl for std::hash::SipHasher.. since deprecated!
 
 // over-constrain on purpose!
-arbitrary!([H: Default + Hasher] BuildHasherDefault<H>; Default::default());
+arbitrary!([H: Default + Hasher] BuildHasherDefault<H>; BuildHasherDefault::default());
 
 #[cfg(feature = "std")]
 lazy_just!(DefaultHasher, Default::default; RandomState, Default::default);

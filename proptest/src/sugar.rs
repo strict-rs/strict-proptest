@@ -8,6 +8,8 @@
 // except according to those terms.
 
 use crate::std_facade::fmt;
+#[cfg(feature = "std")]
+use crate::test_runner::{Config, emit_closure_fork_unsupported};
 
 /// Easily define `proptest` tests.
 ///
@@ -130,12 +132,12 @@ use crate::std_facade::fmt;
 ///   // But now can run multiple tests without needing to build it every time.
 ///   // Note the extra parentheses around the arguments are currently
 ///   // required.
-///   proptest!(|(x in 0u32..42u32, y in 1000u32..100000u32)| {
+///   proptest!(|(x in 0_u32..42_u32, y in 1000_u32..100000_u32)| {
 ///     // Test stuff
 ///   });
 ///
 ///   // `move` closures are also supported
-///   proptest!(move |(x in 0u32..42u32)| {
+///   proptest!(move |(x in 0_u32..42_u32)| {
 ///     // Test other stuff
 ///   });
 ///
@@ -149,6 +151,14 @@ use crate::std_facade::fmt;
 /// ```
 #[macro_export]
 macro_rules! proptest {
+    ($($tokens:tt)*) => {
+        $crate::__proptest_internal! { $($tokens)* }
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __proptest_internal {
     (#![proptest_config($config:expr)]
      $(
         $(#[$meta:meta])*
@@ -156,11 +166,16 @@ macro_rules! proptest {
     )*) => {
         $(
             $(#[$meta])*
-            fn $test_name() {
+            fn $test_name()
+                -> ::core::result::Result<
+                    (),
+                    $crate::std_facade::Box<dyn ::core::fmt::Debug>,
+                >
+            {
                 let mut config = $crate::test_runner::contextualize_config($config.clone());
                 config.test_name = ::core::option::Option::Some(
                     ::core::concat!(::core::module_path!(), "::", ::core::stringify!($test_name)));
-                $crate::proptest_helper!(@_BODY config ($($parm in $strategy),+) [] $body);
+                $crate::proptest_helper!(@_BODY config ($($parm in $strategy),+) [] $body)
             }
         )*
     };
@@ -171,11 +186,16 @@ macro_rules! proptest {
     )*) => {
         $(
             $(#[$meta])*
-            fn $test_name() {
+            fn $test_name()
+                -> ::core::result::Result<
+                    (),
+                    $crate::std_facade::Box<dyn ::core::fmt::Debug>,
+                >
+            {
                 let mut config = $crate::test_runner::contextualize_config($config.clone());
                 config.test_name = ::core::option::Option::Some(
                     ::core::concat!(::core::module_path!(), "::", ::core::stringify!($test_name)));
-                $crate::proptest_helper!(@_BODY2 config ($($arg)+) [] $body);
+                $crate::proptest_helper!(@_BODY2 config ($($arg)+) [] $body)
             }
         )*
     };
@@ -183,7 +203,7 @@ macro_rules! proptest {
     ($(
         $(#[$meta:meta])*
         fn $test_name:ident($($parm:pat in $strategy:expr),+ $(,)?) $body:block
-    )*) => { $crate::proptest! {
+    )*) => { $crate::__proptest_internal! {
         #![proptest_config($crate::test_runner::Config::default())]
         $($(#[$meta])*
           fn $test_name($($parm in $strategy),+) $body)*
@@ -192,32 +212,32 @@ macro_rules! proptest {
     ($(
         $(#[$meta:meta])*
         fn $test_name:ident($($arg:tt)+) $body:block
-    )*) => { $crate::proptest! {
+    )*) => { $crate::__proptest_internal! {
         #![proptest_config($crate::test_runner::Config::default())]
         $($(#[$meta])*
           fn $test_name($($arg)+) $body)*
     } };
 
     (|($($parm:pat in $strategy:expr),+ $(,)?)| $body:expr) => {
-        $crate::proptest!(
+        $crate::__proptest_internal!(
             $crate::test_runner::Config::default(),
             |($($parm in $strategy),+)| $body)
     };
 
     (move |($($parm:pat in $strategy:expr),+ $(,)?)| $body:expr) => {
-        $crate::proptest!(
+        $crate::__proptest_internal!(
             $crate::test_runner::Config::default(),
             move |($($parm in $strategy),+)| $body)
     };
 
     (|($($arg:tt)+)| $body:expr) => {
-        $crate::proptest!(
+        $crate::__proptest_internal!(
             $crate::test_runner::Config::default(),
             |($($arg)+)| $body)
     };
 
     (move |($($arg:tt)+)| $body:expr) => {
-        $crate::proptest!(
+        $crate::__proptest_internal!(
             $crate::test_runner::Config::default(),
             move |($($arg)+)| $body)
     };
@@ -237,13 +257,13 @@ macro_rules! proptest {
     ($config:expr, |($($arg:tt)+)| $body:expr) => { {
         let mut config = $crate::test_runner::contextualize_config($config.__sugar_to_owned());
         $crate::sugar::force_no_fork(&mut config);
-        $crate::proptest_helper!(@_BODY2 config ($($arg)+) [] $body);
+        $crate::proptest_helper!(@_BODY2 config ($($arg)+) [] $body)
     } };
 
     ($config:expr, move |($($arg:tt)+)| $body:expr) => { {
         let mut config = $crate::test_runner::contextualize_config($config.__sugar_to_owned());
         $crate::sugar::force_no_fork(&mut config);
-        $crate::proptest_helper!(@_BODY2 config ($($arg)+) [move] $body);
+        $crate::proptest_helper!(@_BODY2 config ($($arg)+) [move] $body)
     } };
 }
 
@@ -335,41 +355,31 @@ macro_rules! prop_oneof {
 
     ($_weight0:expr => $item0:expr $(,)?) => { $item0 };
 
-    // NOTE: The clippy::arc_with_non_send_sync lint is disabled here because
-    // the strategies passed into prop_oneof! are often not Send or Sync, such
-    // as BoxedStrategy.
-    //
-    // The double-curly-braces are not strictly required, but allow the expression
-    // to be annotated with an attribute.
-
     ($weight0:expr => $item0:expr,
      $weight1:expr => $item1:expr $(,)?) => {{
-        #[allow(clippy::arc_with_non_send_sync)]
         $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Arc::new($item0)),
-             ($weight1, $crate::std_facade::Arc::new($item1))))
+            (($weight0, $crate::std_facade::Rc::new($item0)),
+             ($weight1, $crate::std_facade::Rc::new($item1))))
     }};
 
     ($weight0:expr => $item0:expr,
      $weight1:expr => $item1:expr,
      $weight2:expr => $item2:expr $(,)?) => {{
-        #[allow(clippy::arc_with_non_send_sync)]
         $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Arc::new($item0)),
-             ($weight1, $crate::std_facade::Arc::new($item1)),
-             ($weight2, $crate::std_facade::Arc::new($item2))))
+            (($weight0, $crate::std_facade::Rc::new($item0)),
+             ($weight1, $crate::std_facade::Rc::new($item1)),
+             ($weight2, $crate::std_facade::Rc::new($item2))))
     }};
 
     ($weight0:expr => $item0:expr,
      $weight1:expr => $item1:expr,
      $weight2:expr => $item2:expr,
      $weight3:expr => $item3:expr $(,)?) => {{
-        #[allow(clippy::arc_with_non_send_sync)]
         $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Arc::new($item0)),
-             ($weight1, $crate::std_facade::Arc::new($item1)),
-             ($weight2, $crate::std_facade::Arc::new($item2)),
-             ($weight3, $crate::std_facade::Arc::new($item3))))
+            (($weight0, $crate::std_facade::Rc::new($item0)),
+             ($weight1, $crate::std_facade::Rc::new($item1)),
+             ($weight2, $crate::std_facade::Rc::new($item2)),
+             ($weight3, $crate::std_facade::Rc::new($item3))))
     }};
 
     ($weight0:expr => $item0:expr,
@@ -377,13 +387,12 @@ macro_rules! prop_oneof {
      $weight2:expr => $item2:expr,
      $weight3:expr => $item3:expr,
      $weight4:expr => $item4:expr $(,)?) => {{
-        #[allow(clippy::arc_with_non_send_sync)]
         $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Arc::new($item0)),
-             ($weight1, $crate::std_facade::Arc::new($item1)),
-             ($weight2, $crate::std_facade::Arc::new($item2)),
-             ($weight3, $crate::std_facade::Arc::new($item3)),
-             ($weight4, $crate::std_facade::Arc::new($item4))))
+            (($weight0, $crate::std_facade::Rc::new($item0)),
+             ($weight1, $crate::std_facade::Rc::new($item1)),
+             ($weight2, $crate::std_facade::Rc::new($item2)),
+             ($weight3, $crate::std_facade::Rc::new($item3)),
+             ($weight4, $crate::std_facade::Rc::new($item4))))
     }};
 
     ($weight0:expr => $item0:expr,
@@ -392,14 +401,13 @@ macro_rules! prop_oneof {
      $weight3:expr => $item3:expr,
      $weight4:expr => $item4:expr,
      $weight5:expr => $item5:expr $(,)?) => {{
-        #[allow(clippy::arc_with_non_send_sync)]
         $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Arc::new($item0)),
-             ($weight1, $crate::std_facade::Arc::new($item1)),
-             ($weight2, $crate::std_facade::Arc::new($item2)),
-             ($weight3, $crate::std_facade::Arc::new($item3)),
-             ($weight4, $crate::std_facade::Arc::new($item4)),
-             ($weight5, $crate::std_facade::Arc::new($item5))))
+            (($weight0, $crate::std_facade::Rc::new($item0)),
+             ($weight1, $crate::std_facade::Rc::new($item1)),
+             ($weight2, $crate::std_facade::Rc::new($item2)),
+             ($weight3, $crate::std_facade::Rc::new($item3)),
+             ($weight4, $crate::std_facade::Rc::new($item4)),
+             ($weight5, $crate::std_facade::Rc::new($item5))))
     }};
 
     ($weight0:expr => $item0:expr,
@@ -409,15 +417,14 @@ macro_rules! prop_oneof {
      $weight4:expr => $item4:expr,
      $weight5:expr => $item5:expr,
      $weight6:expr => $item6:expr $(,)?) => {{
-        #[allow(clippy::arc_with_non_send_sync)]
         $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Arc::new($item0)),
-             ($weight1, $crate::std_facade::Arc::new($item1)),
-             ($weight2, $crate::std_facade::Arc::new($item2)),
-             ($weight3, $crate::std_facade::Arc::new($item3)),
-             ($weight4, $crate::std_facade::Arc::new($item4)),
-             ($weight5, $crate::std_facade::Arc::new($item5)),
-             ($weight6, $crate::std_facade::Arc::new($item6))))
+            (($weight0, $crate::std_facade::Rc::new($item0)),
+             ($weight1, $crate::std_facade::Rc::new($item1)),
+             ($weight2, $crate::std_facade::Rc::new($item2)),
+             ($weight3, $crate::std_facade::Rc::new($item3)),
+             ($weight4, $crate::std_facade::Rc::new($item4)),
+             ($weight5, $crate::std_facade::Rc::new($item5)),
+             ($weight6, $crate::std_facade::Rc::new($item6))))
     }};
 
     ($weight0:expr => $item0:expr,
@@ -428,16 +435,15 @@ macro_rules! prop_oneof {
      $weight5:expr => $item5:expr,
      $weight6:expr => $item6:expr,
      $weight7:expr => $item7:expr $(,)?) => {{
-        #[allow(clippy::arc_with_non_send_sync)]
         $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Arc::new($item0)),
-             ($weight1, $crate::std_facade::Arc::new($item1)),
-             ($weight2, $crate::std_facade::Arc::new($item2)),
-             ($weight3, $crate::std_facade::Arc::new($item3)),
-             ($weight4, $crate::std_facade::Arc::new($item4)),
-             ($weight5, $crate::std_facade::Arc::new($item5)),
-             ($weight6, $crate::std_facade::Arc::new($item6)),
-             ($weight7, $crate::std_facade::Arc::new($item7))))
+            (($weight0, $crate::std_facade::Rc::new($item0)),
+             ($weight1, $crate::std_facade::Rc::new($item1)),
+             ($weight2, $crate::std_facade::Rc::new($item2)),
+             ($weight3, $crate::std_facade::Rc::new($item3)),
+             ($weight4, $crate::std_facade::Rc::new($item4)),
+             ($weight5, $crate::std_facade::Rc::new($item5)),
+             ($weight6, $crate::std_facade::Rc::new($item6)),
+             ($weight7, $crate::std_facade::Rc::new($item7))))
     }};
 
     ($weight0:expr => $item0:expr,
@@ -449,17 +455,16 @@ macro_rules! prop_oneof {
      $weight6:expr => $item6:expr,
      $weight7:expr => $item7:expr,
      $weight8:expr => $item8:expr $(,)?) => {{
-        #[allow(clippy::arc_with_non_send_sync)]
         $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Arc::new($item0)),
-             ($weight1, $crate::std_facade::Arc::new($item1)),
-             ($weight2, $crate::std_facade::Arc::new($item2)),
-             ($weight3, $crate::std_facade::Arc::new($item3)),
-             ($weight4, $crate::std_facade::Arc::new($item4)),
-             ($weight5, $crate::std_facade::Arc::new($item5)),
-             ($weight6, $crate::std_facade::Arc::new($item6)),
-             ($weight7, $crate::std_facade::Arc::new($item7)),
-             ($weight8, $crate::std_facade::Arc::new($item8))))
+            (($weight0, $crate::std_facade::Rc::new($item0)),
+             ($weight1, $crate::std_facade::Rc::new($item1)),
+             ($weight2, $crate::std_facade::Rc::new($item2)),
+             ($weight3, $crate::std_facade::Rc::new($item3)),
+             ($weight4, $crate::std_facade::Rc::new($item4)),
+             ($weight5, $crate::std_facade::Rc::new($item5)),
+             ($weight6, $crate::std_facade::Rc::new($item6)),
+             ($weight7, $crate::std_facade::Rc::new($item7)),
+             ($weight8, $crate::std_facade::Rc::new($item8))))
     }};
 
     ($weight0:expr => $item0:expr,
@@ -472,18 +477,17 @@ macro_rules! prop_oneof {
      $weight7:expr => $item7:expr,
      $weight8:expr => $item8:expr,
      $weight9:expr => $item9:expr $(,)?) => {{
-        #[allow(clippy::arc_with_non_send_sync)]
         $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Arc::new($item0)),
-             ($weight1, $crate::std_facade::Arc::new($item1)),
-             ($weight2, $crate::std_facade::Arc::new($item2)),
-             ($weight3, $crate::std_facade::Arc::new($item3)),
-             ($weight4, $crate::std_facade::Arc::new($item4)),
-             ($weight5, $crate::std_facade::Arc::new($item5)),
-             ($weight6, $crate::std_facade::Arc::new($item6)),
-             ($weight7, $crate::std_facade::Arc::new($item7)),
-             ($weight8, $crate::std_facade::Arc::new($item8)),
-             ($weight9, $crate::std_facade::Arc::new($item9))))
+            (($weight0, $crate::std_facade::Rc::new($item0)),
+             ($weight1, $crate::std_facade::Rc::new($item1)),
+             ($weight2, $crate::std_facade::Rc::new($item2)),
+             ($weight3, $crate::std_facade::Rc::new($item3)),
+             ($weight4, $crate::std_facade::Rc::new($item4)),
+             ($weight5, $crate::std_facade::Rc::new($item5)),
+             ($weight6, $crate::std_facade::Rc::new($item6)),
+             ($weight7, $crate::std_facade::Rc::new($item7)),
+             ($weight8, $crate::std_facade::Rc::new($item8)),
+             ($weight9, $crate::std_facade::Rc::new($item9))))
     }};
 
     ($($weight:expr => $item:expr),+ $(,)?) => {
@@ -593,17 +597,17 @@ macro_rules! prop_oneof {
 /// The second form is sugar around making a strategy tuple, calling
 /// `prop_flat_map()`, then `prop_map()`.
 ///
-/// To give the function any modifier which isn't a visibility modifier, put it
-/// in brackets before the `fn` token but after any visibility modifier.
+/// Visibility modifiers are supported directly before the `fn` token. Other
+/// bracketed function modifiers are rejected; use [`prop_compose_ffi!`] when a
+/// generated strategy should call a C-ABI mapper.
 ///
 /// ```rust,no_run
 /// # #![allow(dead_code)]
 /// use proptest::prelude::*;
 ///
 /// prop_compose! {
-///   pub(crate) [unsafe] fn pointer()(v in prop::num::usize::ANY)
-///                                 -> *const () {
-///     v as *const ()
+///   pub(crate) fn pointer_sized()(v in prop::num::usize::ANY) -> usize {
+///     v
 ///   }
 /// }
 /// # fn main() { }
@@ -625,14 +629,23 @@ macro_rules! prop_oneof {
 macro_rules! prop_compose {
     ($(#[$meta:meta])*
      $vis:vis
-     $([$($modi:tt)*])? fn $name:ident $params:tt
+     [$($modifier:tt)*] fn $name:ident $($tail:tt)*) =>
+    {
+        ::core::compile_error!(
+            "prop_compose! no longer supports bracketed function modifiers; use prop_compose_ffi! for C-ABI mapper functions"
+        );
+    };
+
+    ($(#[$meta:meta])*
+     $vis:vis
+     fn $name:ident $params:tt
      ($($var:pat in $strategy:expr),+ $(,)?)
        -> $return_type:ty $body:block) =>
     {
         #[must_use = "strategies do nothing unless used"]
         $(#[$meta])*
         $vis
-        $($($modi)*)? fn $name $params
+        fn $name $params
                  -> impl $crate::strategy::Strategy<Value = $return_type> {
             let strat = $crate::proptest_helper!(@_WRAP ($($strategy)+));
             $crate::strategy::Strategy::prop_map(strat,
@@ -642,7 +655,7 @@ macro_rules! prop_compose {
 
     ($(#[$meta:meta])*
      $vis:vis
-     $([$($modi:tt)*])? fn $name:ident $params:tt
+     fn $name:ident $params:tt
      ($($var:pat in $strategy:expr),+ $(,)?)
      ($($var2:pat in $strategy2:expr),+ $(,)?)
        -> $return_type:ty $body:block) =>
@@ -650,7 +663,7 @@ macro_rules! prop_compose {
         #[must_use = "strategies do nothing unless used"]
         $(#[$meta])*
         $vis
-        $($($modi)*)? fn $name $params
+        fn $name $params
                  -> impl $crate::strategy::Strategy<Value = $return_type> {
             let strat = $crate::proptest_helper!(@_WRAP ($($strategy)+));
             let strat = $crate::strategy::Strategy::prop_flat_map(
@@ -664,14 +677,14 @@ macro_rules! prop_compose {
 
     ($(#[$meta:meta])*
      $vis:vis
-     $([$($modi:tt)*])? fn $name:ident $params:tt
+     fn $name:ident $params:tt
      ($($arg:tt)+)
        -> $return_type:ty $body:block) =>
     {
         #[must_use = "strategies do nothing unless used"]
         $(#[$meta])*
         $vis
-        $($($modi)*)? fn $name $params
+        fn $name $params
                  -> impl $crate::strategy::Strategy<Value = $return_type> {
             let strat = $crate::proptest_helper!(@_EXT _STRAT ($($arg)+));
             $crate::strategy::Strategy::prop_map(strat,
@@ -681,7 +694,7 @@ macro_rules! prop_compose {
 
     ($(#[$meta:meta])*
      $vis:vis
-     $([$($modi:tt)*])? fn $name:ident $params:tt
+     fn $name:ident $params:tt
      ($($arg:tt)+)
      ($($arg2:tt)+)
        -> $return_type:ty $body:block) =>
@@ -689,7 +702,7 @@ macro_rules! prop_compose {
         #[must_use = "strategies do nothing unless used"]
         $(#[$meta])*
         $vis
-        $($($modi)*)? fn $name $params
+        fn $name $params
                  -> impl $crate::strategy::Strategy<Value = $return_type> {
             let strat = $crate::proptest_helper!(@_EXT _STRAT ($($arg)+));
             let strat = $crate::strategy::Strategy::prop_flat_map(
@@ -698,6 +711,165 @@ macro_rules! prop_compose {
                 $crate::proptest_helper!(@_EXT _STRAT ($($arg2)+)));
             $crate::strategy::Strategy::prop_map(strat,
                 move |$crate::proptest_helper!(@_EXT _PAT ($($arg2)+))| $body)
+        }
+    };
+}
+
+/// Define a Rust strategy-builder function that maps generated values through
+/// a user-named `extern "C"` function.
+///
+/// The generated strategy-builder remains a normal Rust function returning
+/// `impl Strategy<Value = T>`. The mapper is a local `extern "C"` item inside
+/// that builder; it is not exported as a C symbol, and no raw strategy handle
+/// crosses an FFI boundary.
+///
+/// ```rust,no_run
+/// use proptest::prelude::*;
+///
+/// prop_compose_ffi! {
+///   fn offset_sample(offset: i32)(sample in 0_i32..10)
+///   with extern "C" fn add_offset(sample: i32, offset: i32) -> i32 {
+///     sample + offset
+///   }
+///   call add_offset(sample, offset);
+/// }
+/// # fn main() { let _ = offset_sample(4); }
+/// ```
+///
+/// Two-stage generation is also supported. The second strategy list can refer
+/// to values generated by the first list.
+///
+/// ```rust,no_run
+/// use proptest::prelude::*;
+///
+/// prop_compose_ffi! {
+///   fn span_from(base: i32)
+///   (upper in base + 1..base + 8)
+///   (lower in base..upper, upper in Just(upper))
+///   with extern "C" fn span(lower: i32, upper: i32) -> i32 {
+///     upper - lower
+///   }
+///   call span(lower, upper);
+/// }
+/// # fn main() { let _ = span_from(3); }
+/// ```
+#[macro_export]
+macro_rules! prop_compose_ffi {
+    ($(#[$meta:meta])*
+     $vis:vis fn $name:ident $params:tt
+     ($($var:pat in $strategy:expr),+ $(,)?)
+     with extern "C" fn $mapper:ident(
+         $($mapper_arg:ident : $mapper_ty:ty),* $(,)?
+     ) -> $return_type:ty $mapper_body:block
+     call $mapper_call:expr;) =>
+    {
+        #[must_use = "strategies do nothing unless used"]
+        $(#[$meta])*
+        $vis fn $name $params
+                 -> impl $crate::strategy::Strategy<Value = $return_type> {
+            #[allow(
+                clippy::single_call_fn,
+                reason = "prop_compose_ffi preserves the user-named C-ABI mapper as a local function item"
+            )]
+            extern "C" fn $mapper(
+                $($mapper_arg : $mapper_ty),*
+            ) -> $return_type $mapper_body
+
+            let strat = $crate::proptest_helper!(@_WRAP ($($strategy)+));
+            $crate::strategy::Strategy::prop_map(strat,
+                move |$crate::proptest_helper!(@_WRAPPAT ($($var),+))|
+                    $mapper_call)
+        }
+    };
+
+    ($(#[$meta:meta])*
+     $vis:vis fn $name:ident $params:tt
+     ($($var:pat in $strategy:expr),+ $(,)?)
+     ($($var2:pat in $strategy2:expr),+ $(,)?)
+     with extern "C" fn $mapper:ident(
+         $($mapper_arg:ident : $mapper_ty:ty),* $(,)?
+     ) -> $return_type:ty $mapper_body:block
+     call $mapper_call:expr;) =>
+    {
+        #[must_use = "strategies do nothing unless used"]
+        $(#[$meta])*
+        $vis fn $name $params
+                 -> impl $crate::strategy::Strategy<Value = $return_type> {
+            #[allow(
+                clippy::single_call_fn,
+                reason = "prop_compose_ffi preserves the user-named C-ABI mapper as a local function item"
+            )]
+            extern "C" fn $mapper(
+                $($mapper_arg : $mapper_ty),*
+            ) -> $return_type $mapper_body
+
+            let strat = $crate::proptest_helper!(@_WRAP ($($strategy)+));
+            let strat = $crate::strategy::Strategy::prop_flat_map(
+                strat,
+                move |$crate::proptest_helper!(@_WRAPPAT ($($var),+))|
+                $crate::proptest_helper!(@_WRAP ($($strategy2)+)));
+            $crate::strategy::Strategy::prop_map(strat,
+                move |$crate::proptest_helper!(@_WRAPPAT ($($var2),+))|
+                    $mapper_call)
+        }
+    };
+
+    ($(#[$meta:meta])*
+     $vis:vis fn $name:ident $params:tt
+     ($($arg:tt)+)
+     with extern "C" fn $mapper:ident(
+         $($mapper_arg:ident : $mapper_ty:ty),* $(,)?
+     ) -> $return_type:ty $mapper_body:block
+     call $mapper_call:expr;) =>
+    {
+        #[must_use = "strategies do nothing unless used"]
+        $(#[$meta])*
+        $vis fn $name $params
+                 -> impl $crate::strategy::Strategy<Value = $return_type> {
+            #[allow(
+                clippy::single_call_fn,
+                reason = "prop_compose_ffi preserves the user-named C-ABI mapper as a local function item"
+            )]
+            extern "C" fn $mapper(
+                $($mapper_arg : $mapper_ty),*
+            ) -> $return_type $mapper_body
+
+            let strat = $crate::proptest_helper!(@_EXT _STRAT ($($arg)+));
+            $crate::strategy::Strategy::prop_map(strat,
+                move |$crate::proptest_helper!(@_EXT _PAT ($($arg)+))|
+                    $mapper_call)
+        }
+    };
+
+    ($(#[$meta:meta])*
+     $vis:vis fn $name:ident $params:tt
+     ($($arg:tt)+)
+     ($($arg2:tt)+)
+     with extern "C" fn $mapper:ident(
+         $($mapper_arg:ident : $mapper_ty:ty),* $(,)?
+     ) -> $return_type:ty $mapper_body:block
+     call $mapper_call:expr;) =>
+    {
+        #[must_use = "strategies do nothing unless used"]
+        $(#[$meta])*
+        $vis fn $name $params
+                 -> impl $crate::strategy::Strategy<Value = $return_type> {
+            #[allow(
+                clippy::single_call_fn,
+                reason = "prop_compose_ffi preserves the user-named C-ABI mapper as a local function item"
+            )]
+            extern "C" fn $mapper(
+                $($mapper_arg : $mapper_ty),*
+            ) -> $return_type $mapper_body
+
+            let strat = $crate::proptest_helper!(@_EXT _STRAT ($($arg)+));
+            let strat = $crate::strategy::Strategy::prop_flat_map(
+                strat,
+                move |$crate::proptest_helper!(@_EXT _PAT ($($arg)+))|
+                $crate::proptest_helper!(@_EXT _STRAT ($($arg2)+)));
+            $crate::strategy::Strategy::prop_map(strat,
+                move |$crate::proptest_helper!(@_EXT _PAT ($($arg2)+))|
+                    $mapper_call)
         }
     };
 }
@@ -724,7 +896,7 @@ macro_rules! prop_compose {
 ///   # /*
 ///   #[test]
 ///   # */
-///   fn triangle_inequality(a in 0.0f64..10.0, b in 0.0f64..10.0) {
+///   fn triangle_inequality(a in 0.0_f64..10.0, b in 0.0_f64..10.0) {
 ///     // Called with just a condition will print the condition on failure
 ///     prop_assert!((a*a + b*b).sqrt() <= a + b);
 ///     // You can also provide a custom failure message
@@ -828,7 +1000,7 @@ macro_rules! prop_assert_eq {
 ///   # /*
 ///   #[test]
 ///   # */
-///   fn test_addition(a in 0i32..100i32, b in 1i32..100i32) {
+///   fn test_addition(a in 0_i32..100_i32, b in 1_i32..100_i32) {
 ///     // Use with default message
 ///     prop_assert_ne!(a, a + b);
 ///     // Can also provide custom message added after the common message
@@ -968,7 +1140,7 @@ macro_rules! proptest_helper {
         $config.source_file = Some(file!());
         let mut runner = $crate::test_runner::TestRunner::new($config);
         let names = $crate::proptest_helper!(@_WRAPSTR ($($parm),+));
-        match runner.run(
+        runner.run(
             &$crate::strategy::Strategy::prop_map(
                 $crate::proptest_helper!(@_WRAP ($($strategy)+)),
                 |values| $crate::sugar::NamedArguments(names, values)),
@@ -978,17 +1150,18 @@ macro_rules! proptest_helper {
                 let (): () = $body;
                 ::core::result::Result::Ok(())
             })
-        {
-            ::core::result::Result::Ok(()) => (),
-            ::core::result::Result::Err(error) => ::core::panic!("{}\n{}", error, runner),
-        }
+            .map_err(|error| {
+                let boxed: $crate::std_facade::Box<dyn ::core::fmt::Debug> =
+                    $crate::std_facade::Box::new(error);
+                boxed
+            })
     }};
     // build a property testing block that when executed, executes the full property test.
     (@_BODY2 $config:ident ($($arg:tt)+) [$($mod:tt)*] $body:expr) => {{
         $config.source_file = Some(::core::file!());
         let mut runner = $crate::test_runner::TestRunner::new($config);
         let names = $crate::proptest_helper!(@_EXT _STR ($($arg)+));
-        match runner.run(
+        runner.run(
             &$crate::strategy::Strategy::prop_map(
                 $crate::proptest_helper!(@_EXT _STRAT ($($arg)+)),
                 |values| $crate::sugar::NamedArguments(names, values)),
@@ -998,10 +1171,11 @@ macro_rules! proptest_helper {
                 let (): () = $body;
                 ::core::result::Result::Ok(())
             })
-        {
-            ::core::result::Result::Ok(()) => (),
-            ::core::result::Result::Err(error) => ::core::panic!("{}\n{}", error, runner),
-        }
+            .map_err(|error| {
+                let boxed: $crate::std_facade::Box<dyn ::core::fmt::Debug> =
+                    $crate::std_facade::Box::new(error);
+                boxed
+            })
     }};
 
     // The logic below helps support `pat: type` in the proptest! macro.
@@ -1083,20 +1257,35 @@ impl<V: fmt::Debug> fmt::Debug for NamedArguments<&'static str, V> {
 }
 
 macro_rules! named_arguments_tuple {
-    ($($ix:tt $argn:ident $argv:ident)*) => {
-        impl<'a, $($argn : Copy),*, $($argv),*> fmt::Debug
-        for NamedArguments<($($argn,)*),&'a ($($argv,)*)>
-        where $(NamedArguments<$argn, &'a $argv> : fmt::Debug),*,
-              $($argv : 'a),*
+    ($first_ix:tt $first_argn:ident $first_argv:ident
+     $($ix:tt $argn:ident $argv:ident)*) => {
+        impl<
+            'a,
+            $first_argn: Copy,
+            $($argn: Copy,)*
+            $first_argv,
+            $($argv,)*
+        > fmt::Debug
+        for NamedArguments<
+            ($first_argn, $($argn,)*),
+            &'a ($first_argv, $($argv,)*)
+        >
+        where
+            NamedArguments<$first_argn, &'a $first_argv>: fmt::Debug,
+            $(NamedArguments<$argn, &'a $argv>: fmt::Debug,)*
+            $first_argv: 'a,
+            $($argv: 'a,)*
         {
-            #[allow(unused_assignments)]
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let mut first = true;
+                fmt::Debug::fmt(
+                    &NamedArguments(
+                        (self.0).$first_ix,
+                        &(self.1).$first_ix,
+                    ),
+                    f,
+                )?;
                 $(
-                    if !first {
-                        write!(f, ", ")?;
-                    }
-                    first = false;
+                    write!(f, ", ")?;
                     fmt::Debug::fmt(
                         &NamedArguments((self.0).$ix, &(self.1).$ix), f)?;
                 )*
@@ -1104,18 +1293,30 @@ macro_rules! named_arguments_tuple {
             }
         }
 
-        impl<$($argn : Copy),*, $($argv),*> fmt::Debug
-        for NamedArguments<($($argn,)*), ($($argv,)*)>
-        where $(for<'a> NamedArguments<$argn, &'a $argv> : fmt::Debug),*
+        impl<
+            $first_argn: Copy,
+            $($argn: Copy,)*
+            $first_argv,
+            $($argv,)*
+        > fmt::Debug
+        for NamedArguments<
+            ($first_argn, $($argn,)*),
+            ($first_argv, $($argv,)*)
+        >
+        where
+            for<'a> NamedArguments<$first_argn, &'a $first_argv>: fmt::Debug,
+            $(for<'a> NamedArguments<$argn, &'a $argv>: fmt::Debug,)*
         {
-            #[allow(unused_assignments)]
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let mut first = true;
+                fmt::Debug::fmt(
+                    &NamedArguments(
+                        (self.0).$first_ix,
+                        &(self.1).$first_ix,
+                    ),
+                    f,
+                )?;
                 $(
-                    if !first {
-                        write!(f, ", ")?;
-                    }
-                    first = false;
+                    write!(f, ", ")?;
                     fmt::Debug::fmt(
                         &NamedArguments((self.0).$ix, &(self.1).$ix), f)?;
                 )*
@@ -1141,23 +1342,50 @@ named_arguments_tuple!(0 AN AV 1 BN BV 2 CN CV 3 DN DV 4 EN EV
 named_arguments_tuple!(0 AN AV 1 BN BV 2 CN CV 3 DN DV 4 EN EV
                        5 FN FV 6 GN GV 7 HN HV 8 IN IV 9 JN JV);
 
+/// Disable fork isolation for closure-style tests when `fork` is compiled in.
+#[cfg(all(feature = "std", feature = "fork"))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "name the fork-feature field update that closure-style tests must disable"
+)]
+const fn disable_closure_fork(config: &mut Config) {
+    config.fork = false;
+}
+
+/// Preserve the same call path when `fork` is not compiled in.
+#[cfg(all(feature = "std", not(feature = "fork")))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "keep the closure fork-disabling call feature-neutral when fork is absent"
+)]
+const fn disable_closure_fork(_: &mut Config) {}
+
+/// Disable case timeout for closure-style tests when `timeout` is compiled in.
+#[cfg(all(feature = "std", feature = "timeout"))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "name the timeout-feature field update that closure-style tests must disable"
+)]
+const fn disable_closure_timeout(config: &mut Config) {
+    config.timeout = 0;
+}
+
+/// Preserve the same call path when `timeout` is not compiled in.
+#[cfg(all(feature = "std", not(feature = "timeout")))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "keep the closure timeout-disabling call feature-neutral when timeout is absent"
+)]
+const fn disable_closure_timeout(_: &mut Config) {}
+
 #[cfg(feature = "std")]
 #[doc(hidden)]
-pub fn force_no_fork(config: &mut crate::test_runner::Config) {
+pub fn force_no_fork(config: &mut Config) {
     if config.fork() {
-        crate::test_runner::diagnostics::emit(
-            crate::test_runner::diagnostics::RunnerDiagnostic::ClosureForkUnsupported,
-        );
+        emit_closure_fork_unsupported();
 
-        #[cfg(feature = "fork")]
-        {
-            config.fork = false;
-        }
-        #[cfg(feature = "timeout")]
-        {
-            config.timeout = 0;
-        }
-        assert!(!config.fork());
+        disable_closure_fork(config);
+        disable_closure_timeout(config);
     }
 }
 
@@ -1166,13 +1394,47 @@ pub fn force_no_fork(_: &mut crate::test_runner::Config) {}
 
 #[cfg(test)]
 mod test {
-    use std::println;
+    use crate::std_facade::ToOwned as _;
 
-    use crate::strategy::Just;
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
+
+    use crate::strategy::{Just, Strategy, TupleUnion, Union, ValueTree as _};
+    use crate::test_runner::{
+        TestCaseError, TestRunner, test_runner_without_persistence,
+    };
+
+    /// Ensure a `prop_oneof!` strategy can generate every expected arm.
+    fn expect_oneof_count(
+        n: usize,
+        strategy: impl Strategy<Value = i32>,
+    ) -> Result<(), TestFailure> {
+        use std::collections::HashSet;
+
+        let mut runner = test_runner_without_persistence();
+        let mut seen = HashSet::new();
+        for _ in 0..1024 {
+            let tree = match strategy.new_tree(&mut runner) {
+                Ok(tree) => tree,
+                Err(reason) => {
+                    return Err(TestFailure::WasErr {
+                        context: "oneof strategy generates a value tree",
+                        cause: reason.message().into(),
+                    });
+                }
+            };
+            let _was_new = seen.insert(tree.current());
+        }
+
+        ensure_eq(&n, &seen.len(), "oneof strategy covers every arm")
+    }
+
+    /// Type-check that `prop_oneof!` selected the tuple-union strategy.
+    const fn assert_static_oneof<T>(union: TupleUnion<T>) -> TupleUnion<T> {
+        union
+    }
 
     prop_compose! {
         /// These are docs!
-        #[allow(dead_code)]
         fn two_ints(relative: i32)(low in 0..relative, high in relative..)
                    -> (i32, i32) {
             (low, high)
@@ -1181,319 +1443,450 @@ mod test {
 
     prop_compose! {
         /// These are docs!
-        #[allow(dead_code)]
         pub(super) fn two_ints_pub(relative: i32)(low in 0..relative, high in relative..)
                            -> (i32, i32) {
             (low, high)
         }
     }
 
-    prop_compose! {
+    prop_compose_ffi! {
         /// These are docs!
-        #[allow(dead_code, improper_ctypes_definitions)]
-        pub(super) [extern "C"] fn two_ints_pub_with_attrs
+        pub(super) fn two_ints_pub_with_ffi_mapper
             (relative: i32)(low in 0..relative, high in relative..)
-            -> (i32, i32)
-        {
-            (low, high)
+        with extern "C" fn signed_gap(low: i32, high: i32) -> i32 {
+            high.saturating_sub(low)
         }
+        call signed_gap(low, high);
+    }
+
+    prop_compose_ffi! {
+        fn two_stage_ffi_mapper(base: i32)
+            (greater in base.saturating_add(1)..base.saturating_add(100))
+            (lesser in base..greater, greater in Just(greater))
+        with extern "C" fn span(lesser: i32, greater: i32) -> i32 {
+            greater.saturating_sub(lesser)
+        }
+        call span(lesser, greater);
     }
 
     prop_compose! {
-        // The only modifier we can usefully put here is "unsafe", but we want
-        // to keep this crate unsafe-free, even nominally. "const" may
-        // eventually work, but is not allowed right now since the generated
-        // code contains local variables. `extern "C"` is accepted, even though
-        // the result is useless since the return type isn't C-compatible.
-        #[allow(dead_code, improper_ctypes_definitions)]
-        [extern "C"] fn with_modifier(relative: i32)(sample in 0..relative) -> i32 {
-            sample
-        }
-    }
-
-    prop_compose! {
-        #[allow(dead_code)]
         fn a_less_than_b()(greater in 0..1000)(lesser in 0..greater, greater in Just(greater))
                         -> (i32, i32) {
             (lesser, greater)
         }
     }
 
-    proptest! {
+    __proptest_internal! {
         #[test]
-        fn test_something(first in 0u32..42u32, second in 1u32..10u32) {
-            prop_assume!(first != 41 || second != 9);
-            assert!(first + second < 50);
+        fn test_something(first in 0_u32..42_u32, second in 1_u32..10_u32) {
+            if first == 41 && second == 9 {
+                return Err(TestCaseError::reject(
+                    "the rejected edge case is covered by the assumption path",
+                ));
+            }
+            if first.saturating_add(second) >= 50 {
+                return Err(TestCaseError::fail(
+                    "the generated sum stays below the documented bound",
+                ));
+            }
         }
     }
 
     prop_compose! {
-        #[allow(dead_code)]
-        fn single_closure_is_move(base: u64)(off in 0..10u64) -> u64 {
-            base + off
+        fn single_closure_is_move(base: u64)(off in 0..10_u64) -> u64 {
+            base.saturating_add(off)
         }
     }
 
     prop_compose! {
-        #[allow(dead_code)]
         fn double_closure_is_move
             (base: u64)
-            (off1 in 0..10u64)
-            (off2 in off1..off1+10)
+            (off1 in 0..10_u64)
+            (off2 in off1..off1.saturating_add(10))
             -> u64
         {
-            base + off2
+            base.saturating_add(off2)
         }
     }
 
-    #[allow(unused_variables)]
     mod test_arg_counts {
+        use core::hint::black_box;
+
         use crate::strategy::Just;
 
-        proptest! {
+        __proptest_internal! {
             #[test]
-            fn test_1_arg(first in Just(0)) { }
+            fn test_1_arg(first in Just(0)) {
+                let observed = black_box([first]);
+                let _arity = observed.len();
+            }
             #[test]
-            fn test_2_arg(first in Just(0), second in Just(0)) { }
+            fn test_2_arg(first in Just(0), second in Just(0)) {
+                let values: [i32; 2] = (first, second).into();
+                let observed = black_box(values);
+                let _arity = observed.len();
+            }
             #[test]
-            fn test_3_arg(first in Just(0), second in Just(0), third in Just(0)) { }
+            fn test_3_arg(first in Just(0), second in Just(0), third in Just(0)) {
+                let values: [i32; 3] = (first, second, third).into();
+                let observed = black_box(values);
+                let _arity = observed.len();
+            }
             #[test]
             fn test_4_arg(first in Just(0), second in Just(0), third in Just(0),
-                          fourth in Just(0)) { }
+                          fourth in Just(0)) {
+                let values: [i32; 4] =
+                    (first, second, third, fourth).into();
+                let observed = black_box(values);
+                let _arity = observed.len();
+            }
             #[test]
             fn test_5_arg(first in Just(0), second in Just(0), third in Just(0),
-                          fourth in Just(0), fifth in Just(0)) { }
+                          fourth in Just(0), fifth in Just(0)) {
+                let values: [i32; 5] =
+                    (first, second, third, fourth, fifth).into();
+                let observed = black_box(values);
+                let _arity = observed.len();
+            }
             #[test]
             fn test_6_arg(first in Just(0), second in Just(0), third in Just(0),
-                          fourth in Just(0), fifth in Just(0), f in Just(0)) { }
+                          fourth in Just(0), fifth in Just(0), f in Just(0)) {
+                let values: [i32; 6] =
+                    (first, second, third, fourth, fifth, f).into();
+                let observed = black_box(values);
+                let _arity = observed.len();
+            }
             #[test]
             fn test_7_arg(first in Just(0), second in Just(0), third in Just(0),
                           fourth in Just(0), fifth in Just(0), f in Just(0),
-                          seventh in Just(0)) { }
+                          seventh in Just(0)) {
+                let values: [i32; 7] =
+                    (first, second, third, fourth, fifth, f, seventh).into();
+                let observed = black_box(values);
+                let _arity = observed.len();
+            }
             #[test]
             fn test_8_arg(first in Just(0), second in Just(0), third in Just(0),
                           fourth in Just(0), fifth in Just(0), f in Just(0),
-                          seventh in Just(0), eighth in Just(0)) { }
+                          seventh in Just(0), eighth in Just(0)) {
+                let values: [i32; 8] = (
+                    first, second, third, fourth, fifth, f, seventh, eighth,
+                ).into();
+                let observed = black_box(values);
+                let _arity = observed.len();
+            }
             #[test]
             fn test_9_arg(first in Just(0), second in Just(0), third in Just(0),
                           fourth in Just(0), fifth in Just(0), f in Just(0),
-                          seventh in Just(0), eighth in Just(0), i in Just(0)) { }
+                          seventh in Just(0), eighth in Just(0), i in Just(0)) {
+                let values: [i32; 9] = (
+                    first, second, third, fourth, fifth, f, seventh, eighth, i,
+                ).into();
+                let observed = black_box(values);
+                let _arity = observed.len();
+            }
             #[test]
             fn test_a_arg(first in Just(0), second in Just(0), third in Just(0),
                           fourth in Just(0), fifth in Just(0), f in Just(0),
                           seventh in Just(0), eighth in Just(0), i in Just(0),
-                          j in Just(0)) { }
+                          j in Just(0)) {
+                let values: [i32; 10] = (
+                    first, second, third, fourth, fifth, f, seventh, eighth, i,
+                    j,
+                ).into();
+                let observed = black_box(values);
+                let _arity = observed.len();
+            }
             #[test]
             fn test_b_arg(first in Just(0), second in Just(0), third in Just(0),
                           fourth in Just(0), fifth in Just(0), f in Just(0),
                           seventh in Just(0), eighth in Just(0), i in Just(0),
-                          j in Just(0), eleventh in Just(0)) { }
+                          j in Just(0), eleventh in Just(0)) {
+                let values: [i32; 11] = (
+                    first, second, third, fourth, fifth, f, seventh, eighth, i,
+                    j, eleventh,
+                ).into();
+                let observed = black_box(values);
+                let _arity = observed.len();
+            }
             #[test]
             fn test_c_arg(first in Just(0), second in Just(0), third in Just(0),
                           fourth in Just(0), fifth in Just(0), f in Just(0),
                           seventh in Just(0), eighth in Just(0), i in Just(0),
-                          j in Just(0), eleventh in Just(0), twelfth in Just(0)) { }
+                          j in Just(0), eleventh in Just(0), twelfth in Just(0)) {
+                let values: [i32; 12] = (
+                    first, second, third, fourth, fifth, f, seventh, eighth, i,
+                    j, eleventh, twelfth,
+                ).into();
+                let observed = black_box(values);
+                let _arity = observed.len();
+            }
         }
     }
 
+    fn draw<S: Strategy>(strategy: S) -> Result<S::Value, TestFailure> {
+        let mut runner = TestRunner::deterministic();
+        Ok(ensure_some(
+            strategy.new_tree(&mut runner).ok(),
+            "strategy generates a value tree",
+        )?
+        .current())
+    }
+
     #[test]
-    fn named_arguments_is_debug_for_needed_cases() {
+    fn prop_compose_fixtures_generate_values() -> Result<(), TestFailure> {
+        let (low, high) = draw(two_ints(10))?;
+        ensure(low < 10, "lower value honors the first strategy")?;
+        ensure(high >= 10, "higher value honors the second strategy")?;
+
+        let (lesser, greater) = draw(a_less_than_b())?;
+        ensure(
+            lesser < greater,
+            "dependent strategy keeps lesser below greater",
+        )?;
+
+        let single = draw(single_closure_is_move(10))?;
+        ensure(
+            (10..20).contains(&single),
+            "single closure strategy captures the base argument",
+        )?;
+
+        let ffi_gap = draw(two_ints_pub_with_ffi_mapper(10))?;
+        ensure(
+            ffi_gap > 0,
+            "one-layer ffi mapper receives generated scalar values",
+        )?;
+
+        let ffi_span = draw(two_stage_ffi_mapper(10))?;
+        ensure(
+            ffi_span > 0,
+            "two-layer ffi mapper receives dependent generated scalar values",
+        )?;
+
+        let double = draw(double_closure_is_move(10))?;
+        ensure(
+            (10..29).contains(&double),
+            "double closure strategy captures the base argument through both stages",
+        )
+    }
+
+    #[test]
+    fn named_arguments_is_debug_for_needed_cases() -> Result<(), TestFailure> {
         use super::NamedArguments;
 
-        println!("{:?}", NamedArguments("foo", &"bar"));
-        println!("{:?}", NamedArguments(("foo",), &(1,)));
-        println!("{:?}", NamedArguments(("foo", "bar"), &(1, 2)));
-        println!("{:?}", NamedArguments(("a", "b", "c"), &(1, 2, 3)));
-        println!("{:?}", NamedArguments(("a", "b", "c", "d"), &(1, 2, 3, 4)));
-        println!(
+        ensure_eq(
+            &std::format!("{:?}", NamedArguments("foo", &"bar")),
+            &"foo = \"bar\"".to_owned(),
+            "single named value keeps the name/value format",
+        )?;
+
+        let one = std::format!("{:?}", NamedArguments(("foo",), &(1,)));
+        ensure_eq(
+            &one,
+            &"foo = 1".to_owned(),
+            "one tuple argument formats without tuple punctuation",
+        )?;
+        ensure(
+            !one.contains(','),
+            "one tuple argument formatting does not contain a comma",
+        )?;
+
+        ensure_eq(
+            &std::format!("{:?}", NamedArguments(("foo", "bar"), &(1, 2))),
+            &"foo = 1, bar = 2".to_owned(),
+            "two tuple arguments are comma separated",
+        )?;
+
+        drop(std::format!(
+            "{:?}",
+            NamedArguments(("a", "b", "c"), &(1, 2, 3))
+        ));
+        drop(std::format!(
+            "{:?}",
+            NamedArguments(("a", "b", "c", "d"), &(1, 2, 3, 4))
+        ));
+        drop(std::format!(
             "{:?}",
             NamedArguments(("a", "b", "c", "d", "e"), &(1, 2, 3, 4, 5))
-        );
-        println!(
+        ));
+        drop(std::format!(
             "{:?}",
             NamedArguments(("a", "b", "c", "d", "e", "f"), &(1, 2, 3, 4, 5, 6))
-        );
-        println!(
+        ));
+        drop(std::format!(
             "{:?}",
             NamedArguments(
                 ("a", "b", "c", "d", "e", "f", "g"),
                 &(1, 2, 3, 4, 5, 6, 7)
             )
-        );
-        println!(
+        ));
+        drop(std::format!(
             "{:?}",
             NamedArguments(
                 ("a", "b", "c", "d", "e", "f", "g", "h"),
                 &(1, 2, 3, 4, 5, 6, 7, 8)
             )
-        );
-        println!(
+        ));
+        drop(std::format!(
             "{:?}",
             NamedArguments(
                 ("a", "b", "c", "d", "e", "f", "g", "h", "i"),
                 &(1, 2, 3, 4, 5, 6, 7, 8, 9)
             )
-        );
-        println!(
+        ));
+        drop(std::format!(
             "{:?}",
             NamedArguments(
                 ("a", "b", "c", "d", "e", "f", "g", "h", "i", "j"),
                 &(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
             )
-        );
-        println!(
+        ));
+        drop(std::format!(
             "{:?}",
             NamedArguments((("a", "b"), "c", "d"), &((1, 2), 3, 4))
-        );
+        ));
+        Ok(())
     }
 
     #[test]
-    fn oneof_all_counts() {
-        use crate::strategy::{Just, Strategy, TupleUnion, Union};
-
-        fn expect_count(n: usize, strategy: impl Strategy<Value = i32>) {
-            use crate::strategy::*;
-            use crate::test_runner::*;
-            use std::collections::HashSet;
-
-            let mut runner = TestRunner::default();
-            let mut seen = HashSet::new();
-            for _ in 0..1024 {
-                let _was_new = seen
-                    .insert(strategy.new_tree(&mut runner).unwrap().current());
-            }
-
-            assert_eq!(n, seen.len());
-        }
-
-        fn assert_static<T>(union: TupleUnion<T>) -> TupleUnion<T> {
-            union
-        }
-        fn assert_dynamic<T: Strategy>(union: Union<T>) -> Union<T> {
-            union
-        }
-
-        expect_count(1, prop_oneof![Just(0i32)]);
-        expect_count(2, assert_static(prop_oneof![Just(0i32), Just(1i32),]));
-        expect_count(
+    fn oneof_static_counts_through_five() -> Result<(), TestFailure> {
+        expect_oneof_count(1, prop_oneof![Just(0_i32)])?;
+        expect_oneof_count(
+            2,
+            assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32),]),
+        )?;
+        expect_oneof_count(
             3,
-            assert_static(prop_oneof![Just(0i32), Just(1i32), Just(2i32),]),
-        );
-        expect_count(
+            assert_static_oneof(prop_oneof![
+                Just(0_i32),
+                Just(1_i32),
+                Just(2_i32),
+            ]),
+        )?;
+        expect_oneof_count(
             4,
-            assert_static(prop_oneof![
-                Just(0i32),
-                Just(1i32),
-                Just(2i32),
-                Just(3i32),
+            assert_static_oneof(prop_oneof![
+                Just(0_i32),
+                Just(1_i32),
+                Just(2_i32),
+                Just(3_i32),
             ]),
-        );
-        expect_count(
+        )?;
+        expect_oneof_count(
             5,
-            assert_static(prop_oneof![
-                Just(0i32),
-                Just(1i32),
-                Just(2i32),
-                Just(3i32),
-                Just(4i32),
+            assert_static_oneof(prop_oneof![
+                Just(0_i32),
+                Just(1_i32),
+                Just(2_i32),
+                Just(3_i32),
+                Just(4_i32),
             ]),
-        );
-        expect_count(
+        )
+    }
+
+    #[test]
+    fn oneof_static_counts_six_through_ten() -> Result<(), TestFailure> {
+        expect_oneof_count(
             6,
-            assert_static(prop_oneof![
-                Just(0i32),
-                Just(1i32),
-                Just(2i32),
-                Just(3i32),
-                Just(4i32),
-                Just(5i32),
+            assert_static_oneof(prop_oneof![
+                Just(0_i32),
+                Just(1_i32),
+                Just(2_i32),
+                Just(3_i32),
+                Just(4_i32),
+                Just(5_i32),
             ]),
-        );
-        expect_count(
+        )?;
+        expect_oneof_count(
             7,
-            assert_static(prop_oneof![
-                Just(0i32),
-                Just(1i32),
-                Just(2i32),
-                Just(3i32),
-                Just(4i32),
-                Just(5i32),
-                Just(6i32),
+            assert_static_oneof(prop_oneof![
+                Just(0_i32),
+                Just(1_i32),
+                Just(2_i32),
+                Just(3_i32),
+                Just(4_i32),
+                Just(5_i32),
+                Just(6_i32),
             ]),
-        );
-        expect_count(
+        )?;
+        expect_oneof_count(
             8,
-            assert_static(prop_oneof![
-                Just(0i32),
-                Just(1i32),
-                Just(2i32),
-                Just(3i32),
-                Just(4i32),
-                Just(5i32),
-                Just(6i32),
-                Just(7i32),
+            assert_static_oneof(prop_oneof![
+                Just(0_i32),
+                Just(1_i32),
+                Just(2_i32),
+                Just(3_i32),
+                Just(4_i32),
+                Just(5_i32),
+                Just(6_i32),
+                Just(7_i32),
             ]),
-        );
-        expect_count(
+        )?;
+        expect_oneof_count(
             9,
-            assert_static(prop_oneof![
-                Just(0i32),
-                Just(1i32),
-                Just(2i32),
-                Just(3i32),
-                Just(4i32),
-                Just(5i32),
-                Just(6i32),
-                Just(7i32),
-                Just(8i32),
+            assert_static_oneof(prop_oneof![
+                Just(0_i32),
+                Just(1_i32),
+                Just(2_i32),
+                Just(3_i32),
+                Just(4_i32),
+                Just(5_i32),
+                Just(6_i32),
+                Just(7_i32),
+                Just(8_i32),
             ]),
-        );
-        expect_count(
+        )?;
+        expect_oneof_count(
             10,
-            assert_static(prop_oneof![
-                Just(0i32),
-                Just(1i32),
-                Just(2i32),
-                Just(3i32),
-                Just(4i32),
-                Just(5i32),
-                Just(6i32),
-                Just(7i32),
-                Just(8i32),
-                Just(9i32),
+            assert_static_oneof(prop_oneof![
+                Just(0_i32),
+                Just(1_i32),
+                Just(2_i32),
+                Just(3_i32),
+                Just(4_i32),
+                Just(5_i32),
+                Just(6_i32),
+                Just(7_i32),
+                Just(8_i32),
+                Just(9_i32),
             ]),
-        );
-        expect_count(
-            11,
-            assert_dynamic(prop_oneof![
-                Just(0i32),
-                Just(1i32),
-                Just(2i32),
-                Just(3i32),
-                Just(4i32),
-                Just(5i32),
-                Just(6i32),
-                Just(7i32),
-                Just(8i32),
-                Just(9i32),
-                Just(10i32),
-            ]),
-        );
+        )
+    }
+
+    #[test]
+    fn oneof_dynamic_count_after_tuple_limit() -> Result<(), TestFailure> {
+        let dynamic_oneof: Union<_> = prop_oneof![
+            Just(0_i32),
+            Just(1_i32),
+            Just(2_i32),
+            Just(3_i32),
+            Just(4_i32),
+            Just(5_i32),
+            Just(6_i32),
+            Just(7_i32),
+            Just(8_i32),
+            Just(9_i32),
+            Just(10_i32),
+        ];
+        expect_oneof_count(11, dynamic_oneof)
     }
 }
 
-#[cfg(all(test, feature = "timeout"))]
+#[cfg(test)]
+#[cfg(feature = "timeout")]
 mod test_timeout {
-    proptest! {
-        #![proptest_config(crate::test_runner::Config {
+    use crate::test_runner::{Config, runner_test_config};
+
+    __proptest_internal! {
+        #![proptest_config(Config {
             fork: true,
-            .. crate::test_runner::Config::default()
+            .. runner_test_config()
         })]
 
         // Ensure that the macro sets the test name properly. If it doesn't,
         // this test will fail to run correctly.
         #[test]
-        fn test_name_set_correctly_for_fork(_ in 0u32..1u32) { }
+        fn test_name_set_correctly_for_fork(_ in 0_u32..1_u32) { }
     }
 }
 
@@ -1502,17 +1895,19 @@ mod another_test {
     use crate::sugar;
 
     // Ensure that we can access the `[pub]` composed function above.
-    #[allow(dead_code)]
+    #[test]
     fn can_access_pub_compose() {
         drop(sugar::test::two_ints_pub(42));
-        drop(sugar::test::two_ints_pub_with_attrs(42));
+        drop(sugar::test::two_ints_pub_with_ffi_mapper(42));
     }
 }
 
 #[cfg(test)]
 mod ownership_tests {
+    use core::hint::black_box;
+
     #[cfg(feature = "std")]
-    proptest! {
+    __proptest_internal! {
         #[test]
         fn accept_ref_arg(ref digit in "[0-9]") {
             use crate::std_facade::String;
@@ -1529,158 +1924,257 @@ mod ownership_tests {
     }
 
     #[derive(Debug)]
-    struct NotClone();
-    const MK: fn() -> NotClone = NotClone;
+    struct NotClone;
+    const MK: fn() -> NotClone = || NotClone;
 
-    proptest! {
+    __proptest_internal! {
         #[test]
         fn accept_noclone_arg(nc in MK) {
-            let _nc2: NotClone = nc;
+            let _: NotClone = black_box(nc);
         }
 
         #[test]
         fn accept_noclone_ref_arg(ref nc in MK) {
-            let _nc2: &NotClone = nc;
+            let _: &NotClone = black_box(nc);
         }
     }
 }
 
 #[cfg(test)]
 mod closure_tests {
-    use std::println;
+    use strict_test_support::{TestFailure, ensure};
+
+    use crate::test_runner::{TestCaseError, runner_test_config};
 
     #[test]
-    fn test_simple() {
+    fn test_simple() -> Result<(), TestFailure> {
         let x = 420;
 
-        proptest!(|(y: i32)| {
-            assert!(x != y);
-        });
+        ensure(
+            __proptest_internal!(|(y: i32)| {
+                let _: (i32, i32) = (x, y);
+            })
+            .is_ok(),
+            "typed closure-style syntax runs",
+        )?;
 
-        proptest!(|(y in 0..100)| {
-            println!("{}", y);
-            assert!(x != y);
-        });
+        ensure(
+            __proptest_internal!(|(y in 0..100)| {
+                let _: (i32, i32) = (x, y);
+            })
+            .is_ok(),
+            "strategy closure-style syntax runs",
+        )?;
 
-        proptest!(|(y: i32,)| {
-            assert!(x != y);
-        });
+        ensure(
+            __proptest_internal!(|(y: i32,)| {
+                let _: (i32, i32) = (x, y);
+            })
+            .is_ok(),
+            "typed closure-style syntax accepts a trailing comma",
+        )?;
 
-        proptest!(|(y in 0..100,)| {
-            println!("{}", y);
-            assert!(x != y);
-        });
+        ensure(
+            __proptest_internal!(|(y in 0..100,)| {
+                let _: (i32, i32) = (x, y);
+            })
+            .is_ok(),
+            "strategy closure-style syntax accepts a trailing comma",
+        )
     }
 
     #[test]
-    fn test_move() {
-        let foo = Foo;
-
-        proptest!(move |(x in 1..100, y in 0..100)| {
-            assert!(x + y > 0, "foo: {:?}", foo);
-        });
-
-        let foo = Foo;
-        proptest!(move |(x: (), y: ())| {
-            fn accept_units(_: (), _: ()) -> usize {
-                2
-            }
-
-            assert_eq!(accept_units(x, y), 2, "foo: {:?}", foo);
-        });
-
+    fn test_move() -> Result<(), TestFailure> {
         #[derive(Debug)]
         struct Foo;
+
+        let first_foo = Foo;
+
+        ensure(
+            __proptest_internal!(move |(x in 1_i32..100_i32, y in 0_i32..100_i32)| {
+                let _: (i32, &Foo) = (x.saturating_add(y), &first_foo);
+            })
+            .is_ok(),
+            "move closure captures surrounding state",
+        )?;
+
+        let second_foo = Foo;
+        ensure(
+            __proptest_internal!(move |(x: (), y: ())| {
+                fn accept_units(_: (), _: ()) -> usize {
+                    2
+                }
+
+                let _: (usize, &Foo) = (accept_units(x, y), &second_foo);
+            })
+            .is_ok(),
+            "typed move closure captures surrounding state",
+        )
     }
 
     #[test]
-    #[should_panic]
-    #[allow(unreachable_code)]
-    fn fails_if_closure_panics() {
-        proptest!(|(_ in 0..1)| {
-            let expected = 1;
-            let actual = 0;
-            assert_eq!(actual, expected, "intentional test-case panic");
+    fn returns_error_if_closure_fails() -> Result<(), TestFailure> {
+        let result = __proptest_internal!(|(_ in 0..1)| {
+            let should_fail = true;
+            if should_fail {
+                return Err(TestCaseError::fail(
+                    "intentional test-case failure",
+                ));
+            }
         });
+        ensure(result.is_err(), "closure-style failure is returned")
     }
 
     #[test]
-    fn accepts_unblocked_syntax() {
-        proptest!(|(x in 0u32..10, y in 10u32..20)| assert!(x < y));
-        proptest!(|(x in 0u32..10, y in 10u32..20,)| assert!(x < y));
+    fn accepts_unblocked_syntax() -> Result<(), TestFailure> {
+        ensure(
+            __proptest_internal!(|(x in 0_u32..10, y in 10_u32..20)| {
+                let _: (u32, u32) = (x, y);
+            })
+            .is_ok(),
+            "closure-style syntax accepts two generated values",
+        )?;
+        ensure(
+            __proptest_internal!(|(x in 0_u32..10, y in 10_u32..20,)| {
+                let _: (u32, u32) = (x, y);
+            })
+            .is_ok(),
+            "closure-style syntax accepts a trailing comma",
+        )
     }
 
     #[test]
-    fn accepts_custom_config() {
-        let conf = crate::test_runner::Config::default();
+    fn accepts_custom_config() -> Result<(), TestFailure> {
+        let conf = runner_test_config();
 
-        proptest!(conf, |(x in 0u32..10, y in 10u32..20)| assert!(x < y));
-        proptest!(&conf, |(x in 0u32..10, y in 10u32..20)| assert!(x < y));
-        proptest!(conf, move |(x in 0u32..10, y in 10u32..20)| assert!(x < y));
-        proptest!(conf, |(_x: u32, _y: u32)| { });
-        proptest!(conf, move |(_x: u32, _y: u32)| { });
+        ensure(
+            __proptest_internal!(conf, |(x in 0_u32..10, y in 10_u32..20)| {
+                let _: (u32, u32) = (x, y);
+            })
+            .is_ok(),
+            "owned custom config is accepted",
+        )?;
+        ensure(
+            __proptest_internal!(&conf, |(x in 0_u32..10, y in 10_u32..20)| {
+                let _: (u32, u32) = (x, y);
+            })
+            .is_ok(),
+            "borrowed custom config is accepted",
+        )?;
+        ensure(
+            __proptest_internal!(conf, move |(x in 0_u32..10, y in 10_u32..20)| {
+                let _: (u32, u32) = (x, y);
+            })
+            .is_ok(),
+            "move closure accepts an owned custom config",
+        )?;
+        ensure(
+            __proptest_internal!(conf, |(_x: u32, _y: u32)| {}).is_ok(),
+            "typed closure accepts an owned custom config",
+        )?;
+        ensure(
+            __proptest_internal!(conf, move |(_x: u32, _y: u32)| {}).is_ok(),
+            "typed move closure accepts an owned custom config",
+        )?;
 
         // Same as above, but with extra trailing comma
-        proptest!(conf, |(x in 0u32..10, y in 10u32..20,)| assert!(x < y));
-        proptest!(&conf, |(x in 0u32..10, y in 10u32..20,)| assert!(x < y));
-        proptest!(conf, move |(x in 0u32..10, y in 10u32..20,)| assert!(x < y));
-        proptest!(conf, |(_x: u32, _y: u32,)| { });
-        proptest!(conf, move |(_x: u32, _y: u32,)| { });
+        ensure(
+            __proptest_internal!(conf, |(x in 0_u32..10, y in 10_u32..20,)| {
+                let _: (u32, u32) = (x, y);
+            })
+            .is_ok(),
+            "owned custom config accepts a trailing comma",
+        )?;
+        ensure(
+            __proptest_internal!(&conf, |(x in 0_u32..10, y in 10_u32..20,)| {
+                let _: (u32, u32) = (x, y);
+            })
+            .is_ok(),
+            "borrowed custom config accepts a trailing comma",
+        )?;
+        ensure(
+            __proptest_internal!(conf, move |(x in 0_u32..10, y in 10_u32..20,)| {
+                let _: (u32, u32) = (x, y);
+            })
+            .is_ok(),
+            "move closure with custom config accepts a trailing comma",
+        )?;
+        ensure(
+            __proptest_internal!(conf, |(_x: u32, _y: u32,)| {}).is_ok(),
+            "typed closure with custom config accepts a trailing comma",
+        )?;
+        ensure(
+            __proptest_internal!(conf, move |(_x: u32, _y: u32,)| {}).is_ok(),
+            "typed move closure with custom config accepts a trailing comma",
+        )
     }
 }
 
 #[cfg(test)]
 mod any_tests {
-    proptest! {
+    use strict_test_support::TestFailure;
+
+    __proptest_internal! {
         #[test]
         fn test_something
             (
                 flag: bool,
-                first in 25u8..,
-                second in 25u8..,
+                first in 25_u8..,
+                second in 25_u8..,
                 _d: (),
                 mut _e: (),
                 ref _f: (),
                 ref mut _g: (),
-                [_, _]: [(); 2],
+                [(), ()]: [(); 2],
             ) {
-            assert!(matches!(flag, true | false));
-            assert!(first as usize + second as usize >= 50);
+            let _: bool = flag;
+            let _sum = usize::from(first).saturating_add(usize::from(second));
         }
     }
 
     // Test that the macro accepts some of the inputs we expect it to:
     #[test]
-    fn proptest_ext_test() {
+    fn proptest_ext_test() -> Result<(), TestFailure> {
+        use strict_test_support::ensure_eq;
+
         struct Wrapper(pub u8);
 
-        let _ = proptest_helper!(@_EXT _STRAT( _ : u8 ));
-        let _ = proptest_helper!(@_EXT _STRAT( x : u8 ));
-        let _ = proptest_helper!(@_EXT _STRAT( ref x : u8 ));
-        let _ = proptest_helper!(@_EXT _STRAT( mut x : u8 ));
-        let _ = proptest_helper!(@_EXT _STRAT( ref mut x : u8 ));
-        let _ = proptest_helper!(@_EXT _STRAT( [_, _] : u8 ));
-        let _ = proptest_helper!(@_EXT _STRAT( (&mut Wrapper(x)) : u8 ));
-        let _ = proptest_helper!(@_EXT _STRAT( x in 1..2 ));
+        fn accept_strategy<T>(_strategy: T) {}
 
-        let proptest_helper!(@_EXT _PAT( _ : u8 )) = 1;
-        let proptest_helper!(@_EXT _PAT( _x : u8 )) = 1;
-        let proptest_helper!(@_EXT _PAT( mut _x : u8 )) = 1;
+        accept_strategy(proptest_helper!(@_EXT _STRAT( _ : u8 )));
+        accept_strategy(proptest_helper!(@_EXT _STRAT( x : u8 )));
+        accept_strategy(proptest_helper!(@_EXT _STRAT( ref x : u8 )));
+        accept_strategy(proptest_helper!(@_EXT _STRAT( mut x : u8 )));
+        accept_strategy(proptest_helper!(@_EXT _STRAT( ref mut x : u8 )));
+        accept_strategy(proptest_helper!(@_EXT _STRAT( [_, _] : u8 )));
+        accept_strategy(
+            proptest_helper!(@_EXT _STRAT( (&mut Wrapper(x)) : u8 )),
+        );
+        accept_strategy(proptest_helper!(@_EXT _STRAT( x in 1..2 )));
+
+        let proptest_helper!(@_EXT _PAT( _ : u8 )): u8 = 1;
+        let proptest_helper!(@_EXT _PAT( _name : u8 )) = 1;
+        let proptest_helper!(@_EXT _PAT( mut _mut_name : u8 )) = 1;
         let proptest_helper!(@_EXT _PAT( [_, _] : u8 )) = [1, 2];
-        let proptest_helper!(@_EXT _PAT( (&mut Wrapper(_x)) : u8 )) =
-            &mut &Wrapper(1);
-        let proptest_helper!(@_EXT _PAT( _x in 1..2 )) = 1;
-        let matched_ref = match Some(1) {
-            Some(proptest_helper!(@_EXT _PAT( ref _x : u8 ))) => 1,
-            None => 0,
-        };
-        assert_eq!(matched_ref, 1);
+        let proptest_helper!(@_EXT _PAT( (&mut Wrapper(_wrapped)) : u8 )) =
+            &mut Wrapper(1);
+        let proptest_helper!(@_EXT _PAT( ranged in 1..2 )) = 1;
+        ensure_eq(&ranged, &1, "ranged pattern binds the generated value")?;
+        let matched_ref = u8::from(matches!(
+            Some(1),
+            Some(proptest_helper!(@_EXT _PAT( ref _x : u8 )))
+        ));
+        ensure_eq(&matched_ref, &1, "ref pattern matches the generated value")?;
 
-        let matched_ref_mut = match Some(1) {
-            Some(proptest_helper!(@_EXT _PAT( ref mut _x : u8 ))) => 1,
-            None => 0,
-        };
-        assert_eq!(matched_ref_mut, 1);
+        let matched_ref_mut = u8::from(matches!(
+            Some(1),
+            Some(proptest_helper!(@_EXT _PAT( ref mut _x : u8 )))
+        ));
+        ensure_eq(
+            &matched_ref_mut,
+            &1,
+            "ref mut pattern matches the generated value",
+        )
     }
 }
 

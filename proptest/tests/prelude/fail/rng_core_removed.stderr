@@ -1,0 +1,5 @@
+error[E0405]: cannot find trait `RngCore` in this scope
+ --> tests/prelude/fail/rng_core_removed.rs:3:32
+  |
+3 | fn require_removed_rng_core<R: RngCore + ?Sized>(_rng: &mut R) {}
+  |                                ^^^^^^^ not found in this scope

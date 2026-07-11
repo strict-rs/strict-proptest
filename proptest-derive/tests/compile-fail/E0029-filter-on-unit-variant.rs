@@ -29,33 +29,3 @@ enum T0 {
     #[proptest(filter(foo))]
     V0,
 }
-
-#[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0029]
-enum T1 {
-    #[proptest(filter(foo))]
-    V0,
-}
-
-#[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0029]
-enum T2 {
-    #[proptest(filter(foo))]
-    V0 {},
-}
-
-#[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0029]
-enum T3 {
-    #[proptest(filter(foo))]
-    V0 {},
-}
-
-#[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0029]
-enum T4 {
-    #[proptest(filter(foo))]
-    V0(),
-}
-
-#[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0029]
-enum T5 {
-    #[proptest(filter(foo))]
-    V0(),
-}

@@ -11,8 +11,9 @@ use crate::std_facade::{Arc, fmt};
 use core::mem;
 
 use crate::strategy::fuse::Fuse;
-use crate::strategy::traits::*;
-use crate::test_runner::*;
+use crate::strategy::traits::{NewTree, Strategy, ValueTree};
+use crate::test_runner::{Reason, TestRunner};
+use crate::tuple::TupleValueTree;
 
 /// Adaptor that flattens a `Strategy` which produces other `Strategy`s into a
 /// `Strategy` that picks one of those strategies and then picks values from
@@ -31,8 +32,8 @@ impl<S: Strategy> Flatten<S> {
         clippy::single_call_fn,
         reason = "wrap a strategy-producing source so prop_flat_map can flatten its output"
     )]
-    pub fn new(source: S) -> Self {
-        Flatten { source }
+    pub const fn new(source: S) -> Self {
+        Self { source }
     }
 }
 
@@ -81,14 +82,14 @@ where
     complicate_regen_remaining: u32,
 }
 
-impl<S: ValueTree> Clone for FlattenValueTree<S>
+impl<S> Clone for FlattenValueTree<S>
 where
+    S: ValueTree + Clone,
     S::Value: Strategy + Clone,
-    S: Clone,
     <S::Value as Strategy>::Tree: Clone,
 {
     fn clone(&self) -> Self {
-        FlattenValueTree {
+        Self {
             meta: self.meta.clone(),
             current: self.current.clone(),
             final_complication: self.final_complication.clone(),
@@ -98,10 +99,10 @@ where
     }
 }
 
-impl<S: ValueTree> fmt::Debug for FlattenValueTree<S>
+impl<S> fmt::Debug for FlattenValueTree<S>
 where
+    S: ValueTree + fmt::Debug,
     S::Value: Strategy,
-    S: fmt::Debug,
     <S::Value as Strategy>::Tree: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -109,6 +110,7 @@ where
             .field("meta", &self.meta)
             .field("current", &self.current)
             .field("final_complication", &self.final_complication)
+            .field("runner", &self.runner)
             .field(
                 "complicate_regen_remaining",
                 &self.complicate_regen_remaining,
@@ -133,7 +135,7 @@ where
     )]
     fn new(runner: &mut TestRunner, meta: S) -> Result<Self, Reason> {
         let current = meta.current().new_tree(runner)?;
-        Ok(FlattenValueTree {
+        Ok(Self {
             meta: Fuse::new(meta),
             current: Fuse::new(current),
             final_complication: None,
@@ -175,11 +177,9 @@ where
             // since we're going to return `true` from `simplify()`
             // ourselves.
             self.current.disallow_complicate();
-            self.final_complication = Some(Fuse::new(tree));
-            mem::swap(
-                self.final_complication.as_mut().unwrap(),
-                &mut self.current,
-            );
+            let mut final_complication = Fuse::new(tree);
+            mem::swap(&mut final_complication, &mut self.current);
+            self.final_complication = Some(final_complication);
             // Initially complicate by regenerating the chosen value.
             self.complicate_regen_remaining = self.runner.config().cases;
             true
@@ -196,7 +196,8 @@ where
             self.complicate_regen_remaining = 0;
         }
         if self.complicate_regen_remaining > 0 {
-            self.complicate_regen_remaining -= 1;
+            self.complicate_regen_remaining =
+                self.complicate_regen_remaining.saturating_sub(1);
 
             if let Ok(tree) = self.meta.current().new_tree(&mut self.runner) {
                 self.current = Fuse::new(tree);
@@ -267,7 +268,7 @@ impl<S: fmt::Debug, F> fmt::Debug for IndFlattenMap<S, F> {
 
 impl<S: Clone, F> Clone for IndFlattenMap<S, F> {
     fn clone(&self) -> Self {
-        IndFlattenMap {
+        Self {
             source: self.source.clone(),
             fun: Arc::clone(&self.fun),
         }
@@ -277,7 +278,7 @@ impl<S: Clone, F> Clone for IndFlattenMap<S, F> {
 impl<S: Strategy, R: Strategy, F: Fn(S::Value) -> R> Strategy
     for IndFlattenMap<S, F>
 {
-    type Tree = crate::tuple::TupleValueTree<(S::Tree, R::Tree)>;
+    type Tree = TupleValueTree<(S::Tree, R::Tree)>;
     type Value = (S::Value, R::Value);
 
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
@@ -285,7 +286,7 @@ impl<S: Strategy, R: Strategy, F: Fn(S::Value) -> R> Strategy
         let right_source = (self.fun)(left.current());
         let right = right_source.new_tree(runner)?;
 
-        Ok(crate::tuple::TupleValueTree::new((left, right)))
+        Ok(TupleValueTree::new((left, right)))
     }
 }
 
@@ -295,8 +296,12 @@ mod test {
 
     use super::*;
 
+    use crate::strategy::check_strategy_sanity;
     use crate::strategy::just::Just;
-    use crate::test_runner::Config;
+    use crate::test_runner::{
+        Config, RngAlgorithm, TestCaseError, TestError, TestRng,
+        runner_test_config,
+    };
 
     #[test]
     fn test_flat_map() -> Result<(), TestFailure> {
@@ -310,7 +315,7 @@ mod test {
         let mut runner = TestRunner::new_with_rng(
             Config {
                 max_shrink_iters: u32::MAX - 1,
-                ..Config::default()
+                ..runner_test_config()
             },
             TestRng::deterministic_rng(RngAlgorithm::default()),
         );
@@ -319,13 +324,11 @@ mod test {
                 input.new_tree(&mut runner).ok(),
                 "flat_map strategy generates a value tree",
             )?;
-            let result = runner.run_one(case, |(first, second)| {
-                if first <= 10000 || second <= first {
-                    Ok(())
-                } else {
-                    Err(TestCaseError::fail("fail"))
-                }
-            });
+            let result =
+                runner.run_one(case, |(first, second)| match (first, second) {
+                    (left, right) if left <= 10000 || right <= left => Ok(()),
+                    _ => Err(TestCaseError::fail("fail")),
+                });
 
             match result {
                 Ok(_) => {}
@@ -347,12 +350,12 @@ mod test {
     }
 
     #[test]
-    fn test_flat_map_sanity() {
+    fn test_flat_map_sanity() -> Result<(), Reason> {
         check_strategy_sanity(
             (0..65536)
                 .prop_flat_map(|first| (Just(first), (first - 5..first + 5))),
             None,
-        );
+        )
     }
 
     #[test]
@@ -374,7 +377,7 @@ mod test {
         let pass = AtomicBool::new(false);
         let mut runner = TestRunner::new(Config {
             max_flat_map_regens: 1000,
-            ..Config::default()
+            ..runner_test_config()
         });
         let case = ensure_some(
             input.new_tree(&mut runner).ok(),
@@ -396,20 +399,20 @@ mod test {
     }
 
     #[test]
-    fn test_ind_flat_map_sanity() {
+    fn test_ind_flat_map_sanity() -> Result<(), Reason> {
         check_strategy_sanity(
             (0..65536).prop_ind_flat_map(|first| {
                 (Just(first), (first - 5..first + 5))
             }),
             None,
-        );
+        )
     }
 
     #[test]
-    fn test_ind_flat_map2_sanity() {
+    fn test_ind_flat_map2_sanity() -> Result<(), Reason> {
         check_strategy_sanity(
             (0..65536).prop_ind_flat_map2(|first| first - 5..first + 5),
             None,
-        );
+        )
     }
 }

@@ -10,7 +10,7 @@ set -eux
     cd proptest
     cargo clean
     cargo +nightly build --target thumbv7em-none-eabihf \
-          --no-default-features --features 'no_std alloc unstable'
+          --no-default-features --features 'libm alloc unstable'
     cargo clean
     cargo +nightly build --target wasm32-unknown-emscripten \
           --no-default-features --features std

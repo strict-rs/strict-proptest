@@ -17,7 +17,7 @@
 consistent!(autoshutdown_0, r"\s*(\d+)(\w)\s*");
 
 // epub-1.1.1: r"/"
-consistent!(epub_0, r"/");
+consistent!(epub_0, "/");
 
 // rpi-info-0.2.0: "^Revision\t+: ([0-9a-fA-F]+)"
 consistent!(rpi_info_0, "^Revision\t+: ([0-9a-fA-F]+)");
@@ -26,7 +26,7 @@ consistent!(rpi_info_0, "^Revision\t+: ([0-9a-fA-F]+)");
 consistent!(rpi_info_1, "Serial\t+: ([0-9a-fA-F]+)");
 
 // pnet_macros-0.21.0: r"^u([0-9]+)(be|le|he)?$"
-consistent!(pnet_macros_0, r"^u([0-9]+)(be|le|he)?$");
+consistent!(pnet_macros_0, "^u([0-9]+)(be|le|he)?$");
 
 // iban_validate-1.0.3: r"^[A-Z]{2}\d{2}[A-Z\d]{1,30}$"
 consistent!(iban_validate_0, r"^[A-Z]{2}\d{2}[A-Z\d]{1,30}$");
@@ -47,7 +47,7 @@ consistent!(mallumo_2, r"(\d+\()(\d+)(?:\) : )(.+)");
 consistent!(magnet_more_0, r"(.+?)(\[.*?\])?");
 
 // magnet_app-0.0.1: r":(?P<k>[a-zA-Z_]+)"
-consistent!(magnet_app_0, r":(?P<k>[a-zA-Z_]+)");
+consistent!(magnet_app_0, ":(?P<k>[a-zA-Z_]+)");
 
 // yubibomb-0.2.0: r"^\d{6}(?:\s*,\s*\d{6})*$"
 consistent!(yubibomb_0, r"^\d{6}(?:\s*,\s*\d{6})*$");
@@ -71,7 +71,7 @@ consistent!(hueclient_3, "\\{,");
 consistent!(aerial_0, r"[a-zA-Z_\$][a-zA-Z_0-9]*");
 
 // aerial-0.1.0: r"thi[sng]+"
-consistent!(aerial_1, r"thi[sng]+");
+consistent!(aerial_1, "thi[sng]+");
 
 // rvue-0.1.0: r"(.+)\s+\((.+?)\)"
 consistent!(rvue_0, r"(.+)\s+\((.+?)\)");
@@ -98,13 +98,13 @@ consistent!(nereon_0, "(.*[^\\\\])\\{\\}(.*)");
 consistent!(next_episode_0, r"((?i)^(.+).s(\d+)e(\d+).*)$");
 
 // migrant_lib-0.19.2: r"[^a-z0-9-]+"
-consistent!(migrant_lib_0, r"[^a-z0-9-]+");
+consistent!(migrant_lib_0, "[^a-z0-9-]+");
 
 // migrant_lib-0.19.2: r"[0-9]{14}_[a-z0-9-]+"
-consistent!(migrant_lib_1, r"[0-9]{14}_[a-z0-9-]+");
+consistent!(migrant_lib_1, "[0-9]{14}_[a-z0-9-]+");
 
 // migrant_lib-0.19.2: r"([0-9]{14}_)?[a-z0-9-]+"
-consistent!(migrant_lib_2, r"([0-9]{14}_)?[a-z0-9-]+");
+consistent!(migrant_lib_2, "([0-9]{14}_)?[a-z0-9-]+");
 
 // minipre-0.2.0: "$_"
 consistent!(minipre_0, "$_");
@@ -167,7 +167,7 @@ consistent!(pop3_0, r"^\.\r\n$");
 consistent!(pop3_1, r"\+OK(.*)");
 
 // pop3-1.0.6: r"-ERR(.*)"
-consistent!(pop3_2, r"-ERR(.*)");
+consistent!(pop3_2, "-ERR(.*)");
 
 // pop3-1.0.6: r"\+OK (\d+) (\d+)\r\n"
 consistent!(pop3_3, r"\+OK (\d+) (\d+)\r\n");
@@ -197,16 +197,16 @@ consistent!(generic_dns_update_0, r"((?:(?:0|1[\d]{0,2}|2(?:[0-4]\d?|5[0-5]?|[6-
 consistent!(generic_dns_update_1, r"((([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4})|(([0-9A-Fa-f]{1,4}:){6}:[0-9A-Fa-f]{1,4})|(([0-9A-Fa-f]{1,4}:){5}:([0-9A-Fa-f]{1,4}:)?[0-9A-Fa-f]{1,4})|(([0-9A-Fa-f]{1,4}:){4}:([0-9A-Fa-f]{1,4}:){0,2}[0-9A-Fa-f]{1,4})|(([0-9A-Fa-f]{1,4}:){3}:([0-9A-Fa-f]{1,4}:){0,3}[0-9A-Fa-f]{1,4})|(([0-9A-Fa-f]{1,4}:){2}:([0-9A-Fa-f]{1,4}:){0,4}[0-9A-Fa-f]{1,4})|(([0-9A-Fa-f]{1,4}:){6}((\d((25[0-5])|(1\d{2})|(2[0-4]\d)|(\d{1,2}))\d)\.){3}(\d((25[0-5])|(1\d{2})|(2[0-4]\d)|(\d{1,2}))\d))|(([0-9A-Fa-f]{1,4}:){0,5}:((\d((25[0-5])|(1\d{2})|(2[0-4]\d)|(\d{1,2}))\d)\.){3}(\d((25[0-5])|(1\d{2})|(2[0-4]\d)|(\d{1,2}))\d))|(::([0-9A-Fa-f]{1,4}:){0,5}((\d((25[0-5])|(1\d{2})|(2[0-4]\d)|(\d{1,2}))\d)\.){3}(\d((25[0-5])|(1\d{2})|(2[0-4]\d)|(\d{1,2}))\d))|([0-9A-Fa-f]{1,4}::([0-9A-Fa-f]{1,4}:){0,5}[0-9A-Fa-f]{1,4})|(::([0-9A-Fa-f]{1,4}:){0,6}[0-9A-Fa-f]{1,4})|(([0-9A-Fa-f]{1,4}:){1,7}:))");
 
 // generic-dns-update-1.1.4: r"<value><string>([0-9.]*)</string></value>"
-consistent!(generic_dns_update_2, r"<value><string>([0-9.]*)</string></value>");
+consistent!(generic_dns_update_2, "<value><string>([0-9.]*)</string></value>");
 
 // generic-dns-update-1.1.4: r"<int>([0-9]+)</int>"
-consistent!(generic_dns_update_3, r"<int>([0-9]+)</int>");
+consistent!(generic_dns_update_3, "<int>([0-9]+)</int>");
 
 // generic-dns-update-1.1.4: r"<int>([0-9]+)</int>"
-consistent!(generic_dns_update_4, r"<int>([0-9]+)</int>");
+consistent!(generic_dns_update_4, "<int>([0-9]+)</int>");
 
 // generic-dns-update-1.1.4: r"<boolean>([0-1]*)</boolean>"
-consistent!(generic_dns_update_5, r"<boolean>([0-1]*)</boolean>");
+consistent!(generic_dns_update_5, "<boolean>([0-1]*)</boolean>");
 
 // generate-nix-pkg-0.3.0: r"(\d*)\.(\d*)\.(\d*)(-(\S*))?"
 consistent!(generate_nix_pkg_0, r"(\d*)\.(\d*)\.(\d*)(-(\S*))?");
@@ -215,16 +215,16 @@ consistent!(generate_nix_pkg_0, r"(\d*)\.(\d*)\.(\d*)(-(\S*))?");
 consistent!(generate_nix_pkg_1, r"^(\S*) (\d*)\.(\d*)\.(\d*)(-(\S*))?");
 
 // genact-0.6.0: r"arch/([a-z0-9_])+/"
-consistent!(genact_0, r"arch/([a-z0-9_])+/");
+consistent!(genact_0, "arch/([a-z0-9_])+/");
 
 // genact-0.6.0: r"arch/([a-z0-9_])+/"
-consistent!(genact_1, r"arch/([a-z0-9_])+/");
+consistent!(genact_1, "arch/([a-z0-9_])+/");
 
 // cron_rs-0.1.6: r"^\s*((\*(/\d+)?)|[0-9-,/]+)(\s+((\*(/\d+)?)|[0-9-,/]+)){4,5}\s*$"
 consistent!(cron_rs_0, r"^\s*((\*(/\d+)?)|[0-9-,/]+)(\s+((\*(/\d+)?)|[0-9-,/]+)){4,5}\s*$");
 
 // systemfd-0.3.0: r"^([a-zA-Z]+)::(.+)$"
-consistent!(systemfd_0, r"^([a-zA-Z]+)::(.+)$");
+consistent!(systemfd_0, "^([a-zA-Z]+)::(.+)$");
 
 // symbolic-debuginfo-5.0.2: "__?hidden#\\d+_"
 consistent!(symbolic_debuginfo_0, "__?hidden#\\d+_");
@@ -308,7 +308,7 @@ consistent!(phonenumber_2, r"[\\/] *x");
 consistent!(phonenumber_3, r"[[\P{N}&&\P{L}]&&[^#]]+$");
 
 // phonenumber-0.2.0+8.9.0: r"(?:.*?[A-Za-z]){3}.*"
-consistent!(phonenumber_4, r"(?:.*?[A-Za-z]){3}.*");
+consistent!(phonenumber_4, "(?:.*?[A-Za-z]){3}.*");
 
 // phonenumber-0.2.0+8.9.0: r"(\D+)"
 consistent!(phonenumber_5, r"(\D+)");
@@ -323,13 +323,13 @@ consistent!(phonenumber_7, r"\(?\$1\)?");
 consistent!(phone_number_0, r"\D");
 
 // phone_number-0.1.0: r"^0+"
-consistent!(phone_number_1, r"^0+");
+consistent!(phone_number_1, "^0+");
 
 // phone_number-0.1.0: r"^89"
-consistent!(phone_number_2, r"^89");
+consistent!(phone_number_2, "^89");
 
 // phone_number-0.1.0: r"^8+"
-consistent!(phone_number_3, r"^8+");
+consistent!(phone_number_3, "^8+");
 
 // phile-0.1.4: r"^ *(\^_*\^) *$"
 consistent!(phile_0, r"^ *(\^_*\^) *$");
@@ -347,13 +347,13 @@ consistent!(uritemplate_0, "%25(?P<hex>[0-9a-fA-F][0-9a-fA-F])");
 consistent!(urdf_rs_0, "^package://(\\w+)/");
 
 // url-match-0.1.7: r"(?P<key>[?&.])"
-consistent!(url_match_0, r"(?P<key>[?&.])");
+consistent!(url_match_0, "(?P<key>[?&.])");
 
 // url-match-0.1.7: r":(?P<key>[a-zA-Z0-9_-]+)"
-consistent!(url_match_1, r":(?P<key>[a-zA-Z0-9_-]+)");
+consistent!(url_match_1, ":(?P<key>[a-zA-Z0-9_-]+)");
 
 // tsm-sys-0.1.0: r"hello world"
-consistent!(tsm_sys_0, r"hello world");
+consistent!(tsm_sys_0, "hello world");
 
 // deb-version-0.1.0: "^(?:(?:(?:\\d+:).+)|(?:[^:]+))$"
 consistent!(deb_version_0, "^(?:(?:(?:\\d+:).+)|(?:[^:]+))$");
@@ -392,31 +392,31 @@ consistent!(hyperscan_2, r"RawDatabase<Block>\{db: \w+\}");
 consistent!(hyperscan_3, r"RawSerializedDatabase\{p: \w+, len: \d+\}");
 
 // ucd-parse-0.1.1: r"[0-9A-F]+"
-consistent!(ucd_parse_0, r"[0-9A-F]+");
+consistent!(ucd_parse_0, "[0-9A-F]+");
 
 // afsort-0.2.0: r".*"
-consistent!(afsort_0, r".*");
+consistent!(afsort_0, ".*");
 
 // afsort-0.2.0: r".*"
-consistent!(afsort_1, r".*");
+consistent!(afsort_1, ".*");
 
 // afsort-0.2.0: r".*"
-consistent!(afsort_2, r".*");
+consistent!(afsort_2, ".*");
 
 // afsort-0.2.0: r".*"
-consistent!(afsort_3, r".*");
+consistent!(afsort_3, ".*");
 
 // afsort-0.2.0: r".*"
-consistent!(afsort_4, r".*");
+consistent!(afsort_4, ".*");
 
 // afsort-0.2.0: r".*"
-consistent!(afsort_5, r".*");
+consistent!(afsort_5, ".*");
 
 // afsort-0.2.0: r"^[a-z]+$"
-consistent!(afsort_6, r"^[a-z]+$");
+consistent!(afsort_6, "^[a-z]+$");
 
 // afsort-0.2.0: r"^[a-z]+$"
-consistent!(afsort_7, r"^[a-z]+$");
+consistent!(afsort_7, "^[a-z]+$");
 
 // tin-summer-1.21.4: r"(\.git|\.pijul|_darcs|\.hg)$"
 consistent!(tin_summer_0, r"(\.git|\.pijul|_darcs|\.hg)$");
@@ -449,7 +449,7 @@ consistent!(tin_drummer_7, r"\.stack-work|dist-newstyle");
 consistent!(timmy_0, r"_NET_WM_PID\(CARDINAL\) = (\d+)");
 
 // timmy-0.3.0: r"today|yesterday|now"
-consistent!(timmy_1, r"today|yesterday|now");
+consistent!(timmy_1, "today|yesterday|now");
 
 // timmy-0.3.0: r"(?P<day>\d{1,2})/(?P<month>\d{1,2})(/(?P<year>\d{4}|\d{2}))?"
 consistent!(timmy_2, r"(?P<day>\d{1,2})/(?P<month>\d{1,2})(/(?P<year>\d{4}|\d{2}))?");
@@ -482,7 +482,7 @@ consistent!(timespan_3, r"(.*)\s+(\w+)$");
 consistent!(timespan_4, r"(.*)\s+-\s+(.*)");
 
 // titlecase-0.10.0: r"[[:lower:]]"
-consistent!(titlecase_0, r"[[:lower:]]");
+consistent!(titlecase_0, "[[:lower:]]");
 
 // tight-0.1.3: r"^\d+ (day|week|month|year)s?$"
 consistent!(tight_0, r"^\d+ (day|week|month|year)s?$");
@@ -491,16 +491,16 @@ consistent!(tight_0, r"^\d+ (day|week|month|year)s?$");
 consistent!(tight_1, r"^\d+ (day|week|month|year)s?$");
 
 // yaml-0.2.1: r"^[-+]?(0|[1-9][0-9_]*)$"
-consistent!(yaml_0, r"^[-+]?(0|[1-9][0-9_]*)$");
+consistent!(yaml_0, "^[-+]?(0|[1-9][0-9_]*)$");
 
 // yaml-0.2.1: r"^([-+]?)0o?([0-7_]+)$"
-consistent!(yaml_1, r"^([-+]?)0o?([0-7_]+)$");
+consistent!(yaml_1, "^([-+]?)0o?([0-7_]+)$");
 
 // yaml-0.2.1: r"^([-+]?)0x([0-9a-fA-F_]+)$"
-consistent!(yaml_2, r"^([-+]?)0x([0-9a-fA-F_]+)$");
+consistent!(yaml_2, "^([-+]?)0x([0-9a-fA-F_]+)$");
 
 // yaml-0.2.1: r"^([-+]?)0b([0-1_]+)$"
-consistent!(yaml_3, r"^([-+]?)0b([0-1_]+)$");
+consistent!(yaml_3, "^([-+]?)0b([0-1_]+)$");
 
 // yaml-0.2.1: r"^([-+]?)(\.[0-9]+|[0-9]+(\.[0-9]*)?([eE][-+]?[0-9]+)?)$"
 consistent!(yaml_4, r"^([-+]?)(\.[0-9]+|[0-9]+(\.[0-9]*)?([eE][-+]?[0-9]+)?)$");
@@ -515,13 +515,13 @@ consistent!(yaml_6, r"^-(\.inf|\.Inf|\.INF)$");
 consistent!(yaml_7, r"^(\.nan|\.NaN|\.NAN)$");
 
 // yaml-0.2.1: r"^(null|Null|NULL|~)$"
-consistent!(yaml_8, r"^(null|Null|NULL|~)$");
+consistent!(yaml_8, "^(null|Null|NULL|~)$");
 
 // yaml-0.2.1: r"^(true|True|TRUE|yes|Yes|YES)$"
-consistent!(yaml_9, r"^(true|True|TRUE|yes|Yes|YES)$");
+consistent!(yaml_9, "^(true|True|TRUE|yes|Yes|YES)$");
 
 // yaml-0.2.1: r"^(false|False|FALSE|no|No|NO)$"
-consistent!(yaml_10, r"^(false|False|FALSE|no|No|NO)$");
+consistent!(yaml_10, "^(false|False|FALSE|no|No|NO)$");
 
 // kefia-0.1.0: r"(?m)^(\S+)/(\S+) (\S+)(?: \((.*)\))?$"
 consistent!(kefia_0, r"(?m)^(\S+)/(\S+) (\S+)(?: \((.*)\))?$");
@@ -551,7 +551,7 @@ consistent!(riquid_1, r"^\d+");
 consistent!(recursive_disassembler_0, r"\A(0x)?([a-fA-F0-9]+)\z");
 
 // remake-0.1.0: r"^[a-zA-Z_][a-zA-Z0-9_]*"
-consistent!(remake_0, r"^[a-zA-Z_][a-zA-Z0-9_]*");
+consistent!(remake_0, "^[a-zA-Z_][a-zA-Z0-9_]*");
 
 // regex-decode-0.1.0: r"'(?P<title>[^']+)'\s+\((?P<year>\d{4})\)"
 consistent!(regex_decode_0, r"'(?P<title>[^']+)'\s+\((?P<year>\d{4})\)");
@@ -602,7 +602,7 @@ consistent!(regex_cache_0, "[0-9]{3}-[0-9]{3}-[0-9]{4}");
 consistent!(regex_cache_1, r"^\d+$");
 
 // regex-cache-0.2.0: r"^[a-z]+$"
-consistent!(regex_cache_2, r"^[a-z]+$");
+consistent!(regex_cache_2, "^[a-z]+$");
 
 // regex-cache-0.2.0: r"^\d+$"
 consistent!(regex_cache_3, r"^\d+$");
@@ -617,7 +617,7 @@ consistent!(regex_dfa_0, r"\d{4}-\d{2}-\d{2}");
 consistent!(reaper_0, r"^[0-9\p{L} _\\.]{3,16}$");
 
 // retdec-0.1.0: r"^attachment; filename=(.+)$"
-consistent!(retdec_0, r"^attachment; filename=(.+)$");
+consistent!(retdec_0, "^attachment; filename=(.+)$");
 
 // renvsubst-0.1.2: r"(\\)(?P<head>\$[0-9A-Za-z_{])"
 consistent!(renvsubst_0, r"(\\)(?P<head>\$[0-9A-Za-z_{])");
@@ -629,7 +629,7 @@ consistent!(renvsubst_1, r"\$([[:word:]]+)");
 consistent!(renvsubst_2, r"\$\{([[:word:]]+)\}");
 
 // rexpect-0.3.0: r"'[a-z]+'"
-consistent!(rexpect_0, r"'[a-z]+'");
+consistent!(rexpect_0, "'[a-z]+'");
 
 // rexpect-0.3.0: r"^\d{4}-\d{2}-\d{2}$"
 consistent!(rexpect_1, r"^\d{4}-\d{2}-\d{2}$");
@@ -698,7 +698,7 @@ consistent!(linky_1, r"^(.*):(\d+): [^ ]* ([^ ]*)$");
 consistent!(limonite_0, r"^(\d{4}-\d{2}-\d{2})-(\d{3})-(.+)$");
 
 // process-queue-0.1.1: r"^[a-zA-Z]+$"
-consistent!(process_queue_0, r"^[a-zA-Z]+$");
+consistent!(process_queue_0, "^[a-zA-Z]+$");
 
 // pronghorn-0.1.2: r"^\{([a-zA-Z_]+)\}$"
 consistent!(pronghorn_0, r"^\{([a-zA-Z_]+)\}$");
@@ -728,28 +728,28 @@ consistent!(protocol_ftp_client_6, "^([d-])(?:[rwx-]{3}){3} +\\d+ +\\w+ +\\w+ +(
 consistent!(article_date_extractor_0, r"([\./\-_]{0,1}(19|20)\d{2})[\./\-_]{0,1}(([0-3]{0,1}[0-9][\./\-_])|(\w{3,5}[\./\-_]))([0-3]{0,1}[0-9][\./\-]{0,1})");
 
 // article-date-extractor-0.1.1: r"(?i)publishdate|pubdate|timestamp|article_date|articledate|date"
-consistent!(article_date_extractor_1, r"(?i)publishdate|pubdate|timestamp|article_date|articledate|date");
+consistent!(article_date_extractor_1, "(?i)publishdate|pubdate|timestamp|article_date|articledate|date");
 
 // arthas_plugin-0.1.1: r"type\((.*)\)"
 consistent!(arthas_plugin_0, r"type\((.*)\)");
 
 // arthas_plugin-0.1.1: r"Vec<(.*)>"
-consistent!(arthas_plugin_1, r"Vec<(.*)>");
+consistent!(arthas_plugin_1, "Vec<(.*)>");
 
 // arthas_plugin-0.1.1: r"Option<(.*)>"
-consistent!(arthas_plugin_2, r"Option<(.*)>");
+consistent!(arthas_plugin_2, "Option<(.*)>");
 
 // arthas_plugin-0.1.1: r"HashMap<[a-z0-9A-Z]+, *(.*)>"
-consistent!(arthas_plugin_3, r"HashMap<[a-z0-9A-Z]+, *(.*)>");
+consistent!(arthas_plugin_3, "HashMap<[a-z0-9A-Z]+, *(.*)>");
 
 // arthas_derive-0.1.0: "Vec *< *(.*) *>"
 consistent!(arthas_derive_0, "Vec *< *(.*) *>");
 
 // arthas_derive-0.1.0: r"Option *< *(.*) *>"
-consistent!(arthas_derive_1, r"Option *< *(.*) *>");
+consistent!(arthas_derive_1, "Option *< *(.*) *>");
 
 // arthas_derive-0.1.0: r"HashMap *< *[a-z0-9A-Z]+ *, *(.*) *>"
-consistent!(arthas_derive_2, r"HashMap *< *[a-z0-9A-Z]+ *, *(.*) *>");
+consistent!(arthas_derive_2, "HashMap *< *[a-z0-9A-Z]+ *, *(.*) *>");
 
 // arpabet-0.2.0: r"^([\w\-\(\)\.']+)\s+([^\s].*)\s*$"
 consistent!(arpabet_0, r"^([\w\-\(\)\.']+)\s+([^\s].*)\s*$");
@@ -794,7 +794,7 @@ consistent!(glr_parser_1, r"^\w+$");
 consistent!(glr_parser_2, "'[^']+'");
 
 // hoodlum-0.5.0: r"(?m)//.*"
-consistent!(hoodlum_0, r"(?m)//.*");
+consistent!(hoodlum_0, "(?m)//.*");
 
 // form-checker-0.2.2: r"^1\d{10}$"
 consistent!(form_checker_0, r"^1\d{10}$");
@@ -806,10 +806,10 @@ consistent!(form_checker_1, r"(?i)^[\w.%+-]+@(?:[A-Z0-9-]+\.)+[A-Z]{2,4}$");
 consistent!(wikibase_0, r"(?P<user_agent>[a-zA-Z0-9-_]+/[0-9\.]+)");
 
 // wifiscanner-0.3.6: r"Cell [0-9]{2,} - Address:"
-consistent!(wifiscanner_0, r"Cell [0-9]{2,} - Address:");
+consistent!(wifiscanner_0, "Cell [0-9]{2,} - Address:");
 
 // wifiscanner-0.3.6: r"([0-9a-zA-Z]{1}[0-9a-zA-Z]{1}[:]{1}){5}[0-9a-zA-Z]{1}[0-9a-zA-Z]{1}"
-consistent!(wifiscanner_1, r"([0-9a-zA-Z]{1}[0-9a-zA-Z]{1}[:]{1}){5}[0-9a-zA-Z]{1}[0-9a-zA-Z]{1}");
+consistent!(wifiscanner_1, "([0-9a-zA-Z]{1}[0-9a-zA-Z]{1}[:]{1}){5}[0-9a-zA-Z]{1}[0-9a-zA-Z]{1}");
 
 // wifiscanner-0.3.6: r"Signal level=(\d+)/100"
 consistent!(wifiscanner_2, r"Signal level=(\d+)/100");
@@ -902,7 +902,7 @@ consistent!(block_utils_1, r"ram\d+");
 consistent!(block_utils_2, r"md\d+");
 
 // kvvliveapi-0.1.0: r"^([1-9]) min$"
-consistent!(kvvliveapi_0, r"^([1-9]) min$");
+consistent!(kvvliveapi_0, "^([1-9]) min$");
 
 // rfc822_sanitizer-0.3.3: r"(\d{2}):(\d{2}):(\d{2})"
 consistent!(rfc822_sanitizer_0, r"(\d{2}):(\d{2}):(\d{2})");
@@ -911,13 +911,13 @@ consistent!(rfc822_sanitizer_0, r"(\d{2}):(\d{2}):(\d{2})");
 consistent!(rfc822_sanitizer_1, r"(\d{1,2}):(\d{1,2}):(\d{1,2})");
 
 // faker-0.0.4: r"[2-9]"
-consistent!(faker_0, r"[2-9]");
+consistent!(faker_0, "[2-9]");
 
 // faker-0.0.4: r"[1-9]"
-consistent!(faker_1, r"[1-9]");
+consistent!(faker_1, "[1-9]");
 
 // faker-0.0.4: r"[0-9]"
-consistent!(faker_2, r"[0-9]");
+consistent!(faker_2, "[0-9]");
 
 // faker-0.0.4: r"\d{10}"
 consistent!(faker_3, r"\d{10}");
@@ -944,10 +944,10 @@ consistent!(faker_9, r"^[A-Z][A-Za-z]*\.?$");
 consistent!(faker_10, r"http://lorempixel.com/100/100/\w+");
 
 // faker-0.0.4: r"http://lorempixel.com/100/100/cats"
-consistent!(faker_11, r"http://lorempixel.com/100/100/cats");
+consistent!(faker_11, "http://lorempixel.com/100/100/cats");
 
 // fancy-regex-0.1.0: "(?i:ß)"
-consistent!(fancy_regex_0, "(?i:ß)");
+consistent!(fancy_regex_0, "(?i:\u{df})");
 
 // fancy-regex-0.1.0: "(?i:\\x{0587})"
 consistent!(fancy_regex_1, "(?i:\\x{0587})");
@@ -956,16 +956,16 @@ consistent!(fancy_regex_1, "(?i:\\x{0587})");
 consistent!(fancy_regex_2, "^\\\\([!-/:-@\\[-`\\{-~aftnrv]|[0-7]{1,3}|x[0-9a-fA-F]{2}|x\\{[0-9a-fA-F]{1,6}\\})");
 
 // fancy-prompt-0.1.5: r"/([^/])[^/]+/"
-consistent!(fancy_prompt_0, r"/([^/])[^/]+/");
+consistent!(fancy_prompt_0, "/([^/])[^/]+/");
 
 // fancy-prompt-0.1.5: r"^([^:]+):.*?(?::([^:]+))?$"
-consistent!(fancy_prompt_1, r"^([^:]+):.*?(?::([^:]+))?$");
+consistent!(fancy_prompt_1, "^([^:]+):.*?(?::([^:]+))?$");
 
 // fanta-0.2.0: r"^(/?__\w+__)/(.*)"
 consistent!(fanta_0, r"^(/?__\w+__)/(.*)");
 
 // fanta-cli-0.1.1: r"(.)([A-Z])"
-consistent!(fanta_cli_0, r"(.)([A-Z])");
+consistent!(fanta_cli_0, "(.)([A-Z])");
 
 // fanta-cli-0.1.1: "\\{:[^\\s]+\\}"
 consistent!(fanta_cli_1, "\\{:[^\\s]+\\}");
@@ -992,10 +992,10 @@ consistent!(amigo_4, r"^\s+");
 consistent!(ethcore_logger_0, "\x1b\\[[^m]+m");
 
 // dash2html-1.0.1: r"__.*?__"
-consistent!(dash2html_0, r"__.*?__");
+consistent!(dash2html_0, "__.*?__");
 
 // dash2html-1.0.1: r"(?i)@(?:time|clipboard|cursor|date)"
-consistent!(dash2html_1, r"(?i)@(?:time|clipboard|cursor|date)");
+consistent!(dash2html_1, "(?i)@(?:time|clipboard|cursor|date)");
 
 // os_type-2.0.0: r"^Microsoft Windows \[Version\s(\d+\.\d+\.\d+)\]$"
 consistent!(os_type_0, r"^Microsoft Windows \[Version\s(\d+\.\d+\.\d+)\]$");
@@ -1028,13 +1028,13 @@ consistent!(bindgen_0, r"typename type\-parameter\-\d+\-\d+::.+");
 consistent!(imap_0, "^+(.*)\r\n");
 
 // image-base64-0.1.0: r"^ffd8ffe0"
-consistent!(image_base64_0, r"^ffd8ffe0");
+consistent!(image_base64_0, "^ffd8ffe0");
 
 // image-base64-0.1.0: r"^89504e47"
-consistent!(image_base64_1, r"^89504e47");
+consistent!(image_base64_1, "^89504e47");
 
 // image-base64-0.1.0: r"^47494638"
-consistent!(image_base64_2, r"^47494638");
+consistent!(image_base64_2, "^47494638");
 
 // json-pointer-0.3.2: "^(/([^/~]|~[01])*)*$"
 consistent!(json_pointer_0, "^(/([^/~]|~[01])*)*$");
@@ -1049,19 +1049,19 @@ consistent!(mysql_common_0, r"^5.5.5-(\d{1,2})\.(\d{1,2})\.(\d{1,3})-MariaDB");
 consistent!(mysql_common_1, r"^(\d{1,2})\.(\d{1,2})\.(\d{1,3})(.*)");
 
 // government_id-0.1.0: r"^[0-9]{4}[0-9A-Z]{2}[0-9]{3}$"
-consistent!(government_id_0, r"^[0-9]{4}[0-9A-Z]{2}[0-9]{3}$");
+consistent!(government_id_0, "^[0-9]{4}[0-9A-Z]{2}[0-9]{3}$");
 
 // ohmers-0.1.1: r"UniqueIndexViolation: (\w+)"
 consistent!(ohmers_0, r"UniqueIndexViolation: (\w+)");
 
 // eliza-1.0.0: r"(.*) you are (.*)"
-consistent!(eliza_0, r"(.*) you are (.*)");
+consistent!(eliza_0, "(.*) you are (.*)");
 
 // eliza-1.0.0: r"(.*) you are (.*)"
-consistent!(eliza_1, r"(.*) you are (.*)");
+consistent!(eliza_1, "(.*) you are (.*)");
 
 // eliza-1.0.0: r"(.*) you are (.*)"
-consistent!(eliza_2, r"(.*) you are (.*)");
+consistent!(eliza_2, "(.*) you are (.*)");
 
 // chema-0.0.5: "^\\s*\\*"
 consistent!(chema_0, "^\\s*\\*");
@@ -1118,7 +1118,7 @@ consistent!(notetxt_0, "^([A-Za-z0-9 -_:]+)\n-+\n");
 consistent!(nail_0, r"^-?[0-9]+(\.[0-9]+)?([eE]-?[0-9]+)?$");
 
 // nail-0.1.0-pre.0: r"^-?[0-9]+$"
-consistent!(nail_1, r"^-?[0-9]+$");
+consistent!(nail_1, "^-?[0-9]+$");
 
 // askalono-0.2.0: r"[^\w\s\pP]+"
 consistent!(askalono_0, r"[^\w\s\pP]+");
@@ -1139,7 +1139,7 @@ consistent!(askalono_4, r"\p{Pe}+");
 consistent!(askalono_5, r"\p{Pc}+");
 
 // askalono-0.2.0: r"[©Ⓒⓒ]"
-consistent!(askalono_6, r"[©Ⓒⓒ]");
+consistent!(askalono_6, r"[\u{a9}\u{24b8}\u{24d2}]");
 
 // askalono-0.2.0: r"[\r\n\v\f]"
 consistent!(askalono_7, r"[\r\n\v\f]");
@@ -1154,16 +1154,16 @@ consistent!(askalono_9, r"[^\w\s]+");
 consistent!(askalono_10, r"\s+");
 
 // assembunny_plus-0.0.3: r"[^0-9a-zA-Z_]"
-consistent!(assembunny_plus_0, r"[^0-9a-zA-Z_]");
+consistent!(assembunny_plus_0, "[^0-9a-zA-Z_]");
 
 // assembunny_plus-0.0.3: r"[0-9]"
-consistent!(assembunny_plus_1, r"[0-9]");
+consistent!(assembunny_plus_1, "[0-9]");
 
 // salt-compressor-0.4.0: r"(?m)^Minion (\S*) did not respond\. No job will be sent\.$"
 consistent!(salt_compressor_0, r"(?m)^Minion (\S*) did not respond\. No job will be sent\.$");
 
 // sabisabi-0.4.1: r"</?[^>]+?>"
-consistent!(sabisabi_0, r"</?[^>]+?>");
+consistent!(sabisabi_0, "</?[^>]+?>");
 
 // sabisabi-0.4.1: r"\([^)]*\)"
 consistent!(sabisabi_1, r"\([^)]*\)");
@@ -1187,82 +1187,82 @@ consistent!(shellwords_1, r"\n");
 consistent!(shush_0, "(?P<num>[0-9]+)(?P<units>[dhms])");
 
 // woothee-0.8.0: r"(?:Chrome|CrMo|CriOS)/([.0-9]+)"
-consistent!(woothee_0, r"(?:Chrome|CrMo|CriOS)/([.0-9]+)");
+consistent!(woothee_0, "(?:Chrome|CrMo|CriOS)/([.0-9]+)");
 
 // woothee-0.8.0: r"Vivaldi/([.0-9]+)"
-consistent!(woothee_1, r"Vivaldi/([.0-9]+)");
+consistent!(woothee_1, "Vivaldi/([.0-9]+)");
 
 // woothee-0.8.0: r"Firefox/([.0-9]+)"
-consistent!(woothee_2, r"Firefox/([.0-9]+)");
+consistent!(woothee_2, "Firefox/([.0-9]+)");
 
 // woothee-0.8.0: r"^Mozilla/[.0-9]+ \((?:Mobile|Tablet);(?:.*;)? rv:([.0-9]+)\) Gecko/[.0-9]+ Firefox/[.0-9]+$"
 consistent!(woothee_3, r"^Mozilla/[.0-9]+ \((?:Mobile|Tablet);(?:.*;)? rv:([.0-9]+)\) Gecko/[.0-9]+ Firefox/[.0-9]+$");
 
 // woothee-0.8.0: r"FxiOS/([.0-9]+)"
-consistent!(woothee_4, r"FxiOS/([.0-9]+)");
+consistent!(woothee_4, "FxiOS/([.0-9]+)");
 
 // woothee-0.8.0: r"\(([^;)]+);FOMA;"
 consistent!(woothee_5, r"\(([^;)]+);FOMA;");
 
 // woothee-0.8.0: r"jig browser[^;]+; ([^);]+)"
-consistent!(woothee_6, r"jig browser[^;]+; ([^);]+)");
+consistent!(woothee_6, "jig browser[^;]+; ([^);]+)");
 
 // woothee-0.8.0: r"(?i)rss(?:reader|bar|[-_ /;()]|[ +]*/)"
-consistent!(woothee_7, r"(?i)rss(?:reader|bar|[-_ /;()]|[ +]*/)");
+consistent!(woothee_7, "(?i)rss(?:reader|bar|[-_ /;()]|[ +]*/)");
 
 // woothee-0.8.0: r"(?i)(?:bot|crawler|spider)(?:[-_ ./;@()]|$)"
-consistent!(woothee_8, r"(?i)(?:bot|crawler|spider)(?:[-_ ./;@()]|$)");
+consistent!(woothee_8, "(?i)(?:bot|crawler|spider)(?:[-_ ./;@()]|$)");
 
 // woothee-0.8.0: r"(?i)(?:feed|web) ?parser"
-consistent!(woothee_9, r"(?i)(?:feed|web) ?parser");
+consistent!(woothee_9, "(?i)(?:feed|web) ?parser");
 
 // woothee-0.8.0: r"(?i)watch ?dog"
-consistent!(woothee_10, r"(?i)watch ?dog");
+consistent!(woothee_10, "(?i)watch ?dog");
 
 // woothee-0.8.0: r"Edge/([.0-9]+)"
-consistent!(woothee_11, r"Edge/([.0-9]+)");
+consistent!(woothee_11, "Edge/([.0-9]+)");
 
 // woothee-0.8.0: r"MSIE ([.0-9]+);"
-consistent!(woothee_12, r"MSIE ([.0-9]+);");
+consistent!(woothee_12, "MSIE ([.0-9]+);");
 
 // woothee-0.8.0: r"Version/([.0-9]+)"
-consistent!(woothee_13, r"Version/([.0-9]+)");
+consistent!(woothee_13, "Version/([.0-9]+)");
 
 // woothee-0.8.0: r"Opera[/ ]([.0-9]+)"
-consistent!(woothee_14, r"Opera[/ ]([.0-9]+)");
+consistent!(woothee_14, "Opera[/ ]([.0-9]+)");
 
 // woothee-0.8.0: r"OPR/([.0-9]+)"
-consistent!(woothee_15, r"OPR/([.0-9]+)");
+consistent!(woothee_15, "OPR/([.0-9]+)");
 
 // woothee-0.8.0: r"Version/([.0-9]+)"
-consistent!(woothee_16, r"Version/([.0-9]+)");
+consistent!(woothee_16, "Version/([.0-9]+)");
 
 // woothee-0.8.0: r"(?:SoftBank|Vodafone|J-PHONE)/[.0-9]+/([^ /;()]+)"
-consistent!(woothee_17, r"(?:SoftBank|Vodafone|J-PHONE)/[.0-9]+/([^ /;()]+)");
+consistent!(woothee_17, "(?:SoftBank|Vodafone|J-PHONE)/[.0-9]+/([^ /;()]+)");
 
 // woothee-0.8.0: r"Trident/([.0-9]+);"
-consistent!(woothee_18, r"Trident/([.0-9]+);");
+consistent!(woothee_18, "Trident/([.0-9]+);");
 
 // woothee-0.8.0: r" rv:([.0-9]+)"
-consistent!(woothee_19, r" rv:([.0-9]+)");
+consistent!(woothee_19, " rv:([.0-9]+)");
 
 // woothee-0.8.0: r"IEMobile/([.0-9]+);"
-consistent!(woothee_20, r"IEMobile/([.0-9]+);");
+consistent!(woothee_20, "IEMobile/([.0-9]+);");
 
 // woothee-0.8.0: r"(?:WILLCOM|DDIPOCKET);[^/]+/([^ /;()]+)"
-consistent!(woothee_21, r"(?:WILLCOM|DDIPOCKET);[^/]+/([^ /;()]+)");
+consistent!(woothee_21, "(?:WILLCOM|DDIPOCKET);[^/]+/([^ /;()]+)");
 
 // woothee-0.8.0: r"Windows ([ .a-zA-Z0-9]+)[;\\)]"
 consistent!(woothee_22, r"Windows ([ .a-zA-Z0-9]+)[;\\)]");
 
 // woothee-0.8.0: r"^Phone(?: OS)? ([.0-9]+)"
-consistent!(woothee_23, r"^Phone(?: OS)? ([.0-9]+)");
+consistent!(woothee_23, "^Phone(?: OS)? ([.0-9]+)");
 
 // woothee-0.8.0: r"iP(hone;|ad;|od) .*like Mac OS X"
-consistent!(woothee_24, r"iP(hone;|ad;|od) .*like Mac OS X");
+consistent!(woothee_24, "iP(hone;|ad;|od) .*like Mac OS X");
 
 // woothee-0.8.0: r"Version/([.0-9]+)"
-consistent!(woothee_25, r"Version/([.0-9]+)");
+consistent!(woothee_25, "Version/([.0-9]+)");
 
 // woothee-0.8.0: r"rv:(\d+\.\d+\.\d+)"
 consistent!(woothee_26, r"rv:(\d+\.\d+\.\d+)");
@@ -1289,7 +1289,7 @@ consistent!(woothee_32, r"PlayStation Vita ([.0-9]+)\)");
 consistent!(woothee_33, r"PlayStation 4 ([.0-9]+)\)");
 
 // woothee-0.8.0: r"BB10(?:.+)Version/([.0-9]+) "
-consistent!(woothee_34, r"BB10(?:.+)Version/([.0-9]+) ");
+consistent!(woothee_34, "BB10(?:.+)Version/([.0-9]+) ");
 
 // woothee-0.8.0: r"BlackBerry(?:\d+)/([.0-9]+) "
 consistent!(woothee_35, r"BlackBerry(?:\d+)/([.0-9]+) ");
@@ -1301,22 +1301,22 @@ consistent!(woothee_36, r"; CPU(?: iPhone)? OS (\d+_\d+(?:_\d+)?) like Mac OS X"
 consistent!(woothee_37, r"Mac OS X (10[._]\d+(?:[._]\d+)?)(?:\)|;)");
 
 // woothee-0.8.0: r"^(?:Apache-HttpClient/|Jakarta Commons-HttpClient/|Java/)"
-consistent!(woothee_38, r"^(?:Apache-HttpClient/|Jakarta Commons-HttpClient/|Java/)");
+consistent!(woothee_38, "^(?:Apache-HttpClient/|Jakarta Commons-HttpClient/|Java/)");
 
 // woothee-0.8.0: r"[- ]HttpClient(/|$)"
-consistent!(woothee_39, r"[- ]HttpClient(/|$)");
+consistent!(woothee_39, "[- ]HttpClient(/|$)");
 
 // woothee-0.8.0: r"^(?:PHP|WordPress|CakePHP|PukiWiki|PECL::HTTP)(?:/| |$)"
-consistent!(woothee_40, r"^(?:PHP|WordPress|CakePHP|PukiWiki|PECL::HTTP)(?:/| |$)");
+consistent!(woothee_40, "^(?:PHP|WordPress|CakePHP|PukiWiki|PECL::HTTP)(?:/| |$)");
 
 // woothee-0.8.0: r"(?:PEAR HTTP_Request|HTTP_Request)(?: class|2)"
-consistent!(woothee_41, r"(?:PEAR HTTP_Request|HTTP_Request)(?: class|2)");
+consistent!(woothee_41, "(?:PEAR HTTP_Request|HTTP_Request)(?: class|2)");
 
 // woothee-0.8.0: r"(?:Rome Client |UnwindFetchor/|ia_archiver |Summify |PostRank/)"
-consistent!(woothee_42, r"(?:Rome Client |UnwindFetchor/|ia_archiver |Summify |PostRank/)");
+consistent!(woothee_42, "(?:Rome Client |UnwindFetchor/|ia_archiver |Summify |PostRank/)");
 
 // woothee-0.8.0: r"Sleipnir/([.0-9]+)"
-consistent!(woothee_43, r"Sleipnir/([.0-9]+)");
+consistent!(woothee_43, "Sleipnir/([.0-9]+)");
 
 // word_replace-0.0.3: r"@@[a-z|A-Z|\d]+@@"
 consistent!(word_replace_0, r"@@[a-z|A-Z|\d]+@@");
@@ -1328,10 +1328,10 @@ consistent!(wordcount_0, r"\w+");
 consistent!(just_0, "^([^=]+)=(.*)$");
 
 // emote-0.1.0: r":[a-zA-Z_]+?:"
-consistent!(emote_0, r":[a-zA-Z_]+?:");
+consistent!(emote_0, ":[a-zA-Z_]+?:");
 
 // emojicons-1.0.1: r":([a-zA-Z0-9_+-]+):"
-consistent!(emojicons_0, r":([a-zA-Z0-9_+-]+):");
+consistent!(emojicons_0, ":([a-zA-Z0-9_+-]+):");
 
 // git2_codecommit-0.1.2: r"git-codecommit\.([a-z0-9-]+)\.amazonaws\.com"
 consistent!(git2_codecommit_0, r"git-codecommit\.([a-z0-9-]+)\.amazonaws\.com");
@@ -1340,7 +1340,7 @@ consistent!(git2_codecommit_0, r"git-codecommit\.([a-z0-9-]+)\.amazonaws\.com");
 consistent!(git_workarea_0, r"^submodule\.(?P<name>.*)\.(?P<key>[^=]*)=(?P<value>.*)$");
 
 // git-shell-enforce-directory-1.0.0: r"^(?P<command>git-(?:receive|upload)-pack) '(?P<path>.+)'$"
-consistent!(git_shell_enforce_directory_0, r"^(?P<command>git-(?:receive|upload)-pack) '(?P<path>.+)'$");
+consistent!(git_shell_enforce_directory_0, "^(?P<command>git-(?:receive|upload)-pack) '(?P<path>.+)'$");
 
 // git-journal-1.6.3: r"[ \n]:(.*?):"
 consistent!(git_journal_0, r"[ \n]:(.*?):");
@@ -1355,7 +1355,7 @@ consistent!(gitlab_api_0, r"private_token=\w{20}");
 consistent!(td_client_0, "^(http://|https://)");
 
 // karaconv-0.3.0: r"--(?P<type>[a-zA-Z]+)-- (?P<contents>.*)"
-consistent!(karaconv_0, r"--(?P<type>[a-zA-Z]+)-- (?P<contents>.*)");
+consistent!(karaconv_0, "--(?P<type>[a-zA-Z]+)-- (?P<contents>.*)");
 
 // katana-1.0.2: r"(?P<comp>et al\.)(?:\.)"
 consistent!(katana_0, r"(?P<comp>et al\.)(?:\.)");
@@ -1379,7 +1379,7 @@ consistent!(katana_5, r"(?P<init>[A-Z])(?P<point>\.)");
 consistent!(katana_6, r"(?P<title>[A-Z][a-z]{1,3})(\.)");
 
 // katana-1.0.2: r"&==&(?P<p>[.!?])"
-consistent!(katana_7, r"&==&(?P<p>[.!?])");
+consistent!(katana_7, "&==&(?P<p>[.!?])");
 
 // katana-1.0.2: r"&\^&(?P<p>[.!?])"
 consistent!(katana_8, r"&\^&(?P<p>[.!?])");
@@ -1388,10 +1388,10 @@ consistent!(katana_8, r"&\^&(?P<p>[.!?])");
 consistent!(katana_9, r"&\*\*&(?P<p>[.!?])");
 
 // katana-1.0.2: r"&=&(?P<p>[.!?])"
-consistent!(katana_10, r"&=&(?P<p>[.!?])");
+consistent!(katana_10, "&=&(?P<p>[.!?])");
 
 // katana-1.0.2: r"&##&(?P<p>[.!?])"
-consistent!(katana_11, r"&##&(?P<p>[.!?])");
+consistent!(katana_11, "&##&(?P<p>[.!?])");
 
 // katana-1.0.2: r"&\$&(?P<p>[.!?])"
 consistent!(katana_12, r"&\$&(?P<p>[.!?])");
@@ -1412,19 +1412,19 @@ consistent!(ftp_1, r"\b(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\b");
 consistent!(ftp_2, r"\s+(\d+)\s*$");
 
 // vat-0.1.0: r"<countryCode>(.*?)</countryCode>"
-consistent!(vat_0, r"<countryCode>(.*?)</countryCode>");
+consistent!(vat_0, "<countryCode>(.*?)</countryCode>");
 
 // vat-0.1.0: r"<vatNumber>(.*?)</vatNumber>"
-consistent!(vat_1, r"<vatNumber>(.*?)</vatNumber>");
+consistent!(vat_1, "<vatNumber>(.*?)</vatNumber>");
 
 // vat-0.1.0: r"<name>(.*?)</name>"
-consistent!(vat_2, r"<name>(.*?)</name>");
+consistent!(vat_2, "<name>(.*?)</name>");
 
 // vat-0.1.0: r"<address>(?s)(.*?)(?-s)</address>"
-consistent!(vat_3, r"<address>(?s)(.*?)(?-s)</address>");
+consistent!(vat_3, "<address>(?s)(.*?)(?-s)</address>");
 
 // vat-0.1.0: r"<valid>(true|false)</valid>"
-consistent!(vat_4, r"<valid>(true|false)</valid>");
+consistent!(vat_4, "<valid>(true|false)</valid>");
 
 // vat-0.1.0: r"^ATU\d{8}$"
 consistent!(vat_5, r"^ATU\d{8}$");
@@ -1541,7 +1541,7 @@ consistent!(avm_0, r"\d+\.\d+\.\d+");
 consistent!(avm_1, r"\d+\.\d+\.\d+");
 
 // orm-0.2.0: r"^Vec<(.+)>$"
-consistent!(orm_0, r"^Vec<(.+)>$");
+consistent!(orm_0, "^Vec<(.+)>$");
 
 // sgf-0.1.5: r"\\(\r\n|\n\r|\n|\r)"
 consistent!(sgf_0, r"\\(\r\n|\n\r|\n|\r)");
@@ -1550,7 +1550,7 @@ consistent!(sgf_0, r"\\(\r\n|\n\r|\n|\r)");
 consistent!(sgf_1, r"\\(.)");
 
 // sgf-0.1.5: r"\r\n|\n\r|\n|\r"
-consistent!(sgf_2, r"\r\n|\n\r|\n|\r");
+consistent!(sgf_2, r"\r\n|\n\r|\n|\");
 
 // sgf-0.1.5: r"([\]\\:])"
 consistent!(sgf_3, r"([\]\\:])");
@@ -1571,7 +1571,7 @@ consistent!(dvb_1, "^F");
 consistent!(dvb_2, "^S");
 
 // ger-0.2.0: r"Change-Id: (I[a-f0-9]{40})$"
-consistent!(ger_0, r"Change-Id: (I[a-f0-9]{40})$");
+consistent!(ger_0, "Change-Id: (I[a-f0-9]{40})$");
 
 // ger-0.2.0: r"(refs|ref|fix|fixes|close|closes)\s+([A-Z]{2,5}-[0-9]{1,5})$"
 consistent!(ger_1, r"(refs|ref|fix|fixes|close|closes)\s+([A-Z]{2,5}-[0-9]{1,5})$");
@@ -1580,10 +1580,10 @@ consistent!(ger_1, r"(refs|ref|fix|fixes|close|closes)\s+([A-Z]{2,5}-[0-9]{1,5})
 consistent!(n5_0, r"(\d+)(\.(\d+))?(\.(\d+))?(.*)");
 
 // po-0.1.4: r"[A-Za-z0-9]"
-consistent!(po_0, r"[A-Za-z0-9]");
+consistent!(po_0, "[A-Za-z0-9]");
 
 // carnix-0.8.5: "path is (‘|')?([^’'\n]*)(’|')?"
-consistent!(carnix_0, "path is (‘|')?([^’'\n]*)(’|')?");
+consistent!(carnix_0, "path is (\u{2018}|')?([^\u{2019}'\n]*)(\u{2019}|')?");
 
 // carnix-0.8.5: r"^(\S*) (\d*)\.(\d*)\.(\d*)(-(\S*))?(.*)?"
 consistent!(carnix_1, r"^(\S*) (\d*)\.(\d*)\.(\d*)(-(\S*))?(.*)?");
@@ -1598,7 +1598,7 @@ consistent!(carnix_3, r"(\S*)-(\d*)\.(\d*)\.(\d*)(-(\S*))?");
 consistent!(caseless_0, r"^# CaseFolding-(\d+)\.(\d+)\.(\d+).txt$");
 
 // caseless-0.2.1: r"^([0-9A-F]+); [CF]; ([0-9A-F ]+);"
-consistent!(caseless_1, r"^([0-9A-F]+); [CF]; ([0-9A-F ]+);");
+consistent!(caseless_1, "^([0-9A-F]+); [CF]; ([0-9A-F ]+);");
 
 // cabot-0.2.0: "\r?\n\r?\n"
 consistent!(cabot_0, "\r?\n\r?\n");
@@ -1607,34 +1607,34 @@ consistent!(cabot_0, "\r?\n\r?\n");
 consistent!(cabot_1, "\r?\n");
 
 // card-validate-2.2.1: r"^600"
-consistent!(card_validate_0, r"^600");
+consistent!(card_validate_0, "^600");
 
 // card-validate-2.2.1: r"^5019"
-consistent!(card_validate_1, r"^5019");
+consistent!(card_validate_1, "^5019");
 
 // card-validate-2.2.1: r"^4"
-consistent!(card_validate_2, r"^4");
+consistent!(card_validate_2, "^4");
 
 // card-validate-2.2.1: r"^(5[1-5]|2[2-7])"
-consistent!(card_validate_3, r"^(5[1-5]|2[2-7])");
+consistent!(card_validate_3, "^(5[1-5]|2[2-7])");
 
 // card-validate-2.2.1: r"^3[47]"
-consistent!(card_validate_4, r"^3[47]");
+consistent!(card_validate_4, "^3[47]");
 
 // card-validate-2.2.1: r"^3[0689]"
-consistent!(card_validate_5, r"^3[0689]");
+consistent!(card_validate_5, "^3[0689]");
 
 // card-validate-2.2.1: r"^6([045]|22)"
-consistent!(card_validate_6, r"^6([045]|22)");
+consistent!(card_validate_6, "^6([045]|22)");
 
 // card-validate-2.2.1: r"^(62|88)"
-consistent!(card_validate_7, r"^(62|88)");
+consistent!(card_validate_7, "^(62|88)");
 
 // card-validate-2.2.1: r"^35"
-consistent!(card_validate_8, r"^35");
+consistent!(card_validate_8, "^35");
 
 // card-validate-2.2.1: r"^[0-9]+$"
-consistent!(card_validate_9, r"^[0-9]+$");
+consistent!(card_validate_9, "^[0-9]+$");
 
 // cargo-testify-0.3.0: r"\d{1,} passed.*filtered out"
 consistent!(cargo_testify_0, r"\d{1,} passed.*filtered out");
@@ -1643,16 +1643,16 @@ consistent!(cargo_testify_0, r"\d{1,} passed.*filtered out");
 consistent!(cargo_testify_1, r"error(:|\[).*");
 
 // cargo-wix-0.0.5: r"<(.*?)>"
-consistent!(cargo_wix_0, r"<(.*?)>");
+consistent!(cargo_wix_0, "<(.*?)>");
 
 // cargo-wix-0.0.5: r"<(.*?)>"
-consistent!(cargo_wix_1, r"<(.*?)>");
+consistent!(cargo_wix_1, "<(.*?)>");
 
 // cargo-wix-0.0.5: r"<(.*?)>"
-consistent!(cargo_wix_2, r"<(.*?)>");
+consistent!(cargo_wix_2, "<(.*?)>");
 
 // cargo-wix-0.0.5: r"<(.*?)>"
-consistent!(cargo_wix_3, r"<(.*?)>");
+consistent!(cargo_wix_3, "<(.*?)>");
 
 // cargo-incremental-0.1.23: r"(?m)^incremental: re-using (\d+) out of (\d+) modules$"
 consistent!(cargo_incremental_0, r"(?m)^incremental: re-using (\d+) out of (\d+) modules$");
@@ -1679,7 +1679,7 @@ consistent!(cargo_tarpaulin_1, r"/\*");
 consistent!(cargo_tarpaulin_2, r"\*/");
 
 // cargo-culture-kit-0.1.0: r"^fo"
-consistent!(cargo_culture_kit_0, r"^fo");
+consistent!(cargo_culture_kit_0, "^fo");
 
 // cargo-screeps-0.1.3: "\\s+"
 consistent!(cargo_screeps_0, "\\s+");
@@ -1694,16 +1694,16 @@ consistent!(cargo_release_0, "^\\[.+\\]");
 consistent!(cargo_release_1, "^\\[\\[.+\\]\\]");
 
 // cargo-edit-0.3.0-beta.1: r"^https://github.com/([-_0-9a-zA-Z]+)/([-_0-9a-zA-Z]+)(/|.git)?$"
-consistent!(cargo_edit_0, r"^https://github.com/([-_0-9a-zA-Z]+)/([-_0-9a-zA-Z]+)(/|.git)?$");
+consistent!(cargo_edit_0, "^https://github.com/([-_0-9a-zA-Z]+)/([-_0-9a-zA-Z]+)(/|.git)?$");
 
 // cargo-edit-0.3.0-beta.1: r"^https://gitlab.com/([-_0-9a-zA-Z]+)/([-_0-9a-zA-Z]+)(/|.git)?$"
-consistent!(cargo_edit_1, r"^https://gitlab.com/([-_0-9a-zA-Z]+)/([-_0-9a-zA-Z]+)(/|.git)?$");
+consistent!(cargo_edit_1, "^https://gitlab.com/([-_0-9a-zA-Z]+)/([-_0-9a-zA-Z]+)(/|.git)?$");
 
 // cargo-disassemble-0.1.1: ".*"
 consistent!(cargo_disassemble_0, ".*");
 
 // cargo-demangle-0.1.2: r"(?m)(?P<symbol>_ZN[0-9]+.*E)"
-consistent!(cargo_demangle_0, r"(?m)(?P<symbol>_ZN[0-9]+.*E)");
+consistent!(cargo_demangle_0, "(?m)(?P<symbol>_ZN[0-9]+.*E)");
 
 // cargo-coverage-annotations-0.1.5: r"^\s*\}(?:\)*;?|\s*else\s*\{)$"
 consistent!(cargo_coverage_annotations_0, r"^\s*\}(?:\)*;?|\s*else\s*\{)$");
@@ -1733,7 +1733,7 @@ consistent!(cargo_update_0, r"cargo-install-update\.exe-v.+");
 consistent!(canteen_0, r"^<(?:(int|uint|str|float|path):)?([\w_][a-zA-Z0-9_]*)>$");
 
 // thruster-cli-0.1.3: r"(.)([A-Z])"
-consistent!(thruster_cli_0, r"(.)([A-Z])");
+consistent!(thruster_cli_0, "(.)([A-Z])");
 
 // thieves-cant-0.1.0: "([Z]+)$"
 consistent!(thieves_cant_0, "([Z]+)$");
@@ -1823,7 +1823,7 @@ consistent!(content_blocker_13, "http://domain.org/ok.html\\?except_this=1");
 consistent!(victoria_dom_0, "[A-Za-z0-9=]");
 
 // numbat-1.0.0: r"^nsq://"
-consistent!(numbat_0, r"^nsq://");
+consistent!(numbat_0, "^nsq://");
 
 // airkorea-0.1.2: r"[\s\t\r\n]"
 consistent!(airkorea_0, r"[\s\t\r\n]");
@@ -1838,10 +1838,10 @@ consistent!(airkorea_2, r"[^.\d]+$");
 // consistent!(rofl_0, r"\b");
 
 // rogcat-0.2.15: r"--------- beginning of.*"
-consistent!(rogcat_0, r"--------- beginning of.*");
+consistent!(rogcat_0, "--------- beginning of.*");
 
 // rogcat-0.2.15: r"a|e|i|o|u"
-consistent!(rogcat_1, r"a|e|i|o|u");
+consistent!(rogcat_1, "a|e|i|o|u");
 
 // rogcat-0.2.15: r"^(\d+)([kMG])$"
 consistent!(rogcat_2, r"^(\d+)([kMG])$");
@@ -1883,7 +1883,7 @@ consistent!(termimage_0, r"(\d+)[xX](\d+)");
 consistent!(teensy_0, r".*(\d{4}-\d{2}-\d{2}).*");
 
 // telescreen-0.1.3: r"<@(.+)>"
-consistent!(telescreen_0, r"<@(.+)>");
+consistent!(telescreen_0, "<@(.+)>");
 
 // tempus_fugit-0.4.4: r"^(\d+)"
 consistent!(tempus_fugit_0, r"^(\d+)");
@@ -1910,10 +1910,10 @@ consistent!(bullet_core_0, "^(?u:[0-9])+");
 consistent!(bullet_core_1, "^(?u:[0-9])+(?u:\\.)(?u:[0-9])+");
 
 // bullet_core-0.1.1: "^(?u:[A-Za-zª-ªµ-µº-ºÀ-ÖØ-öø-ˁˆ-ˑˠ-ˤˬ-ˬˮ-ˮͰ-ʹͶ-ͷͺ-ͽͿ-ͿΆ-ΆΈ-ΊΌ-ΌΎ-ΡΣ-ϵϷ-ҁҊ-ԯԱ-Ֆՙ-ՙա-ևא-תװ-ײؠ-يٮ-ٯٱ-ۓە-ەۥ-ۦۮ-ۯۺ-ۼۿ-ۿܐ-ܐܒ-ܯݍ-ޥޱ-ޱߊ-ߪߴ-ߵߺ-ߺࠀ-ࠕࠚ-ࠚࠤ-ࠤࠨ-ࠨࡀ-ࡘࢠ-ࢴऄ-हऽ-ऽॐ-ॐक़-ॡॱ-ঀঅ-ঌএ-ঐও-নপ-রল-লশ-হঽ-ঽৎ-ৎড়-ঢ়য়-ৡৰ-ৱਅ-ਊਏ-ਐਓ-ਨਪ-ਰਲ-ਲ਼ਵ-ਸ਼ਸ-ਹਖ਼-ੜਫ਼-ਫ਼ੲ-ੴઅ-ઍએ-ઑઓ-નપ-રલ-ળવ-હઽ-ઽૐ-ૐૠ-ૡૹ-ૹଅ-ଌଏ-ଐଓ-ନପ-ରଲ-ଳଵ-ହଽ-ଽଡ଼-ଢ଼ୟ-ୡୱ-ୱஃ-ஃஅ-ஊஎ-ஐஒ-கங-சஜ-ஜஞ-டண-தந-பம-ஹௐ-ௐఅ-ఌఎ-ఐఒ-నప-హఽ-ఽౘ-ౚౠ-ౡಅ-ಌಎ-ಐಒ-ನಪ-ಳವ-ಹಽ-ಽೞ-ೞೠ-ೡೱ-ೲഅ-ഌഎ-ഐഒ-ഺഽ-ഽൎ-ൎൟ-ൡൺ-ൿඅ-ඖක-නඳ-රල-ලව-ෆก-ะา-ำเ-ๆກ-ຂຄ-ຄງ-ຈຊ-ຊຍ-ຍດ-ທນ-ຟມ-ຣລ-ລວ-ວສ-ຫອ-ະາ-ຳຽ-ຽເ-ໄໆ-ໆໜ-ໟༀ-ༀཀ-ཇཉ-ཬྈ-ྌက-ဪဿ-ဿၐ-ၕၚ-ၝၡ-ၡၥ-ၦၮ-ၰၵ-ႁႎ-ႎႠ-ჅჇ-ჇჍ-Ⴭა-ჺჼ-ቈቊ-ቍቐ-ቖቘ-ቘቚ-ቝበ-ኈኊ-ኍነ-ኰኲ-ኵኸ-ኾዀ-ዀዂ-ዅወ-ዖዘ-ጐጒ-ጕጘ-ፚᎀ-ᎏᎠ-Ᏽᏸ-ᏽᐁ-ᙬᙯ-ᙿᚁ-ᚚᚠ-ᛪᛱ-ᛸᜀ-ᜌᜎ-ᜑᜠ-ᜱᝀ-ᝑᝠ-ᝬᝮ-ᝰក-ឳៗ-ៗៜ-ៜᠠ-ᡷᢀ-ᢨᢪ-ᢪᢰ-ᣵᤀ-ᤞᥐ-ᥭᥰ-ᥴᦀ-ᦫᦰ-ᧉᨀ-ᨖᨠ-ᩔᪧ-ᪧᬅ-ᬳᭅ-ᭋᮃ-ᮠᮮ-ᮯᮺ-ᯥᰀ-ᰣᱍ-ᱏᱚ-ᱽᳩ-ᳬᳮ-ᳱᳵ-ᳶᴀ-ᶿḀ-ἕἘ-Ἕἠ-ὅὈ-Ὅὐ-ὗὙ-ὙὛ-ὛὝ-ὝὟ-ώᾀ-ᾴᾶ-ᾼι-ιῂ-ῄῆ-ῌῐ-ΐῖ-Ίῠ-Ῥῲ-ῴῶ-ῼⁱ-ⁱⁿ-ⁿₐ-ₜℂ-ℂℇ-ℇℊ-ℓℕ-ℕℙ-ℝℤ-ℤΩ-Ωℨ-ℨK-ℭℯ-ℹℼ-ℿⅅ-ⅉⅎ-ⅎↃ-ↄⰀ-Ⱞⰰ-ⱞⱠ-ⳤⳫ-ⳮⳲ-ⳳⴀ-ⴥⴧ-ⴧⴭ-ⴭⴰ-ⵧⵯ-ⵯⶀ-ⶖⶠ-ⶦⶨ-ⶮⶰ-ⶶⶸ-ⶾⷀ-ⷆⷈ-ⷎⷐ-ⷖⷘ-ⷞⸯ-ⸯ々-〆〱-〵〻-〼ぁ-ゖゝ-ゟァ-ヺー-ヿㄅ-ㄭㄱ-ㆎㆠ-ㆺㇰ-ㇿ㐀-䶵一-鿕ꀀ-ꒌꓐ-ꓽꔀ-ꘌꘐ-ꘟꘪ-ꘫꙀ-ꙮꙿ-ꚝꚠ-ꛥꜗ-ꜟꜢ-ꞈꞋ-ꞭꞰ-ꞷꟷ-ꠁꠃ-ꠅꠇ-ꠊꠌ-ꠢꡀ-ꡳꢂ-ꢳꣲ-ꣷꣻ-ꣻꣽ-ꣽꤊ-ꤥꤰ-ꥆꥠ-ꥼꦄ-ꦲꧏ-ꧏꧠ-ꧤꧦ-ꧯꧺ-ꧾꨀ-ꨨꩀ-ꩂꩄ-ꩋꩠ-ꩶꩺ-ꩺꩾ-ꪯꪱ-ꪱꪵ-ꪶꪹ-ꪽꫀ-ꫀꫂ-ꫂꫛ-ꫝꫠ-ꫪꫲ-ꫴꬁ-ꬆꬉ-ꬎꬑ-ꬖꬠ-ꬦꬨ-ꬮꬰ-ꭚꭜ-ꭥꭰ-ꯢ가-힣ힰ-ퟆퟋ-ퟻ豈-舘並-龎ﬀ-ﬆﬓ-ﬗיִ-יִײַ-ﬨשׁ-זּטּ-לּמּ-מּנּ-סּףּ-פּצּ-ﮱﯓ-ﴽﵐ-ﶏﶒ-ﷇﷰ-ﷻﹰ-ﹴﹶ-ﻼＡ-Ｚａ-ｚｦ-ﾾￂ-ￇￊ-ￏￒ-ￗￚ-ￜ𐀀-𐀋𐀍-𐀦𐀨-𐀺𐀼-𐀽𐀿-𐁍𐁐-𐁝𐂀-𐃺𐊀-𐊜𐊠-𐋐𐌀-𐌟𐌰-𐍀𐍂-𐍉𐍐-𐍵𐎀-𐎝𐎠-𐏃𐏈-𐏏𐐀-𐒝𐔀-𐔧𐔰-𐕣𐘀-𐜶𐝀-𐝕𐝠-𐝧𐠀-𐠅𐠈-𐠈𐠊-𐠵𐠷-𐠸𐠼-𐠼𐠿-𐡕𐡠-𐡶𐢀-𐢞𐣠-𐣲𐣴-𐣵𐤀-𐤕𐤠-𐤹𐦀-𐦷𐦾-𐦿𐨀-𐨀𐨐-𐨓𐨕-𐨗𐨙-𐨳𐩠-𐩼𐪀-𐪜𐫀-𐫇𐫉-𐫤𐬀-𐬵𐭀-𐭕𐭠-𐭲𐮀-𐮑𐰀-𐱈𐲀-𐲲𐳀-𐳲𑀃-𑀷𑂃-𑂯𑃐-𑃨𑄃-𑄦𑅐-𑅲𑅶-𑅶𑆃-𑆲𑇁-𑇄𑇚-𑇚𑇜-𑇜𑈀-𑈑𑈓-𑈫𑊀-𑊆𑊈-𑊈𑊊-𑊍𑊏-𑊝𑊟-𑊨𑊰-𑋞𑌅-𑌌𑌏-𑌐𑌓-𑌨𑌪-𑌰𑌲-𑌳𑌵-𑌹𑌽-𑌽𑍐-𑍐𑍝-𑍡𑒀-𑒯𑓄-𑓅𑓇-𑓇𑖀-𑖮𑗘-𑗛𑘀-𑘯𑙄-𑙄𑚀-𑚪𑜀-𑜙𑢠-𑣟𑣿-𑣿𑫀-𑫸𒀀-𒎙𒒀-𒕃𓀀-𓐮𔐀-𔙆𖠀-𖨸𖩀-𖩞𖫐-𖫭𖬀-𖬯𖭀-𖭃𖭣-𖭷𖭽-𖮏𖼀-𖽄𖽐-𖽐𖾓-𖾟𛀀-𛀁𛰀-𛱪𛱰-𛱼𛲀-𛲈𛲐-𛲙𝐀-𝑔𝑖-𝒜𝒞-𝒟𝒢-𝒢𝒥-𝒦𝒩-𝒬𝒮-𝒹𝒻-𝒻𝒽-𝓃𝓅-𝔅𝔇-𝔊𝔍-𝔔𝔖-𝔜𝔞-𝔹𝔻-𝔾𝕀-𝕄𝕆-𝕆𝕊-𝕐𝕒-𝚥𝚨-𝛀𝛂-𝛚𝛜-𝛺𝛼-𝜔𝜖-𝜴𝜶-𝝎𝝐-𝝮𝝰-𝞈𝞊-𝞨𝞪-𝟂𝟄-𝟋𞠀-𞣄𞸀-𞸃𞸅-𞸟𞸡-𞸢𞸤-𞸤𞸧-𞸧𞸩-𞸲𞸴-𞸷𞸹-𞸹𞸻-𞸻𞹂-𞹂𞹇-𞹇𞹉-𞹉𞹋-𞹋𞹍-𞹏𞹑-𞹒𞹔-𞹔𞹗-𞹗𞹙-𞹙𞹛-𞹛𞹝-𞹝𞹟-𞹟𞹡-𞹢𞹤-𞹤𞹧-𞹪𞹬-𞹲𞹴-𞹷𞹹-𞹼𞹾-𞹾𞺀-𞺉𞺋-𞺛𞺡-𞺣𞺥-𞺩𞺫-𞺻𠀀-𪛖𪜀-𫜴𫝀-𫠝𫠠-𬺡丽-𪘀])+"
-consistent!(bullet_core_2, "^(?u:[A-Za-zª-ªµ-µº-ºÀ-ÖØ-öø-ˁˆ-ˑˠ-ˤˬ-ˬˮ-ˮͰ-ʹͶ-ͷͺ-ͽͿ-ͿΆ-ΆΈ-ΊΌ-ΌΎ-ΡΣ-ϵϷ-ҁҊ-ԯԱ-Ֆՙ-ՙա-ևא-תװ-ײؠ-يٮ-ٯٱ-ۓە-ەۥ-ۦۮ-ۯۺ-ۼۿ-ۿܐ-ܐܒ-ܯݍ-ޥޱ-ޱߊ-ߪߴ-ߵߺ-ߺࠀ-ࠕࠚ-ࠚࠤ-ࠤࠨ-ࠨࡀ-ࡘࢠ-ࢴऄ-हऽ-ऽॐ-ॐक़-ॡॱ-ঀঅ-ঌএ-ঐও-নপ-রল-লশ-হঽ-ঽৎ-ৎড়-ঢ়য়-ৡৰ-ৱਅ-ਊਏ-ਐਓ-ਨਪ-ਰਲ-ਲ਼ਵ-ਸ਼ਸ-ਹਖ਼-ੜਫ਼-ਫ਼ੲ-ੴઅ-ઍએ-ઑઓ-નપ-રલ-ળવ-હઽ-ઽૐ-ૐૠ-ૡૹ-ૹଅ-ଌଏ-ଐଓ-ନପ-ରଲ-ଳଵ-ହଽ-ଽଡ଼-ଢ଼ୟ-ୡୱ-ୱஃ-ஃஅ-ஊஎ-ஐஒ-கங-சஜ-ஜஞ-டண-தந-பம-ஹௐ-ௐఅ-ఌఎ-ఐఒ-నప-హఽ-ఽౘ-ౚౠ-ౡಅ-ಌಎ-ಐಒ-ನಪ-ಳವ-ಹಽ-ಽೞ-ೞೠ-ೡೱ-ೲഅ-ഌഎ-ഐഒ-ഺഽ-ഽൎ-ൎൟ-ൡൺ-ൿඅ-ඖක-නඳ-රල-ලව-ෆก-ะา-ำเ-ๆກ-ຂຄ-ຄງ-ຈຊ-ຊຍ-ຍດ-ທນ-ຟມ-ຣລ-ລວ-ວສ-ຫອ-ະາ-ຳຽ-ຽເ-ໄໆ-ໆໜ-ໟༀ-ༀཀ-ཇཉ-ཬྈ-ྌက-ဪဿ-ဿၐ-ၕၚ-ၝၡ-ၡၥ-ၦၮ-ၰၵ-ႁႎ-ႎႠ-ჅჇ-ჇჍ-Ⴭა-ჺჼ-ቈቊ-ቍቐ-ቖቘ-ቘቚ-ቝበ-ኈኊ-ኍነ-ኰኲ-ኵኸ-ኾዀ-ዀዂ-ዅወ-ዖዘ-ጐጒ-ጕጘ-ፚᎀ-ᎏᎠ-Ᏽᏸ-ᏽᐁ-ᙬᙯ-ᙿᚁ-ᚚᚠ-ᛪᛱ-ᛸᜀ-ᜌᜎ-ᜑᜠ-ᜱᝀ-ᝑᝠ-ᝬᝮ-ᝰក-ឳៗ-ៗៜ-ៜᠠ-ᡷᢀ-ᢨᢪ-ᢪᢰ-ᣵᤀ-ᤞᥐ-ᥭᥰ-ᥴᦀ-ᦫᦰ-ᧉᨀ-ᨖᨠ-ᩔᪧ-ᪧᬅ-ᬳᭅ-ᭋᮃ-ᮠᮮ-ᮯᮺ-ᯥᰀ-ᰣᱍ-ᱏᱚ-ᱽᳩ-ᳬᳮ-ᳱᳵ-ᳶᴀ-ᶿḀ-ἕἘ-Ἕἠ-ὅὈ-Ὅὐ-ὗὙ-ὙὛ-ὛὝ-ὝὟ-ώᾀ-ᾴᾶ-ᾼι-ιῂ-ῄῆ-ῌῐ-ΐῖ-Ίῠ-Ῥῲ-ῴῶ-ῼⁱ-ⁱⁿ-ⁿₐ-ₜℂ-ℂℇ-ℇℊ-ℓℕ-ℕℙ-ℝℤ-ℤΩ-Ωℨ-ℨK-ℭℯ-ℹℼ-ℿⅅ-ⅉⅎ-ⅎↃ-ↄⰀ-Ⱞⰰ-ⱞⱠ-ⳤⳫ-ⳮⳲ-ⳳⴀ-ⴥⴧ-ⴧⴭ-ⴭⴰ-ⵧⵯ-ⵯⶀ-ⶖⶠ-ⶦⶨ-ⶮⶰ-ⶶⶸ-ⶾⷀ-ⷆⷈ-ⷎⷐ-ⷖⷘ-ⷞⸯ-ⸯ々-〆〱-〵〻-〼ぁ-ゖゝ-ゟァ-ヺー-ヿㄅ-ㄭㄱ-ㆎㆠ-ㆺㇰ-ㇿ㐀-䶵一-鿕ꀀ-ꒌꓐ-ꓽꔀ-ꘌꘐ-ꘟꘪ-ꘫꙀ-ꙮꙿ-ꚝꚠ-ꛥꜗ-ꜟꜢ-ꞈꞋ-ꞭꞰ-ꞷꟷ-ꠁꠃ-ꠅꠇ-ꠊꠌ-ꠢꡀ-ꡳꢂ-ꢳꣲ-ꣷꣻ-ꣻꣽ-ꣽꤊ-ꤥꤰ-ꥆꥠ-ꥼꦄ-ꦲꧏ-ꧏꧠ-ꧤꧦ-ꧯꧺ-ꧾꨀ-ꨨꩀ-ꩂꩄ-ꩋꩠ-ꩶꩺ-ꩺꩾ-ꪯꪱ-ꪱꪵ-ꪶꪹ-ꪽꫀ-ꫀꫂ-ꫂꫛ-ꫝꫠ-ꫪꫲ-ꫴꬁ-ꬆꬉ-ꬎꬑ-ꬖꬠ-ꬦꬨ-ꬮꬰ-ꭚꭜ-ꭥꭰ-ꯢ가-힣ힰ-ퟆퟋ-ퟻ豈-舘並-龎ﬀ-ﬆﬓ-ﬗיִ-יִײַ-ﬨשׁ-זּטּ-לּמּ-מּנּ-סּףּ-פּצּ-ﮱﯓ-ﴽﵐ-ﶏﶒ-ﷇﷰ-ﷻﹰ-ﹴﹶ-ﻼＡ-Ｚａ-ｚｦ-ﾾￂ-ￇￊ-ￏￒ-ￗￚ-ￜ𐀀-𐀋𐀍-𐀦𐀨-𐀺𐀼-𐀽𐀿-𐁍𐁐-𐁝𐂀-𐃺𐊀-𐊜𐊠-𐋐𐌀-𐌟𐌰-𐍀𐍂-𐍉𐍐-𐍵𐎀-𐎝𐎠-𐏃𐏈-𐏏𐐀-𐒝𐔀-𐔧𐔰-𐕣𐘀-𐜶𐝀-𐝕𐝠-𐝧𐠀-𐠅𐠈-𐠈𐠊-𐠵𐠷-𐠸𐠼-𐠼𐠿-𐡕𐡠-𐡶𐢀-𐢞𐣠-𐣲𐣴-𐣵𐤀-𐤕𐤠-𐤹𐦀-𐦷𐦾-𐦿𐨀-𐨀𐨐-𐨓𐨕-𐨗𐨙-𐨳𐩠-𐩼𐪀-𐪜𐫀-𐫇𐫉-𐫤𐬀-𐬵𐭀-𐭕𐭠-𐭲𐮀-𐮑𐰀-𐱈𐲀-𐲲𐳀-𐳲𑀃-𑀷𑂃-𑂯𑃐-𑃨𑄃-𑄦𑅐-𑅲𑅶-𑅶𑆃-𑆲𑇁-𑇄𑇚-𑇚𑇜-𑇜𑈀-𑈑𑈓-𑈫𑊀-𑊆𑊈-𑊈𑊊-𑊍𑊏-𑊝𑊟-𑊨𑊰-𑋞𑌅-𑌌𑌏-𑌐𑌓-𑌨𑌪-𑌰𑌲-𑌳𑌵-𑌹𑌽-𑌽𑍐-𑍐𑍝-𑍡𑒀-𑒯𑓄-𑓅𑓇-𑓇𑖀-𑖮𑗘-𑗛𑘀-𑘯𑙄-𑙄𑚀-𑚪𑜀-𑜙𑢠-𑣟𑣿-𑣿𑫀-𑫸𒀀-𒎙𒒀-𒕃𓀀-𓐮𔐀-𔙆𖠀-𖨸𖩀-𖩞𖫐-𖫭𖬀-𖬯𖭀-𖭃𖭣-𖭷𖭽-𖮏𖼀-𖽄𖽐-𖽐𖾓-𖾟𛀀-𛀁𛰀-𛱪𛱰-𛱼𛲀-𛲈𛲐-𛲙𝐀-𝑔𝑖-𝒜𝒞-𝒟𝒢-𝒢𝒥-𝒦𝒩-𝒬𝒮-𝒹𝒻-𝒻𝒽-𝓃𝓅-𝔅𝔇-𝔊𝔍-𝔔𝔖-𝔜𝔞-𝔹𝔻-𝔾𝕀-𝕄𝕆-𝕆𝕊-𝕐𝕒-𝚥𝚨-𝛀𝛂-𝛚𝛜-𝛺𝛼-𝜔𝜖-𝜴𝜶-𝝎𝝐-𝝮𝝰-𝞈𝞊-𝞨𝞪-𝟂𝟄-𝟋𞠀-𞣄𞸀-𞸃𞸅-𞸟𞸡-𞸢𞸤-𞸤𞸧-𞸧𞸩-𞸲𞸴-𞸷𞸹-𞸹𞸻-𞸻𞹂-𞹂𞹇-𞹇𞹉-𞹉𞹋-𞹋𞹍-𞹏𞹑-𞹒𞹔-𞹔𞹗-𞹗𞹙-𞹙𞹛-𞹛𞹝-𞹝𞹟-𞹟𞹡-𞹢𞹤-𞹤𞹧-𞹪𞹬-𞹲𞹴-𞹷𞹹-𞹼𞹾-𞹾𞺀-𞺉𞺋-𞺛𞺡-𞺣𞺥-𞺩𞺫-𞺻𠀀-𪛖𪜀-𫜴𫝀-𫠝𫠠-𬺡丽-𪘀])+");
+consistent!(bullet_core_2, "^(?u:[A-Za-z\u{aa}-\u{aa}\u{b5}-\u{b5}\u{ba}-\u{ba}\u{c0}-\u{d6}\u{d8}-\u{f6}\u{f8}-\u{2c1}\u{2c6}-\u{2d1}\u{2e0}-\u{2e4}\u{2ec}-\u{2ec}\u{2ee}-\u{2ee}\u{370}-\u{374}\u{376}-\u{377}\u{37a}-\u{37d}\u{37f}-\u{37f}\u{386}-\u{386}\u{388}-\u{38a}\u{38c}-\u{38c}\u{38e}-\u{3a1}\u{3a3}-\u{3f5}\u{3f7}-\u{481}\u{48a}-\u{52f}\u{531}-\u{556}\u{559}-\u{559}\u{561}-\u{587}\u{5d0}-\u{5ea}\u{5f0}-\u{5f2}\u{620}-\u{64a}\u{66e}-\u{66f}\u{671}-\u{6d3}\u{6d5}-\u{6d5}\u{6e5}-\u{6e6}\u{6ee}-\u{6ef}\u{6fa}-\u{6fc}\u{6ff}-\u{6ff}\u{710}-\u{710}\u{712}-\u{72f}\u{74d}-\u{7a5}\u{7b1}-\u{7b1}\u{7ca}-\u{7ea}\u{7f4}-\u{7f5}\u{7fa}-\u{7fa}\u{800}-\u{815}\u{81a}-\u{81a}\u{824}-\u{824}\u{828}-\u{828}\u{840}-\u{858}\u{8a0}-\u{8b4}\u{904}-\u{939}\u{93d}-\u{93d}\u{950}-\u{950}\u{958}-\u{961}\u{971}-\u{980}\u{985}-\u{98c}\u{98f}-\u{990}\u{993}-\u{9a8}\u{9aa}-\u{9b0}\u{9b2}-\u{9b2}\u{9b6}-\u{9b9}\u{9bd}-\u{9bd}\u{9ce}-\u{9ce}\u{9dc}-\u{9dd}\u{9df}-\u{9e1}\u{9f0}-\u{9f1}\u{a05}-\u{a0a}\u{a0f}-\u{a10}\u{a13}-\u{a28}\u{a2a}-\u{a30}\u{a32}-\u{a33}\u{a35}-\u{a36}\u{a38}-\u{a39}\u{a59}-\u{a5c}\u{a5e}-\u{a5e}\u{a72}-\u{a74}\u{a85}-\u{a8d}\u{a8f}-\u{a91}\u{a93}-\u{aa8}\u{aaa}-\u{ab0}\u{ab2}-\u{ab3}\u{ab5}-\u{ab9}\u{abd}-\u{abd}\u{ad0}-\u{ad0}\u{ae0}-\u{ae1}\u{af9}-\u{af9}\u{b05}-\u{b0c}\u{b0f}-\u{b10}\u{b13}-\u{b28}\u{b2a}-\u{b30}\u{b32}-\u{b33}\u{b35}-\u{b39}\u{b3d}-\u{b3d}\u{b5c}-\u{b5d}\u{b5f}-\u{b61}\u{b71}-\u{b71}\u{b83}-\u{b83}\u{b85}-\u{b8a}\u{b8e}-\u{b90}\u{b92}-\u{b95}\u{b99}-\u{b9a}\u{b9c}-\u{b9c}\u{b9e}-\u{b9f}\u{ba3}-\u{ba4}\u{ba8}-\u{baa}\u{bae}-\u{bb9}\u{bd0}-\u{bd0}\u{c05}-\u{c0c}\u{c0e}-\u{c10}\u{c12}-\u{c28}\u{c2a}-\u{c39}\u{c3d}-\u{c3d}\u{c58}-\u{c5a}\u{c60}-\u{c61}\u{c85}-\u{c8c}\u{c8e}-\u{c90}\u{c92}-\u{ca8}\u{caa}-\u{cb3}\u{cb5}-\u{cb9}\u{cbd}-\u{cbd}\u{cde}-\u{cde}\u{ce0}-\u{ce1}\u{cf1}-\u{cf2}\u{d05}-\u{d0c}\u{d0e}-\u{d10}\u{d12}-\u{d3a}\u{d3d}-\u{d3d}\u{d4e}-\u{d4e}\u{d5f}-\u{d61}\u{d7a}-\u{d7f}\u{d85}-\u{d96}\u{d9a}-\u{db1}\u{db3}-\u{dbb}\u{dbd}-\u{dbd}\u{dc0}-\u{dc6}\u{e01}-\u{e30}\u{e32}-\u{e33}\u{e40}-\u{e46}\u{e81}-\u{e82}\u{e84}-\u{e84}\u{e87}-\u{e88}\u{e8a}-\u{e8a}\u{e8d}-\u{e8d}\u{e94}-\u{e97}\u{e99}-\u{e9f}\u{ea1}-\u{ea3}\u{ea5}-\u{ea5}\u{ea7}-\u{ea7}\u{eaa}-\u{eab}\u{ead}-\u{eb0}\u{eb2}-\u{eb3}\u{ebd}-\u{ebd}\u{ec0}-\u{ec4}\u{ec6}-\u{ec6}\u{edc}-\u{edf}\u{f00}-\u{f00}\u{f40}-\u{f47}\u{f49}-\u{f6c}\u{f88}-\u{f8c}\u{1000}-\u{102a}\u{103f}-\u{103f}\u{1050}-\u{1055}\u{105a}-\u{105d}\u{1061}-\u{1061}\u{1065}-\u{1066}\u{106e}-\u{1070}\u{1075}-\u{1081}\u{108e}-\u{108e}\u{10a0}-\u{10c5}\u{10c7}-\u{10c7}\u{10cd}-\u{10cd}\u{10d0}-\u{10fa}\u{10fc}-\u{1248}\u{124a}-\u{124d}\u{1250}-\u{1256}\u{1258}-\u{1258}\u{125a}-\u{125d}\u{1260}-\u{1288}\u{128a}-\u{128d}\u{1290}-\u{12b0}\u{12b2}-\u{12b5}\u{12b8}-\u{12be}\u{12c0}-\u{12c0}\u{12c2}-\u{12c5}\u{12c8}-\u{12d6}\u{12d8}-\u{1310}\u{1312}-\u{1315}\u{1318}-\u{135a}\u{1380}-\u{138f}\u{13a0}-\u{13f5}\u{13f8}-\u{13fd}\u{1401}-\u{166c}\u{166f}-\u{167f}\u{1681}-\u{169a}\u{16a0}-\u{16ea}\u{16f1}-\u{16f8}\u{1700}-\u{170c}\u{170e}-\u{1711}\u{1720}-\u{1731}\u{1740}-\u{1751}\u{1760}-\u{176c}\u{176e}-\u{1770}\u{1780}-\u{17b3}\u{17d7}-\u{17d7}\u{17dc}-\u{17dc}\u{1820}-\u{1877}\u{1880}-\u{18a8}\u{18aa}-\u{18aa}\u{18b0}-\u{18f5}\u{1900}-\u{191e}\u{1950}-\u{196d}\u{1970}-\u{1974}\u{1980}-\u{19ab}\u{19b0}-\u{19c9}\u{1a00}-\u{1a16}\u{1a20}-\u{1a54}\u{1aa7}-\u{1aa7}\u{1b05}-\u{1b33}\u{1b45}-\u{1b4b}\u{1b83}-\u{1ba0}\u{1bae}-\u{1baf}\u{1bba}-\u{1be5}\u{1c00}-\u{1c23}\u{1c4d}-\u{1c4f}\u{1c5a}-\u{1c7d}\u{1ce9}-\u{1cec}\u{1cee}-\u{1cf1}\u{1cf5}-\u{1cf6}\u{1d00}-\u{1dbf}\u{1e00}-\u{1f15}\u{1f18}-\u{1f1d}\u{1f20}-\u{1f45}\u{1f48}-\u{1f4d}\u{1f50}-\u{1f57}\u{1f59}-\u{1f59}\u{1f5b}-\u{1f5b}\u{1f5d}-\u{1f5d}\u{1f5f}-\u{1f7d}\u{1f80}-\u{1fb4}\u{1fb6}-\u{1fbc}\u{1fbe}-\u{1fbe}\u{1fc2}-\u{1fc4}\u{1fc6}-\u{1fcc}\u{1fd0}-\u{1fd3}\u{1fd6}-\u{1fdb}\u{1fe0}-\u{1fec}\u{1ff2}-\u{1ff4}\u{1ff6}-\u{1ffc}\u{2071}-\u{2071}\u{207f}-\u{207f}\u{2090}-\u{209c}\u{2102}-\u{2102}\u{2107}-\u{2107}\u{210a}-\u{2113}\u{2115}-\u{2115}\u{2119}-\u{211d}\u{2124}-\u{2124}\u{2126}-\u{2126}\u{2128}-\u{2128}\u{212a}-\u{212d}\u{212f}-\u{2139}\u{213c}-\u{213f}\u{2145}-\u{2149}\u{214e}-\u{214e}\u{2183}-\u{2184}\u{2c00}-\u{2c2e}\u{2c30}-\u{2c5e}\u{2c60}-\u{2ce4}\u{2ceb}-\u{2cee}\u{2cf2}-\u{2cf3}\u{2d00}-\u{2d25}\u{2d27}-\u{2d27}\u{2d2d}-\u{2d2d}\u{2d30}-\u{2d67}\u{2d6f}-\u{2d6f}\u{2d80}-\u{2d96}\u{2da0}-\u{2da6}\u{2da8}-\u{2dae}\u{2db0}-\u{2db6}\u{2db8}-\u{2dbe}\u{2dc0}-\u{2dc6}\u{2dc8}-\u{2dce}\u{2dd0}-\u{2dd6}\u{2dd8}-\u{2dde}\u{2e2f}-\u{2e2f}\u{3005}-\u{3006}\u{3031}-\u{3035}\u{303b}-\u{303c}\u{3041}-\u{3096}\u{309d}-\u{309f}\u{30a1}-\u{30fa}\u{30fc}-\u{30ff}\u{3105}-\u{312d}\u{3131}-\u{318e}\u{31a0}-\u{31ba}\u{31f0}-\u{31ff}\u{3400}-\u{4db5}\u{4e00}-\u{9fd5}\u{a000}-\u{a48c}\u{a4d0}-\u{a4fd}\u{a500}-\u{a60c}\u{a610}-\u{a61f}\u{a62a}-\u{a62b}\u{a640}-\u{a66e}\u{a67f}-\u{a69d}\u{a6a0}-\u{a6e5}\u{a717}-\u{a71f}\u{a722}-\u{a788}\u{a78b}-\u{a7ad}\u{a7b0}-\u{a7b7}\u{a7f7}-\u{a801}\u{a803}-\u{a805}\u{a807}-\u{a80a}\u{a80c}-\u{a822}\u{a840}-\u{a873}\u{a882}-\u{a8b3}\u{a8f2}-\u{a8f7}\u{a8fb}-\u{a8fb}\u{a8fd}-\u{a8fd}\u{a90a}-\u{a925}\u{a930}-\u{a946}\u{a960}-\u{a97c}\u{a984}-\u{a9b2}\u{a9cf}-\u{a9cf}\u{a9e0}-\u{a9e4}\u{a9e6}-\u{a9ef}\u{a9fa}-\u{a9fe}\u{aa00}-\u{aa28}\u{aa40}-\u{aa42}\u{aa44}-\u{aa4b}\u{aa60}-\u{aa76}\u{aa7a}-\u{aa7a}\u{aa7e}-\u{aaaf}\u{aab1}-\u{aab1}\u{aab5}-\u{aab6}\u{aab9}-\u{aabd}\u{aac0}-\u{aac0}\u{aac2}-\u{aac2}\u{aadb}-\u{aadd}\u{aae0}-\u{aaea}\u{aaf2}-\u{aaf4}\u{ab01}-\u{ab06}\u{ab09}-\u{ab0e}\u{ab11}-\u{ab16}\u{ab20}-\u{ab26}\u{ab28}-\u{ab2e}\u{ab30}-\u{ab5a}\u{ab5c}-\u{ab65}\u{ab70}-\u{abe2}\u{ac00}-\u{d7a3}\u{d7b0}-\u{d7c6}\u{d7cb}-\u{d7fb}\u{f900}-\u{fa6d}\u{fa70}-\u{fad9}\u{fb00}-\u{fb06}\u{fb13}-\u{fb17}\u{fb1d}-\u{fb1d}\u{fb1f}-\u{fb28}\u{fb2a}-\u{fb36}\u{fb38}-\u{fb3c}\u{fb3e}-\u{fb3e}\u{fb40}-\u{fb41}\u{fb43}-\u{fb44}\u{fb46}-\u{fbb1}\u{fbd3}-\u{fd3d}\u{fd50}-\u{fd8f}\u{fd92}-\u{fdc7}\u{fdf0}-\u{fdfb}\u{fe70}-\u{fe74}\u{fe76}-\u{fefc}\u{ff21}-\u{ff3a}\u{ff41}-\u{ff5a}\u{ff66}-\u{ffbe}\u{ffc2}-\u{ffc7}\u{ffca}-\u{ffcf}\u{ffd2}-\u{ffd7}\u{ffda}-\u{ffdc}\u{10000}-\u{1000b}\u{1000d}-\u{10026}\u{10028}-\u{1003a}\u{1003c}-\u{1003d}\u{1003f}-\u{1004d}\u{10050}-\u{1005d}\u{10080}-\u{100fa}\u{10280}-\u{1029c}\u{102a0}-\u{102d0}\u{10300}-\u{1031f}\u{10330}-\u{10340}\u{10342}-\u{10349}\u{10350}-\u{10375}\u{10380}-\u{1039d}\u{103a0}-\u{103c3}\u{103c8}-\u{103cf}\u{10400}-\u{1049d}\u{10500}-\u{10527}\u{10530}-\u{10563}\u{10600}-\u{10736}\u{10740}-\u{10755}\u{10760}-\u{10767}\u{10800}-\u{10805}\u{10808}-\u{10808}\u{1080a}-\u{10835}\u{10837}-\u{10838}\u{1083c}-\u{1083c}\u{1083f}-\u{10855}\u{10860}-\u{10876}\u{10880}-\u{1089e}\u{108e0}-\u{108f2}\u{108f4}-\u{108f5}\u{10900}-\u{10915}\u{10920}-\u{10939}\u{10980}-\u{109b7}\u{109be}-\u{109bf}\u{10a00}-\u{10a00}\u{10a10}-\u{10a13}\u{10a15}-\u{10a17}\u{10a19}-\u{10a33}\u{10a60}-\u{10a7c}\u{10a80}-\u{10a9c}\u{10ac0}-\u{10ac7}\u{10ac9}-\u{10ae4}\u{10b00}-\u{10b35}\u{10b40}-\u{10b55}\u{10b60}-\u{10b72}\u{10b80}-\u{10b91}\u{10c00}-\u{10c48}\u{10c80}-\u{10cb2}\u{10cc0}-\u{10cf2}\u{11003}-\u{11037}\u{11083}-\u{110af}\u{110d0}-\u{110e8}\u{11103}-\u{11126}\u{11150}-\u{11172}\u{11176}-\u{11176}\u{11183}-\u{111b2}\u{111c1}-\u{111c4}\u{111da}-\u{111da}\u{111dc}-\u{111dc}\u{11200}-\u{11211}\u{11213}-\u{1122b}\u{11280}-\u{11286}\u{11288}-\u{11288}\u{1128a}-\u{1128d}\u{1128f}-\u{1129d}\u{1129f}-\u{112a8}\u{112b0}-\u{112de}\u{11305}-\u{1130c}\u{1130f}-\u{11310}\u{11313}-\u{11328}\u{1132a}-\u{11330}\u{11332}-\u{11333}\u{11335}-\u{11339}\u{1133d}-\u{1133d}\u{11350}-\u{11350}\u{1135d}-\u{11361}\u{11480}-\u{114af}\u{114c4}-\u{114c5}\u{114c7}-\u{114c7}\u{11580}-\u{115ae}\u{115d8}-\u{115db}\u{11600}-\u{1162f}\u{11644}-\u{11644}\u{11680}-\u{116aa}\u{11700}-\u{11719}\u{118a0}-\u{118df}\u{118ff}-\u{118ff}\u{11ac0}-\u{11af8}\u{12000}-\u{12399}\u{12480}-\u{12543}\u{13000}-\u{1342e}\u{14400}-\u{14646}\u{16800}-\u{16a38}\u{16a40}-\u{16a5e}\u{16ad0}-\u{16aed}\u{16b00}-\u{16b2f}\u{16b40}-\u{16b43}\u{16b63}-\u{16b77}\u{16b7d}-\u{16b8f}\u{16f00}-\u{16f44}\u{16f50}-\u{16f50}\u{16f93}-\u{16f9f}\u{1b000}-\u{1b001}\u{1bc00}-\u{1bc6a}\u{1bc70}-\u{1bc7c}\u{1bc80}-\u{1bc88}\u{1bc90}-\u{1bc99}\u{1d400}-\u{1d454}\u{1d456}-\u{1d49c}\u{1d49e}-\u{1d49f}\u{1d4a2}-\u{1d4a2}\u{1d4a5}-\u{1d4a6}\u{1d4a9}-\u{1d4ac}\u{1d4ae}-\u{1d4b9}\u{1d4bb}-\u{1d4bb}\u{1d4bd}-\u{1d4c3}\u{1d4c5}-\u{1d505}\u{1d507}-\u{1d50a}\u{1d50d}-\u{1d514}\u{1d516}-\u{1d51c}\u{1d51e}-\u{1d539}\u{1d53b}-\u{1d53e}\u{1d540}-\u{1d544}\u{1d546}-\u{1d546}\u{1d54a}-\u{1d550}\u{1d552}-\u{1d6a5}\u{1d6a8}-\u{1d6c0}\u{1d6c2}-\u{1d6da}\u{1d6dc}-\u{1d6fa}\u{1d6fc}-\u{1d714}\u{1d716}-\u{1d734}\u{1d736}-\u{1d74e}\u{1d750}-\u{1d76e}\u{1d770}-\u{1d788}\u{1d78a}-\u{1d7a8}\u{1d7aa}-\u{1d7c2}\u{1d7c4}-\u{1d7cb}\u{1e800}-\u{1e8c4}\u{1ee00}-\u{1ee03}\u{1ee05}-\u{1ee1f}\u{1ee21}-\u{1ee22}\u{1ee24}-\u{1ee24}\u{1ee27}-\u{1ee27}\u{1ee29}-\u{1ee32}\u{1ee34}-\u{1ee37}\u{1ee39}-\u{1ee39}\u{1ee3b}-\u{1ee3b}\u{1ee42}-\u{1ee42}\u{1ee47}-\u{1ee47}\u{1ee49}-\u{1ee49}\u{1ee4b}-\u{1ee4b}\u{1ee4d}-\u{1ee4f}\u{1ee51}-\u{1ee52}\u{1ee54}-\u{1ee54}\u{1ee57}-\u{1ee57}\u{1ee59}-\u{1ee59}\u{1ee5b}-\u{1ee5b}\u{1ee5d}-\u{1ee5d}\u{1ee5f}-\u{1ee5f}\u{1ee61}-\u{1ee62}\u{1ee64}-\u{1ee64}\u{1ee67}-\u{1ee6a}\u{1ee6c}-\u{1ee72}\u{1ee74}-\u{1ee77}\u{1ee79}-\u{1ee7c}\u{1ee7e}-\u{1ee7e}\u{1ee80}-\u{1ee89}\u{1ee8b}-\u{1ee9b}\u{1eea1}-\u{1eea3}\u{1eea5}-\u{1eea9}\u{1eeab}-\u{1eebb}\u{20000}-\u{2a6d6}\u{2a700}-\u{2b734}\u{2b740}-\u{2b81d}\u{2b820}-\u{2cea1}\u{2f800}-\u{2fa1d}])+");
 
 // bullet_core-0.1.1: "^(?u:d/d)((?u:[A-Za-zª-ªµ-µº-ºÀ-ÖØ-öø-ˁˆ-ˑˠ-ˤˬ-ˬˮ-ˮͰ-ʹͶ-ͷͺ-ͽͿ-ͿΆ-ΆΈ-ΊΌ-ΌΎ-ΡΣ-ϵϷ-ҁҊ-ԯԱ-Ֆՙ-ՙա-ևא-תװ-ײؠ-يٮ-ٯٱ-ۓە-ەۥ-ۦۮ-ۯۺ-ۼۿ-ۿܐ-ܐܒ-ܯݍ-ޥޱ-ޱߊ-ߪߴ-ߵߺ-ߺࠀ-ࠕࠚ-ࠚࠤ-ࠤࠨ-ࠨࡀ-ࡘࢠ-ࢴऄ-हऽ-ऽॐ-ॐक़-ॡॱ-ঀঅ-ঌএ-ঐও-নপ-রল-লশ-হঽ-ঽৎ-ৎড়-ঢ়য়-ৡৰ-ৱਅ-ਊਏ-ਐਓ-ਨਪ-ਰਲ-ਲ਼ਵ-ਸ਼ਸ-ਹਖ਼-ੜਫ਼-ਫ਼ੲ-ੴઅ-ઍએ-ઑઓ-નપ-રલ-ળવ-હઽ-ઽૐ-ૐૠ-ૡૹ-ૹଅ-ଌଏ-ଐଓ-ନପ-ରଲ-ଳଵ-ହଽ-ଽଡ଼-ଢ଼ୟ-ୡୱ-ୱஃ-ஃஅ-ஊஎ-ஐஒ-கங-சஜ-ஜஞ-டண-தந-பம-ஹௐ-ௐఅ-ఌఎ-ఐఒ-నప-హఽ-ఽౘ-ౚౠ-ౡಅ-ಌಎ-ಐಒ-ನಪ-ಳವ-ಹಽ-ಽೞ-ೞೠ-ೡೱ-ೲഅ-ഌഎ-ഐഒ-ഺഽ-ഽൎ-ൎൟ-ൡൺ-ൿඅ-ඖක-නඳ-රල-ලව-ෆก-ะา-ำเ-ๆກ-ຂຄ-ຄງ-ຈຊ-ຊຍ-ຍດ-ທນ-ຟມ-ຣລ-ລວ-ວສ-ຫອ-ະາ-ຳຽ-ຽເ-ໄໆ-ໆໜ-ໟༀ-ༀཀ-ཇཉ-ཬྈ-ྌက-ဪဿ-ဿၐ-ၕၚ-ၝၡ-ၡၥ-ၦၮ-ၰၵ-ႁႎ-ႎႠ-ჅჇ-ჇჍ-Ⴭა-ჺჼ-ቈቊ-ቍቐ-ቖቘ-ቘቚ-ቝበ-ኈኊ-ኍነ-ኰኲ-ኵኸ-ኾዀ-ዀዂ-ዅወ-ዖዘ-ጐጒ-ጕጘ-ፚᎀ-ᎏᎠ-Ᏽᏸ-ᏽᐁ-ᙬᙯ-ᙿᚁ-ᚚᚠ-ᛪᛱ-ᛸᜀ-ᜌᜎ-ᜑᜠ-ᜱᝀ-ᝑᝠ-ᝬᝮ-ᝰក-ឳៗ-ៗៜ-ៜᠠ-ᡷᢀ-ᢨᢪ-ᢪᢰ-ᣵᤀ-ᤞᥐ-ᥭᥰ-ᥴᦀ-ᦫᦰ-ᧉᨀ-ᨖᨠ-ᩔᪧ-ᪧᬅ-ᬳᭅ-ᭋᮃ-ᮠᮮ-ᮯᮺ-ᯥᰀ-ᰣᱍ-ᱏᱚ-ᱽᳩ-ᳬᳮ-ᳱᳵ-ᳶᴀ-ᶿḀ-ἕἘ-Ἕἠ-ὅὈ-Ὅὐ-ὗὙ-ὙὛ-ὛὝ-ὝὟ-ώᾀ-ᾴᾶ-ᾼι-ιῂ-ῄῆ-ῌῐ-ΐῖ-Ίῠ-Ῥῲ-ῴῶ-ῼⁱ-ⁱⁿ-ⁿₐ-ₜℂ-ℂℇ-ℇℊ-ℓℕ-ℕℙ-ℝℤ-ℤΩ-Ωℨ-ℨK-ℭℯ-ℹℼ-ℿⅅ-ⅉⅎ-ⅎↃ-ↄⰀ-Ⱞⰰ-ⱞⱠ-ⳤⳫ-ⳮⳲ-ⳳⴀ-ⴥⴧ-ⴧⴭ-ⴭⴰ-ⵧⵯ-ⵯⶀ-ⶖⶠ-ⶦⶨ-ⶮⶰ-ⶶⶸ-ⶾⷀ-ⷆⷈ-ⷎⷐ-ⷖⷘ-ⷞⸯ-ⸯ々-〆〱-〵〻-〼ぁ-ゖゝ-ゟァ-ヺー-ヿㄅ-ㄭㄱ-ㆎㆠ-ㆺㇰ-ㇿ㐀-䶵一-鿕ꀀ-ꒌꓐ-ꓽꔀ-ꘌꘐ-ꘟꘪ-ꘫꙀ-ꙮꙿ-ꚝꚠ-ꛥꜗ-ꜟꜢ-ꞈꞋ-ꞭꞰ-ꞷꟷ-ꠁꠃ-ꠅꠇ-ꠊꠌ-ꠢꡀ-ꡳꢂ-ꢳꣲ-ꣷꣻ-ꣻꣽ-ꣽꤊ-ꤥꤰ-ꥆꥠ-ꥼꦄ-ꦲꧏ-ꧏꧠ-ꧤꧦ-ꧯꧺ-ꧾꨀ-ꨨꩀ-ꩂꩄ-ꩋꩠ-ꩶꩺ-ꩺꩾ-ꪯꪱ-ꪱꪵ-ꪶꪹ-ꪽꫀ-ꫀꫂ-ꫂꫛ-ꫝꫠ-ꫪꫲ-ꫴꬁ-ꬆꬉ-ꬎꬑ-ꬖꬠ-ꬦꬨ-ꬮꬰ-ꭚꭜ-ꭥꭰ-ꯢ가-힣ힰ-ퟆퟋ-ퟻ豈-舘並-龎ﬀ-ﬆﬓ-ﬗיִ-יִײַ-ﬨשׁ-זּטּ-לּמּ-מּנּ-סּףּ-פּצּ-ﮱﯓ-ﴽﵐ-ﶏﶒ-ﷇﷰ-ﷻﹰ-ﹴﹶ-ﻼＡ-Ｚａ-ｚｦ-ﾾￂ-ￇￊ-ￏￒ-ￗￚ-ￜ𐀀-𐀋𐀍-𐀦𐀨-𐀺𐀼-𐀽𐀿-𐁍𐁐-𐁝𐂀-𐃺𐊀-𐊜𐊠-𐋐𐌀-𐌟𐌰-𐍀𐍂-𐍉𐍐-𐍵𐎀-𐎝𐎠-𐏃𐏈-𐏏𐐀-𐒝𐔀-𐔧𐔰-𐕣𐘀-𐜶𐝀-𐝕𐝠-𐝧𐠀-𐠅𐠈-𐠈𐠊-𐠵𐠷-𐠸𐠼-𐠼𐠿-𐡕𐡠-𐡶𐢀-𐢞𐣠-𐣲𐣴-𐣵𐤀-𐤕𐤠-𐤹𐦀-𐦷𐦾-𐦿𐨀-𐨀𐨐-𐨓𐨕-𐨗𐨙-𐨳𐩠-𐩼𐪀-𐪜𐫀-𐫇𐫉-𐫤𐬀-𐬵𐭀-𐭕𐭠-𐭲𐮀-𐮑𐰀-𐱈𐲀-𐲲𐳀-𐳲𑀃-𑀷𑂃-𑂯𑃐-𑃨𑄃-𑄦𑅐-𑅲𑅶-𑅶𑆃-𑆲𑇁-𑇄𑇚-𑇚𑇜-𑇜𑈀-𑈑𑈓-𑈫𑊀-𑊆𑊈-𑊈𑊊-𑊍𑊏-𑊝𑊟-𑊨𑊰-𑋞𑌅-𑌌𑌏-𑌐𑌓-𑌨𑌪-𑌰𑌲-𑌳𑌵-𑌹𑌽-𑌽𑍐-𑍐𑍝-𑍡𑒀-𑒯𑓄-𑓅𑓇-𑓇𑖀-𑖮𑗘-𑗛𑘀-𑘯𑙄-𑙄𑚀-𑚪𑜀-𑜙𑢠-𑣟𑣿-𑣿𑫀-𑫸𒀀-𒎙𒒀-𒕃𓀀-𓐮𔐀-𔙆𖠀-𖨸𖩀-𖩞𖫐-𖫭𖬀-𖬯𖭀-𖭃𖭣-𖭷𖭽-𖮏𖼀-𖽄𖽐-𖽐𖾓-𖾟𛀀-𛀁𛰀-𛱪𛱰-𛱼𛲀-𛲈𛲐-𛲙𝐀-𝑔𝑖-𝒜𝒞-𝒟𝒢-𝒢𝒥-𝒦𝒩-𝒬𝒮-𝒹𝒻-𝒻𝒽-𝓃𝓅-𝔅𝔇-𝔊𝔍-𝔔𝔖-𝔜𝔞-𝔹𝔻-𝔾𝕀-𝕄𝕆-𝕆𝕊-𝕐𝕒-𝚥𝚨-𝛀𝛂-𝛚𝛜-𝛺𝛼-𝜔𝜖-𝜴𝜶-𝝎𝝐-𝝮𝝰-𝞈𝞊-𝞨𝞪-𝟂𝟄-𝟋𞠀-𞣄𞸀-𞸃𞸅-𞸟𞸡-𞸢𞸤-𞸤𞸧-𞸧𞸩-𞸲𞸴-𞸷𞸹-𞸹𞸻-𞸻𞹂-𞹂𞹇-𞹇𞹉-𞹉𞹋-𞹋𞹍-𞹏𞹑-𞹒𞹔-𞹔𞹗-𞹗𞹙-𞹙𞹛-𞹛𞹝-𞹝𞹟-𞹟𞹡-𞹢𞹤-𞹤𞹧-𞹪𞹬-𞹲𞹴-𞹷𞹹-𞹼𞹾-𞹾𞺀-𞺉𞺋-𞺛𞺡-𞺣𞺥-𞺩𞺫-𞺻𠀀-𪛖𪜀-𫜴𫝀-𫠝𫠠-𬺡丽-𪘀])+)"
-consistent!(bullet_core_3, "^(?u:d/d)((?u:[A-Za-zª-ªµ-µº-ºÀ-ÖØ-öø-ˁˆ-ˑˠ-ˤˬ-ˬˮ-ˮͰ-ʹͶ-ͷͺ-ͽͿ-ͿΆ-ΆΈ-ΊΌ-ΌΎ-ΡΣ-ϵϷ-ҁҊ-ԯԱ-Ֆՙ-ՙա-ևא-תװ-ײؠ-يٮ-ٯٱ-ۓە-ەۥ-ۦۮ-ۯۺ-ۼۿ-ۿܐ-ܐܒ-ܯݍ-ޥޱ-ޱߊ-ߪߴ-ߵߺ-ߺࠀ-ࠕࠚ-ࠚࠤ-ࠤࠨ-ࠨࡀ-ࡘࢠ-ࢴऄ-हऽ-ऽॐ-ॐक़-ॡॱ-ঀঅ-ঌএ-ঐও-নপ-রল-লশ-হঽ-ঽৎ-ৎড়-ঢ়য়-ৡৰ-ৱਅ-ਊਏ-ਐਓ-ਨਪ-ਰਲ-ਲ਼ਵ-ਸ਼ਸ-ਹਖ਼-ੜਫ਼-ਫ਼ੲ-ੴઅ-ઍએ-ઑઓ-નપ-રલ-ળવ-હઽ-ઽૐ-ૐૠ-ૡૹ-ૹଅ-ଌଏ-ଐଓ-ନପ-ରଲ-ଳଵ-ହଽ-ଽଡ଼-ଢ଼ୟ-ୡୱ-ୱஃ-ஃஅ-ஊஎ-ஐஒ-கங-சஜ-ஜஞ-டண-தந-பம-ஹௐ-ௐఅ-ఌఎ-ఐఒ-నప-హఽ-ఽౘ-ౚౠ-ౡಅ-ಌಎ-ಐಒ-ನಪ-ಳವ-ಹಽ-ಽೞ-ೞೠ-ೡೱ-ೲഅ-ഌഎ-ഐഒ-ഺഽ-ഽൎ-ൎൟ-ൡൺ-ൿඅ-ඖක-නඳ-රල-ලව-ෆก-ะา-ำเ-ๆກ-ຂຄ-ຄງ-ຈຊ-ຊຍ-ຍດ-ທນ-ຟມ-ຣລ-ລວ-ວສ-ຫອ-ະາ-ຳຽ-ຽເ-ໄໆ-ໆໜ-ໟༀ-ༀཀ-ཇཉ-ཬྈ-ྌက-ဪဿ-ဿၐ-ၕၚ-ၝၡ-ၡၥ-ၦၮ-ၰၵ-ႁႎ-ႎႠ-ჅჇ-ჇჍ-Ⴭა-ჺჼ-ቈቊ-ቍቐ-ቖቘ-ቘቚ-ቝበ-ኈኊ-ኍነ-ኰኲ-ኵኸ-ኾዀ-ዀዂ-ዅወ-ዖዘ-ጐጒ-ጕጘ-ፚᎀ-ᎏᎠ-Ᏽᏸ-ᏽᐁ-ᙬᙯ-ᙿᚁ-ᚚᚠ-ᛪᛱ-ᛸᜀ-ᜌᜎ-ᜑᜠ-ᜱᝀ-ᝑᝠ-ᝬᝮ-ᝰក-ឳៗ-ៗៜ-ៜᠠ-ᡷᢀ-ᢨᢪ-ᢪᢰ-ᣵᤀ-ᤞᥐ-ᥭᥰ-ᥴᦀ-ᦫᦰ-ᧉᨀ-ᨖᨠ-ᩔᪧ-ᪧᬅ-ᬳᭅ-ᭋᮃ-ᮠᮮ-ᮯᮺ-ᯥᰀ-ᰣᱍ-ᱏᱚ-ᱽᳩ-ᳬᳮ-ᳱᳵ-ᳶᴀ-ᶿḀ-ἕἘ-Ἕἠ-ὅὈ-Ὅὐ-ὗὙ-ὙὛ-ὛὝ-ὝὟ-ώᾀ-ᾴᾶ-ᾼι-ιῂ-ῄῆ-ῌῐ-ΐῖ-Ίῠ-Ῥῲ-ῴῶ-ῼⁱ-ⁱⁿ-ⁿₐ-ₜℂ-ℂℇ-ℇℊ-ℓℕ-ℕℙ-ℝℤ-ℤΩ-Ωℨ-ℨK-ℭℯ-ℹℼ-ℿⅅ-ⅉⅎ-ⅎↃ-ↄⰀ-Ⱞⰰ-ⱞⱠ-ⳤⳫ-ⳮⳲ-ⳳⴀ-ⴥⴧ-ⴧⴭ-ⴭⴰ-ⵧⵯ-ⵯⶀ-ⶖⶠ-ⶦⶨ-ⶮⶰ-ⶶⶸ-ⶾⷀ-ⷆⷈ-ⷎⷐ-ⷖⷘ-ⷞⸯ-ⸯ々-〆〱-〵〻-〼ぁ-ゖゝ-ゟァ-ヺー-ヿㄅ-ㄭㄱ-ㆎㆠ-ㆺㇰ-ㇿ㐀-䶵一-鿕ꀀ-ꒌꓐ-ꓽꔀ-ꘌꘐ-ꘟꘪ-ꘫꙀ-ꙮꙿ-ꚝꚠ-ꛥꜗ-ꜟꜢ-ꞈꞋ-ꞭꞰ-ꞷꟷ-ꠁꠃ-ꠅꠇ-ꠊꠌ-ꠢꡀ-ꡳꢂ-ꢳꣲ-ꣷꣻ-ꣻꣽ-ꣽꤊ-ꤥꤰ-ꥆꥠ-ꥼꦄ-ꦲꧏ-ꧏꧠ-ꧤꧦ-ꧯꧺ-ꧾꨀ-ꨨꩀ-ꩂꩄ-ꩋꩠ-ꩶꩺ-ꩺꩾ-ꪯꪱ-ꪱꪵ-ꪶꪹ-ꪽꫀ-ꫀꫂ-ꫂꫛ-ꫝꫠ-ꫪꫲ-ꫴꬁ-ꬆꬉ-ꬎꬑ-ꬖꬠ-ꬦꬨ-ꬮꬰ-ꭚꭜ-ꭥꭰ-ꯢ가-힣ힰ-ퟆퟋ-ퟻ豈-舘並-龎ﬀ-ﬆﬓ-ﬗיִ-יִײַ-ﬨשׁ-זּטּ-לּמּ-מּנּ-סּףּ-פּצּ-ﮱﯓ-ﴽﵐ-ﶏﶒ-ﷇﷰ-ﷻﹰ-ﹴﹶ-ﻼＡ-Ｚａ-ｚｦ-ﾾￂ-ￇￊ-ￏￒ-ￗￚ-ￜ𐀀-𐀋𐀍-𐀦𐀨-𐀺𐀼-𐀽𐀿-𐁍𐁐-𐁝𐂀-𐃺𐊀-𐊜𐊠-𐋐𐌀-𐌟𐌰-𐍀𐍂-𐍉𐍐-𐍵𐎀-𐎝𐎠-𐏃𐏈-𐏏𐐀-𐒝𐔀-𐔧𐔰-𐕣𐘀-𐜶𐝀-𐝕𐝠-𐝧𐠀-𐠅𐠈-𐠈𐠊-𐠵𐠷-𐠸𐠼-𐠼𐠿-𐡕𐡠-𐡶𐢀-𐢞𐣠-𐣲𐣴-𐣵𐤀-𐤕𐤠-𐤹𐦀-𐦷𐦾-𐦿𐨀-𐨀𐨐-𐨓𐨕-𐨗𐨙-𐨳𐩠-𐩼𐪀-𐪜𐫀-𐫇𐫉-𐫤𐬀-𐬵𐭀-𐭕𐭠-𐭲𐮀-𐮑𐰀-𐱈𐲀-𐲲𐳀-𐳲𑀃-𑀷𑂃-𑂯𑃐-𑃨𑄃-𑄦𑅐-𑅲𑅶-𑅶𑆃-𑆲𑇁-𑇄𑇚-𑇚𑇜-𑇜𑈀-𑈑𑈓-𑈫𑊀-𑊆𑊈-𑊈𑊊-𑊍𑊏-𑊝𑊟-𑊨𑊰-𑋞𑌅-𑌌𑌏-𑌐𑌓-𑌨𑌪-𑌰𑌲-𑌳𑌵-𑌹𑌽-𑌽𑍐-𑍐𑍝-𑍡𑒀-𑒯𑓄-𑓅𑓇-𑓇𑖀-𑖮𑗘-𑗛𑘀-𑘯𑙄-𑙄𑚀-𑚪𑜀-𑜙𑢠-𑣟𑣿-𑣿𑫀-𑫸𒀀-𒎙𒒀-𒕃𓀀-𓐮𔐀-𔙆𖠀-𖨸𖩀-𖩞𖫐-𖫭𖬀-𖬯𖭀-𖭃𖭣-𖭷𖭽-𖮏𖼀-𖽄𖽐-𖽐𖾓-𖾟𛀀-𛀁𛰀-𛱪𛱰-𛱼𛲀-𛲈𛲐-𛲙𝐀-𝑔𝑖-𝒜𝒞-𝒟𝒢-𝒢𝒥-𝒦𝒩-𝒬𝒮-𝒹𝒻-𝒻𝒽-𝓃𝓅-𝔅𝔇-𝔊𝔍-𝔔𝔖-𝔜𝔞-𝔹𝔻-𝔾𝕀-𝕄𝕆-𝕆𝕊-𝕐𝕒-𝚥𝚨-𝛀𝛂-𝛚𝛜-𝛺𝛼-𝜔𝜖-𝜴𝜶-𝝎𝝐-𝝮𝝰-𝞈𝞊-𝞨𝞪-𝟂𝟄-𝟋𞠀-𞣄𞸀-𞸃𞸅-𞸟𞸡-𞸢𞸤-𞸤𞸧-𞸧𞸩-𞸲𞸴-𞸷𞸹-𞸹𞸻-𞸻𞹂-𞹂𞹇-𞹇𞹉-𞹉𞹋-𞹋𞹍-𞹏𞹑-𞹒𞹔-𞹔𞹗-𞹗𞹙-𞹙𞹛-𞹛𞹝-𞹝𞹟-𞹟𞹡-𞹢𞹤-𞹤𞹧-𞹪𞹬-𞹲𞹴-𞹷𞹹-𞹼𞹾-𞹾𞺀-𞺉𞺋-𞺛𞺡-𞺣𞺥-𞺩𞺫-𞺻𠀀-𪛖𪜀-𫜴𫝀-𫠝𫠠-𬺡丽-𪘀])+)");
+consistent!(bullet_core_3, "^(?u:d/d)((?u:[A-Za-z\u{aa}-\u{aa}\u{b5}-\u{b5}\u{ba}-\u{ba}\u{c0}-\u{d6}\u{d8}-\u{f6}\u{f8}-\u{2c1}\u{2c6}-\u{2d1}\u{2e0}-\u{2e4}\u{2ec}-\u{2ec}\u{2ee}-\u{2ee}\u{370}-\u{374}\u{376}-\u{377}\u{37a}-\u{37d}\u{37f}-\u{37f}\u{386}-\u{386}\u{388}-\u{38a}\u{38c}-\u{38c}\u{38e}-\u{3a1}\u{3a3}-\u{3f5}\u{3f7}-\u{481}\u{48a}-\u{52f}\u{531}-\u{556}\u{559}-\u{559}\u{561}-\u{587}\u{5d0}-\u{5ea}\u{5f0}-\u{5f2}\u{620}-\u{64a}\u{66e}-\u{66f}\u{671}-\u{6d3}\u{6d5}-\u{6d5}\u{6e5}-\u{6e6}\u{6ee}-\u{6ef}\u{6fa}-\u{6fc}\u{6ff}-\u{6ff}\u{710}-\u{710}\u{712}-\u{72f}\u{74d}-\u{7a5}\u{7b1}-\u{7b1}\u{7ca}-\u{7ea}\u{7f4}-\u{7f5}\u{7fa}-\u{7fa}\u{800}-\u{815}\u{81a}-\u{81a}\u{824}-\u{824}\u{828}-\u{828}\u{840}-\u{858}\u{8a0}-\u{8b4}\u{904}-\u{939}\u{93d}-\u{93d}\u{950}-\u{950}\u{958}-\u{961}\u{971}-\u{980}\u{985}-\u{98c}\u{98f}-\u{990}\u{993}-\u{9a8}\u{9aa}-\u{9b0}\u{9b2}-\u{9b2}\u{9b6}-\u{9b9}\u{9bd}-\u{9bd}\u{9ce}-\u{9ce}\u{9dc}-\u{9dd}\u{9df}-\u{9e1}\u{9f0}-\u{9f1}\u{a05}-\u{a0a}\u{a0f}-\u{a10}\u{a13}-\u{a28}\u{a2a}-\u{a30}\u{a32}-\u{a33}\u{a35}-\u{a36}\u{a38}-\u{a39}\u{a59}-\u{a5c}\u{a5e}-\u{a5e}\u{a72}-\u{a74}\u{a85}-\u{a8d}\u{a8f}-\u{a91}\u{a93}-\u{aa8}\u{aaa}-\u{ab0}\u{ab2}-\u{ab3}\u{ab5}-\u{ab9}\u{abd}-\u{abd}\u{ad0}-\u{ad0}\u{ae0}-\u{ae1}\u{af9}-\u{af9}\u{b05}-\u{b0c}\u{b0f}-\u{b10}\u{b13}-\u{b28}\u{b2a}-\u{b30}\u{b32}-\u{b33}\u{b35}-\u{b39}\u{b3d}-\u{b3d}\u{b5c}-\u{b5d}\u{b5f}-\u{b61}\u{b71}-\u{b71}\u{b83}-\u{b83}\u{b85}-\u{b8a}\u{b8e}-\u{b90}\u{b92}-\u{b95}\u{b99}-\u{b9a}\u{b9c}-\u{b9c}\u{b9e}-\u{b9f}\u{ba3}-\u{ba4}\u{ba8}-\u{baa}\u{bae}-\u{bb9}\u{bd0}-\u{bd0}\u{c05}-\u{c0c}\u{c0e}-\u{c10}\u{c12}-\u{c28}\u{c2a}-\u{c39}\u{c3d}-\u{c3d}\u{c58}-\u{c5a}\u{c60}-\u{c61}\u{c85}-\u{c8c}\u{c8e}-\u{c90}\u{c92}-\u{ca8}\u{caa}-\u{cb3}\u{cb5}-\u{cb9}\u{cbd}-\u{cbd}\u{cde}-\u{cde}\u{ce0}-\u{ce1}\u{cf1}-\u{cf2}\u{d05}-\u{d0c}\u{d0e}-\u{d10}\u{d12}-\u{d3a}\u{d3d}-\u{d3d}\u{d4e}-\u{d4e}\u{d5f}-\u{d61}\u{d7a}-\u{d7f}\u{d85}-\u{d96}\u{d9a}-\u{db1}\u{db3}-\u{dbb}\u{dbd}-\u{dbd}\u{dc0}-\u{dc6}\u{e01}-\u{e30}\u{e32}-\u{e33}\u{e40}-\u{e46}\u{e81}-\u{e82}\u{e84}-\u{e84}\u{e87}-\u{e88}\u{e8a}-\u{e8a}\u{e8d}-\u{e8d}\u{e94}-\u{e97}\u{e99}-\u{e9f}\u{ea1}-\u{ea3}\u{ea5}-\u{ea5}\u{ea7}-\u{ea7}\u{eaa}-\u{eab}\u{ead}-\u{eb0}\u{eb2}-\u{eb3}\u{ebd}-\u{ebd}\u{ec0}-\u{ec4}\u{ec6}-\u{ec6}\u{edc}-\u{edf}\u{f00}-\u{f00}\u{f40}-\u{f47}\u{f49}-\u{f6c}\u{f88}-\u{f8c}\u{1000}-\u{102a}\u{103f}-\u{103f}\u{1050}-\u{1055}\u{105a}-\u{105d}\u{1061}-\u{1061}\u{1065}-\u{1066}\u{106e}-\u{1070}\u{1075}-\u{1081}\u{108e}-\u{108e}\u{10a0}-\u{10c5}\u{10c7}-\u{10c7}\u{10cd}-\u{10cd}\u{10d0}-\u{10fa}\u{10fc}-\u{1248}\u{124a}-\u{124d}\u{1250}-\u{1256}\u{1258}-\u{1258}\u{125a}-\u{125d}\u{1260}-\u{1288}\u{128a}-\u{128d}\u{1290}-\u{12b0}\u{12b2}-\u{12b5}\u{12b8}-\u{12be}\u{12c0}-\u{12c0}\u{12c2}-\u{12c5}\u{12c8}-\u{12d6}\u{12d8}-\u{1310}\u{1312}-\u{1315}\u{1318}-\u{135a}\u{1380}-\u{138f}\u{13a0}-\u{13f5}\u{13f8}-\u{13fd}\u{1401}-\u{166c}\u{166f}-\u{167f}\u{1681}-\u{169a}\u{16a0}-\u{16ea}\u{16f1}-\u{16f8}\u{1700}-\u{170c}\u{170e}-\u{1711}\u{1720}-\u{1731}\u{1740}-\u{1751}\u{1760}-\u{176c}\u{176e}-\u{1770}\u{1780}-\u{17b3}\u{17d7}-\u{17d7}\u{17dc}-\u{17dc}\u{1820}-\u{1877}\u{1880}-\u{18a8}\u{18aa}-\u{18aa}\u{18b0}-\u{18f5}\u{1900}-\u{191e}\u{1950}-\u{196d}\u{1970}-\u{1974}\u{1980}-\u{19ab}\u{19b0}-\u{19c9}\u{1a00}-\u{1a16}\u{1a20}-\u{1a54}\u{1aa7}-\u{1aa7}\u{1b05}-\u{1b33}\u{1b45}-\u{1b4b}\u{1b83}-\u{1ba0}\u{1bae}-\u{1baf}\u{1bba}-\u{1be5}\u{1c00}-\u{1c23}\u{1c4d}-\u{1c4f}\u{1c5a}-\u{1c7d}\u{1ce9}-\u{1cec}\u{1cee}-\u{1cf1}\u{1cf5}-\u{1cf6}\u{1d00}-\u{1dbf}\u{1e00}-\u{1f15}\u{1f18}-\u{1f1d}\u{1f20}-\u{1f45}\u{1f48}-\u{1f4d}\u{1f50}-\u{1f57}\u{1f59}-\u{1f59}\u{1f5b}-\u{1f5b}\u{1f5d}-\u{1f5d}\u{1f5f}-\u{1f7d}\u{1f80}-\u{1fb4}\u{1fb6}-\u{1fbc}\u{1fbe}-\u{1fbe}\u{1fc2}-\u{1fc4}\u{1fc6}-\u{1fcc}\u{1fd0}-\u{1fd3}\u{1fd6}-\u{1fdb}\u{1fe0}-\u{1fec}\u{1ff2}-\u{1ff4}\u{1ff6}-\u{1ffc}\u{2071}-\u{2071}\u{207f}-\u{207f}\u{2090}-\u{209c}\u{2102}-\u{2102}\u{2107}-\u{2107}\u{210a}-\u{2113}\u{2115}-\u{2115}\u{2119}-\u{211d}\u{2124}-\u{2124}\u{2126}-\u{2126}\u{2128}-\u{2128}\u{212a}-\u{212d}\u{212f}-\u{2139}\u{213c}-\u{213f}\u{2145}-\u{2149}\u{214e}-\u{214e}\u{2183}-\u{2184}\u{2c00}-\u{2c2e}\u{2c30}-\u{2c5e}\u{2c60}-\u{2ce4}\u{2ceb}-\u{2cee}\u{2cf2}-\u{2cf3}\u{2d00}-\u{2d25}\u{2d27}-\u{2d27}\u{2d2d}-\u{2d2d}\u{2d30}-\u{2d67}\u{2d6f}-\u{2d6f}\u{2d80}-\u{2d96}\u{2da0}-\u{2da6}\u{2da8}-\u{2dae}\u{2db0}-\u{2db6}\u{2db8}-\u{2dbe}\u{2dc0}-\u{2dc6}\u{2dc8}-\u{2dce}\u{2dd0}-\u{2dd6}\u{2dd8}-\u{2dde}\u{2e2f}-\u{2e2f}\u{3005}-\u{3006}\u{3031}-\u{3035}\u{303b}-\u{303c}\u{3041}-\u{3096}\u{309d}-\u{309f}\u{30a1}-\u{30fa}\u{30fc}-\u{30ff}\u{3105}-\u{312d}\u{3131}-\u{318e}\u{31a0}-\u{31ba}\u{31f0}-\u{31ff}\u{3400}-\u{4db5}\u{4e00}-\u{9fd5}\u{a000}-\u{a48c}\u{a4d0}-\u{a4fd}\u{a500}-\u{a60c}\u{a610}-\u{a61f}\u{a62a}-\u{a62b}\u{a640}-\u{a66e}\u{a67f}-\u{a69d}\u{a6a0}-\u{a6e5}\u{a717}-\u{a71f}\u{a722}-\u{a788}\u{a78b}-\u{a7ad}\u{a7b0}-\u{a7b7}\u{a7f7}-\u{a801}\u{a803}-\u{a805}\u{a807}-\u{a80a}\u{a80c}-\u{a822}\u{a840}-\u{a873}\u{a882}-\u{a8b3}\u{a8f2}-\u{a8f7}\u{a8fb}-\u{a8fb}\u{a8fd}-\u{a8fd}\u{a90a}-\u{a925}\u{a930}-\u{a946}\u{a960}-\u{a97c}\u{a984}-\u{a9b2}\u{a9cf}-\u{a9cf}\u{a9e0}-\u{a9e4}\u{a9e6}-\u{a9ef}\u{a9fa}-\u{a9fe}\u{aa00}-\u{aa28}\u{aa40}-\u{aa42}\u{aa44}-\u{aa4b}\u{aa60}-\u{aa76}\u{aa7a}-\u{aa7a}\u{aa7e}-\u{aaaf}\u{aab1}-\u{aab1}\u{aab5}-\u{aab6}\u{aab9}-\u{aabd}\u{aac0}-\u{aac0}\u{aac2}-\u{aac2}\u{aadb}-\u{aadd}\u{aae0}-\u{aaea}\u{aaf2}-\u{aaf4}\u{ab01}-\u{ab06}\u{ab09}-\u{ab0e}\u{ab11}-\u{ab16}\u{ab20}-\u{ab26}\u{ab28}-\u{ab2e}\u{ab30}-\u{ab5a}\u{ab5c}-\u{ab65}\u{ab70}-\u{abe2}\u{ac00}-\u{d7a3}\u{d7b0}-\u{d7c6}\u{d7cb}-\u{d7fb}\u{f900}-\u{fa6d}\u{fa70}-\u{fad9}\u{fb00}-\u{fb06}\u{fb13}-\u{fb17}\u{fb1d}-\u{fb1d}\u{fb1f}-\u{fb28}\u{fb2a}-\u{fb36}\u{fb38}-\u{fb3c}\u{fb3e}-\u{fb3e}\u{fb40}-\u{fb41}\u{fb43}-\u{fb44}\u{fb46}-\u{fbb1}\u{fbd3}-\u{fd3d}\u{fd50}-\u{fd8f}\u{fd92}-\u{fdc7}\u{fdf0}-\u{fdfb}\u{fe70}-\u{fe74}\u{fe76}-\u{fefc}\u{ff21}-\u{ff3a}\u{ff41}-\u{ff5a}\u{ff66}-\u{ffbe}\u{ffc2}-\u{ffc7}\u{ffca}-\u{ffcf}\u{ffd2}-\u{ffd7}\u{ffda}-\u{ffdc}\u{10000}-\u{1000b}\u{1000d}-\u{10026}\u{10028}-\u{1003a}\u{1003c}-\u{1003d}\u{1003f}-\u{1004d}\u{10050}-\u{1005d}\u{10080}-\u{100fa}\u{10280}-\u{1029c}\u{102a0}-\u{102d0}\u{10300}-\u{1031f}\u{10330}-\u{10340}\u{10342}-\u{10349}\u{10350}-\u{10375}\u{10380}-\u{1039d}\u{103a0}-\u{103c3}\u{103c8}-\u{103cf}\u{10400}-\u{1049d}\u{10500}-\u{10527}\u{10530}-\u{10563}\u{10600}-\u{10736}\u{10740}-\u{10755}\u{10760}-\u{10767}\u{10800}-\u{10805}\u{10808}-\u{10808}\u{1080a}-\u{10835}\u{10837}-\u{10838}\u{1083c}-\u{1083c}\u{1083f}-\u{10855}\u{10860}-\u{10876}\u{10880}-\u{1089e}\u{108e0}-\u{108f2}\u{108f4}-\u{108f5}\u{10900}-\u{10915}\u{10920}-\u{10939}\u{10980}-\u{109b7}\u{109be}-\u{109bf}\u{10a00}-\u{10a00}\u{10a10}-\u{10a13}\u{10a15}-\u{10a17}\u{10a19}-\u{10a33}\u{10a60}-\u{10a7c}\u{10a80}-\u{10a9c}\u{10ac0}-\u{10ac7}\u{10ac9}-\u{10ae4}\u{10b00}-\u{10b35}\u{10b40}-\u{10b55}\u{10b60}-\u{10b72}\u{10b80}-\u{10b91}\u{10c00}-\u{10c48}\u{10c80}-\u{10cb2}\u{10cc0}-\u{10cf2}\u{11003}-\u{11037}\u{11083}-\u{110af}\u{110d0}-\u{110e8}\u{11103}-\u{11126}\u{11150}-\u{11172}\u{11176}-\u{11176}\u{11183}-\u{111b2}\u{111c1}-\u{111c4}\u{111da}-\u{111da}\u{111dc}-\u{111dc}\u{11200}-\u{11211}\u{11213}-\u{1122b}\u{11280}-\u{11286}\u{11288}-\u{11288}\u{1128a}-\u{1128d}\u{1128f}-\u{1129d}\u{1129f}-\u{112a8}\u{112b0}-\u{112de}\u{11305}-\u{1130c}\u{1130f}-\u{11310}\u{11313}-\u{11328}\u{1132a}-\u{11330}\u{11332}-\u{11333}\u{11335}-\u{11339}\u{1133d}-\u{1133d}\u{11350}-\u{11350}\u{1135d}-\u{11361}\u{11480}-\u{114af}\u{114c4}-\u{114c5}\u{114c7}-\u{114c7}\u{11580}-\u{115ae}\u{115d8}-\u{115db}\u{11600}-\u{1162f}\u{11644}-\u{11644}\u{11680}-\u{116aa}\u{11700}-\u{11719}\u{118a0}-\u{118df}\u{118ff}-\u{118ff}\u{11ac0}-\u{11af8}\u{12000}-\u{12399}\u{12480}-\u{12543}\u{13000}-\u{1342e}\u{14400}-\u{14646}\u{16800}-\u{16a38}\u{16a40}-\u{16a5e}\u{16ad0}-\u{16aed}\u{16b00}-\u{16b2f}\u{16b40}-\u{16b43}\u{16b63}-\u{16b77}\u{16b7d}-\u{16b8f}\u{16f00}-\u{16f44}\u{16f50}-\u{16f50}\u{16f93}-\u{16f9f}\u{1b000}-\u{1b001}\u{1bc00}-\u{1bc6a}\u{1bc70}-\u{1bc7c}\u{1bc80}-\u{1bc88}\u{1bc90}-\u{1bc99}\u{1d400}-\u{1d454}\u{1d456}-\u{1d49c}\u{1d49e}-\u{1d49f}\u{1d4a2}-\u{1d4a2}\u{1d4a5}-\u{1d4a6}\u{1d4a9}-\u{1d4ac}\u{1d4ae}-\u{1d4b9}\u{1d4bb}-\u{1d4bb}\u{1d4bd}-\u{1d4c3}\u{1d4c5}-\u{1d505}\u{1d507}-\u{1d50a}\u{1d50d}-\u{1d514}\u{1d516}-\u{1d51c}\u{1d51e}-\u{1d539}\u{1d53b}-\u{1d53e}\u{1d540}-\u{1d544}\u{1d546}-\u{1d546}\u{1d54a}-\u{1d550}\u{1d552}-\u{1d6a5}\u{1d6a8}-\u{1d6c0}\u{1d6c2}-\u{1d6da}\u{1d6dc}-\u{1d6fa}\u{1d6fc}-\u{1d714}\u{1d716}-\u{1d734}\u{1d736}-\u{1d74e}\u{1d750}-\u{1d76e}\u{1d770}-\u{1d788}\u{1d78a}-\u{1d7a8}\u{1d7aa}-\u{1d7c2}\u{1d7c4}-\u{1d7cb}\u{1e800}-\u{1e8c4}\u{1ee00}-\u{1ee03}\u{1ee05}-\u{1ee1f}\u{1ee21}-\u{1ee22}\u{1ee24}-\u{1ee24}\u{1ee27}-\u{1ee27}\u{1ee29}-\u{1ee32}\u{1ee34}-\u{1ee37}\u{1ee39}-\u{1ee39}\u{1ee3b}-\u{1ee3b}\u{1ee42}-\u{1ee42}\u{1ee47}-\u{1ee47}\u{1ee49}-\u{1ee49}\u{1ee4b}-\u{1ee4b}\u{1ee4d}-\u{1ee4f}\u{1ee51}-\u{1ee52}\u{1ee54}-\u{1ee54}\u{1ee57}-\u{1ee57}\u{1ee59}-\u{1ee59}\u{1ee5b}-\u{1ee5b}\u{1ee5d}-\u{1ee5d}\u{1ee5f}-\u{1ee5f}\u{1ee61}-\u{1ee62}\u{1ee64}-\u{1ee64}\u{1ee67}-\u{1ee6a}\u{1ee6c}-\u{1ee72}\u{1ee74}-\u{1ee77}\u{1ee79}-\u{1ee7c}\u{1ee7e}-\u{1ee7e}\u{1ee80}-\u{1ee89}\u{1ee8b}-\u{1ee9b}\u{1eea1}-\u{1eea3}\u{1eea5}-\u{1eea9}\u{1eeab}-\u{1eebb}\u{20000}-\u{2a6d6}\u{2a700}-\u{2b734}\u{2b740}-\u{2b81d}\u{2b820}-\u{2cea1}\u{2f800}-\u{2fa1d}])+)");
 
 // bullet_core-0.1.1: "^(?u:\\()"
 consistent!(bullet_core_4, "^(?u:\\()");
@@ -1946,7 +1946,7 @@ consistent!(bullet_core_12, "^(?u:\\])");
 consistent!(bullet_core_13, "^(?u:\\^)");
 
 // bullet_core-0.1.1: "^(?u:·)"
-consistent!(bullet_core_14, "^(?u:·)");
+consistent!(bullet_core_14, "^(?u:\u{b7})");
 
 // actix-web-0.6.13: "//+"
 consistent!(actix_web_0, "//+");
@@ -1958,7 +1958,7 @@ consistent!(actix_web_1, "//+");
 consistent!(althea_kernel_interface_0, r"(\S*) .* (\S*) (REACHABLE|STALE|DELAY)");
 
 // althea_kernel_interface-0.1.0: r"-s (.*) --ip6-dst (.*)/.* bcnt = (.*)"
-consistent!(althea_kernel_interface_1, r"-s (.*) --ip6-dst (.*)/.* bcnt = (.*)");
+consistent!(althea_kernel_interface_1, "-s (.*) --ip6-dst (.*)/.* bcnt = (.*)");
 
 // alcibiades-0.3.0: r"\buci(?:\s|$)"
 consistent!(alcibiades_0, r"\buci(?:\s|$)");
@@ -1982,7 +1982,7 @@ consistent!(rust_inbox_0, "^+(.*)\r\n");
 consistent!(rust_inbox_1, r"^\* CAPABILITY (.*)\r\n");
 
 // rust_inbox-0.0.5: r"^([a-zA-Z0-9]+) (OK|NO|BAD)(.*)"
-consistent!(rust_inbox_2, r"^([a-zA-Z0-9]+) (OK|NO|BAD)(.*)");
+consistent!(rust_inbox_2, "^([a-zA-Z0-9]+) (OK|NO|BAD)(.*)");
 
 // rust_inbox-0.0.5: r"^\* (\d+) EXISTS\r\n"
 consistent!(rust_inbox_3, r"^\* (\d+) EXISTS\r\n");
@@ -2021,7 +2021,7 @@ consistent!(rustfmt_0, r"([^\\](\\\\)*)\\[\n\r][[:space:]]*");
 consistent!(rustfmt_core_0, r"(^\s*$)|(^\s*//\s*rustfmt-[^:]+:\s*\S+)");
 
 // rustfmt-core-0.4.0: r"^## `([^`]+)`"
-consistent!(rustfmt_core_1, r"^## `([^`]+)`");
+consistent!(rustfmt_core_1, "^## `([^`]+)`");
 
 // rustfmt-core-0.4.0: r"([^\\](\\\\)*)\\[\n\r][[:space:]]*"
 consistent!(rustfmt_core_2, r"([^\\](\\\\)*)\\[\n\r][[:space:]]*");
@@ -2030,16 +2030,16 @@ consistent!(rustfmt_core_2, r"([^\\](\\\\)*)\\[\n\r][[:space:]]*");
 consistent!(rustfmt_core_3, r"\s;");
 
 // rust-enum-derive-0.4.0: r"^(0x)?([:digit:]+)$"
-consistent!(rust_enum_derive_0, r"^(0x)?([:digit:]+)$");
+consistent!(rust_enum_derive_0, "^(0x)?([:digit:]+)$");
 
 // rust-enum-derive-0.4.0: r"^([:digit:]+)[:space:]*<<[:space:]*([:digit:]+)$"
-consistent!(rust_enum_derive_1, r"^([:digit:]+)[:space:]*<<[:space:]*([:digit:]+)$");
+consistent!(rust_enum_derive_1, "^([:digit:]+)[:space:]*<<[:space:]*([:digit:]+)$");
 
 // rust-enum-derive-0.4.0: r"^[:space:]*([[:alnum:]_]+)([:space:]*=[:space:]*([:graph:]+))?[:space:]*,"
-consistent!(rust_enum_derive_2, r"^[:space:]*([[:alnum:]_]+)([:space:]*=[:space:]*([:graph:]+))?[:space:]*,");
+consistent!(rust_enum_derive_2, "^[:space:]*([[:alnum:]_]+)([:space:]*=[:space:]*([:graph:]+))?[:space:]*,");
 
 // rust-enum-derive-0.4.0: r"^#define[:space:]+([:graph:]+)[:space:]+([:graph:]+)"
-consistent!(rust_enum_derive_3, r"^#define[:space:]+([:graph:]+)[:space:]+([:graph:]+)");
+consistent!(rust_enum_derive_3, "^#define[:space:]+([:graph:]+)[:space:]+([:graph:]+)");
 
 // rustsourcebundler-0.2.0: r"^\s*pub mod (.+);$"
 consistent!(rustsourcebundler_0, r"^\s*pub mod (.+);$");
@@ -2102,7 +2102,7 @@ consistent!(dishub_0, r"(\d+)s");
 consistent!(spreadsheet_textconv_0, r"\n");
 
 // spreadsheet_textconv-0.1.0: r"\r"
-consistent!(spreadsheet_textconv_1, r"\r");
+consistent!(spreadsheet_textconv_1, r"\");
 
 // spreadsheet_textconv-0.1.0: r"\t"
 consistent!(spreadsheet_textconv_2, r"\t");
@@ -2114,19 +2114,19 @@ consistent!(split_aud_0, r"DELAY (-?\d+)ms");
 consistent!(split_aud_1, r"Trim\((\d+), ?(\d+)\)");
 
 // spotrust-0.0.5: r"spotify:[a-z]+:[a-zA-Z0-9]+"
-consistent!(spotrust_0, r"spotify:[a-z]+:[a-zA-Z0-9]+");
+consistent!(spotrust_0, "spotify:[a-z]+:[a-zA-Z0-9]+");
 
 // spaceslugs-0.1.0: r"[^\x00-\x7F]"
 consistent!(spaceslugs_0, r"[^\x00-\x7F]");
 
 // spaceslugs-0.1.0: r"[']+"
-consistent!(spaceslugs_1, r"[']+");
+consistent!(spaceslugs_1, "[']+");
 
 // spaceslugs-0.1.0: r"\W+"
 consistent!(spaceslugs_2, r"\W+");
 
 // spaceslugs-0.1.0: r"[ ]+"
-consistent!(spaceslugs_3, r"[ ]+");
+consistent!(spaceslugs_3, "[ ]+");
 
 // space_email_api-0.1.1: "PHPSESSID=([0-9a-f]+)"
 consistent!(space_email_api_0, "PHPSESSID=([0-9a-f]+)");
@@ -2147,10 +2147,10 @@ consistent!(classifier_0, r"(\s)");
 consistent!(click_0, r"(-----BEGIN .*-----\n)((?:(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)*\n)+)(-----END .*-----)");
 
 // click-0.3.2: r"-----BEGIN PRIVATE KEY-----"
-consistent!(click_1, r"-----BEGIN PRIVATE KEY-----");
+consistent!(click_1, "-----BEGIN PRIVATE KEY-----");
 
 // ultrastar-txt-0.1.2: r"#([A-Z3a-z]*):(.*)"
-consistent!(ultrastar_txt_0, r"#([A-Z3a-z]*):(.*)");
+consistent!(ultrastar_txt_0, "#([A-Z3a-z]*):(.*)");
 
 // ultrastar-txt-0.1.2: "^-\\s?(-?[0-9]+)\\s*$"
 consistent!(ultrastar_txt_1, "^-\\s?(-?[0-9]+)\\s*$");
@@ -2180,7 +2180,7 @@ consistent!(stache_0, r"[^\w]");
 consistent!(strukt_0, "\"([<>]?)([xcbB\\?hHiIlLqQfdspP]*)\"");
 
 // steamid-ng-0.3.1: r"^STEAM_([0-4]):([0-1]):([0-9]{1,10})$"
-consistent!(steamid_ng_0, r"^STEAM_([0-4]):([0-1]):([0-9]{1,10})$");
+consistent!(steamid_ng_0, "^STEAM_([0-4]):([0-1]):([0-9]{1,10})$");
 
 // steamid-ng-0.3.1: r"^\[([AGMPCgcLTIUai]):([0-4]):([0-9]{1,10})(:([0-9]+))?\]$"
 consistent!(steamid_ng_1, r"^\[([AGMPCgcLTIUai]):([0-4]):([0-9]{1,10})(:([0-9]+))?\]$");
@@ -2210,7 +2210,7 @@ consistent!(tk_carbon_1, r"^([a-zA-Z0-9\.-]+)(?:\s+(\d+))$");
 consistent!(evalrs_0, r"extern\s+crate\s+([a-z0-9_]+)\s*;(\s*//(.+))?");
 
 // evalrs-0.0.10: r"(?m)^# "
-consistent!(evalrs_1, r"(?m)^# ");
+consistent!(evalrs_1, "(?m)^# ");
 
 // evalrs-0.0.10: r"(?m)^\s*fn +main *\( *\)"
 consistent!(evalrs_2, r"(?m)^\s*fn +main *\( *\)");
@@ -2228,7 +2228,7 @@ consistent!(rake_0, r"[^\P{P}-]|\s+-\s+");
 consistent!(rafy_0, r"^.*(?:(?:youtu\.be/|v/|vi/|u/w/|embed/)|(?:(?:watch)?\?v(?:i)?=|\&v(?:i)?=))([^#\&\?]*).*");
 
 // raven-0.2.1: r"^(?P<protocol>.*?)://(?P<public_key>.*?):(?P<secret_key>.*?)@(?P<host>.*?)/(?P<path>.*/)?(?P<project_id>.*)$"
-consistent!(raven_0, r"^(?P<protocol>.*?)://(?P<public_key>.*?):(?P<secret_key>.*?)@(?P<host>.*?)/(?P<path>.*/)?(?P<project_id>.*)$");
+consistent!(raven_0, "^(?P<protocol>.*?)://(?P<public_key>.*?):(?P<secret_key>.*?)@(?P<host>.*?)/(?P<path>.*/)?(?P<project_id>.*)$");
 
 // rargs-0.2.0: r"\{[[:space:]]*[^{}]*[[:space:]]*\}"
 consistent!(rargs_0, r"\{[[:space:]]*[^{}]*[[:space:]]*\}");
@@ -2243,13 +2243,13 @@ consistent!(rargs_2, r"^\{[[:space:]]*(?P<num>-?\d+)[[:space:]]*\}$");
 consistent!(rargs_3, r"^\{(?P<left>-?\d*)?\.\.(?P<right>-?\d*)?(?::(?P<sep>.*))?\}$");
 
 // rargs-0.2.0: r"(.*?)[[:space:]]+|(.*?)$"
-consistent!(rargs_4, r"(.*?)[[:space:]]+|(.*?)$");
+consistent!(rargs_4, "(.*?)[[:space:]]+|(.*?)$");
 
 // indradb-lib-0.15.0: r"[a-zA-Z0-9]{8}"
-consistent!(indradb_lib_0, r"[a-zA-Z0-9]{8}");
+consistent!(indradb_lib_0, "[a-zA-Z0-9]{8}");
 
 // fungi-lang-0.1.50: r"::"
-consistent!(fungi_lang_0, r"::");
+consistent!(fungi_lang_0, "::");
 
 // nickel-0.10.1: "/hello/(?P<name>[a-zA-Z]+)"
 consistent!(nickel_0, "/hello/(?P<name>[a-zA-Z]+)");
@@ -2282,7 +2282,7 @@ consistent!(parser_haskell_0, r"\{-[\s\S]*?-\}");
 consistent!(parser_haskell_1, r"(?m);+\s*$");
 
 // parser-haskell-0.2.0: r"(?m)^#(if|ifn?def|endif|else|include|elif).*"
-consistent!(parser_haskell_2, r"(?m)^#(if|ifn?def|endif|else|include|elif).*");
+consistent!(parser_haskell_2, "(?m)^#(if|ifn?def|endif|else|include|elif).*");
 
 // parser-haskell-0.2.0: r"'([^'\\]|\\[A-Z]{1,3}|\\.)'"
 consistent!(parser_haskell_3, r"'([^'\\]|\\[A-Z]{1,3}|\\.)'");
@@ -2303,7 +2303,7 @@ consistent!(html2md_2, "(?m)(\\S) $");
 consistent!(html2md_3, "(?m)^[-*] ");
 
 // ovpnfile-0.1.2: r"#.*$"
-consistent!(ovpnfile_0, r"#.*$");
+consistent!(ovpnfile_0, "#.*$");
 
 // ovpnfile-0.1.2: r"^<(\S+)>"
 consistent!(ovpnfile_1, r"^<(\S+)>");
@@ -2312,7 +2312,7 @@ consistent!(ovpnfile_1, r"^<(\S+)>");
 consistent!(ovpnfile_2, r"^</(\S+)>");
 
 // screenruster-saver-fractal-0.1.1: r"#([:xdigit:]{2})([:xdigit:]{2})([:xdigit:]{2})"
-consistent!(screenruster_saver_fractal_0, r"#([:xdigit:]{2})([:xdigit:]{2})([:xdigit:]{2})");
+consistent!(screenruster_saver_fractal_0, "#([:xdigit:]{2})([:xdigit:]{2})([:xdigit:]{2})");
 
 // scarlet-0.2.2: r"rgb\((?: *(\d{1,3}),)(?: *(\d{1,3}),)(?: *(\d{1,3}))\)"
 consistent!(scarlet_0, r"rgb\((?: *(\d{1,3}),)(?: *(\d{1,3}),)(?: *(\d{1,3}))\)");
@@ -2357,13 +2357,13 @@ consistent!(cpp_to_rust_5, r"(public|protected|private)\s*:");
 consistent!(fritzbox_logs_0, "(\\d{2}\\.\\d{2}\\.\\d{2}) (\\d{2}:\\d{2}:\\d{2}) (.*)");
 
 // fractal-matrix-api-3.29.0: r"mxc://(?P<server>[^/]+)/(?P<media>.+)"
-consistent!(fractal_matrix_api_0, r"mxc://(?P<server>[^/]+)/(?P<media>.+)");
+consistent!(fractal_matrix_api_0, "mxc://(?P<server>[^/]+)/(?P<media>.+)");
 
 // smtp2go-0.1.4: r"^api-[a-zA-Z0-9]{32}$"
-consistent!(smtp2go_0, r"^api-[a-zA-Z0-9]{32}$");
+consistent!(smtp2go_0, "^api-[a-zA-Z0-9]{32}$");
 
 // pusher-0.3.1: r"^[-a-zA-Z0-9_=@,.;]+$"
-consistent!(pusher_0, r"^[-a-zA-Z0-9_=@,.;]+$");
+consistent!(pusher_0, "^[-a-zA-Z0-9_=@,.;]+$");
 
 // pusher-0.3.1: r"\A\d+\.\d+\z"
 consistent!(pusher_1, r"\A\d+\.\d+\z");
@@ -2381,7 +2381,7 @@ consistent!(bakervm_2, r"^include! +([^\s]+)$");
 consistent!(bakervm_3, r"^@(\d+)$");
 
 // bakervm-0.9.0: r"^true|false$"
-consistent!(bakervm_4, r"^true|false$");
+consistent!(bakervm_4, "^true|false$");
 
 // bakervm-0.9.0: r"^(-?\d+)?\.[0-9]+$"
 consistent!(bakervm_5, r"^(-?\d+)?\.[0-9]+$");
@@ -2390,10 +2390,10 @@ consistent!(bakervm_5, r"^(-?\d+)?\.[0-9]+$");
 consistent!(bakervm_6, r"^(-?\d+)?$");
 
 // bakervm-0.9.0: r"^#([0-9abcdefABCDEF]{6})$"
-consistent!(bakervm_7, r"^#([0-9abcdefABCDEF]{6})$");
+consistent!(bakervm_7, "^#([0-9abcdefABCDEF]{6})$");
 
 // bakervm-0.9.0: r"^'(.)'$"
-consistent!(bakervm_8, r"^'(.)'$");
+consistent!(bakervm_8, "^'(.)'$");
 
 // bakervm-0.9.0: r"^\$vi\((\d+)\)$"
 consistent!(bakervm_9, r"^\$vi\((\d+)\)$");
@@ -2405,7 +2405,7 @@ consistent!(bakervm_10, r"^\$key\((\d+)\)$");
 consistent!(banana_0, "(?P<type>[A-Z^']+) (?P<route>[^']+) HTTP/(?P<http>[^']+)");
 
 // serial-key-2.0.0: r"[A-F0-9]{8}"
-consistent!(serial_key_0, r"[A-F0-9]{8}");
+consistent!(serial_key_0, "[A-F0-9]{8}");
 
 // serde-hjson-0.8.1: "[\\\\\"\x00-\x1f\x7f-\u{9f}\u{00ad}\u{0600}-\u{0604}\u{070f}\u{17b4}\u{17b5}\u{200c}-\u{200f}\u{2028}-\u{202f}\u{2060}-\u{206f}\u{feff}\u{fff0}-\u{ffff}]"
 consistent!(serde_hjson_0, "[\\\\\"\x00-\x1f\x7f-\u{9f}\u{00ad}\u{0600}-\u{0604}\u{070f}\u{17b4}\u{17b5}\u{200c}-\u{200f}\u{2028}-\u{202f}\u{2060}-\u{206f}\u{feff}\u{fff0}-\u{ffff}]");
@@ -2423,13 +2423,13 @@ consistent!(serde_odbc_0, r"/todos/(?P<id>\d+)");
 consistent!(sentry_0, r"^(?:_<)?([a-zA-Z0-9_]+?)(?:\.\.|::)");
 
 // sentiment-0.1.1: r"[^a-zA-Z0 -]+"
-consistent!(sentiment_0, r"[^a-zA-Z0 -]+");
+consistent!(sentiment_0, "[^a-zA-Z0 -]+");
 
 // sentiment-0.1.1: r" {2,}"
-consistent!(sentiment_1, r" {2,}");
+consistent!(sentiment_1, " {2,}");
 
 // verilog-0.0.1: r"(?m)//.*"
-consistent!(verilog_0, r"(?m)//.*");
+consistent!(verilog_0, "(?m)//.*");
 
 // verex-0.2.2: "(?P<robot>C3PO)"
 consistent!(verex_0, "(?P<robot>C3PO)");
@@ -2447,7 +2447,7 @@ consistent!(haikunator_1, r"^\w+@\w+@[0123456789]{4}$");
 consistent!(haikunator_2, r"^\w+-\w+-[0123456789abcdef]{4}$");
 
 // haikunator-0.1.2: r"^\w+-\w+-[0123456789忠犬ハチ公]{10}$"
-consistent!(haikunator_3, r"^\w+-\w+-[0123456789忠犬ハチ公]{10}$");
+consistent!(haikunator_3, r"^\w+-\w+-[0123456789\u{5fe0}\u{72ac}\u{30cf}\u{30c1}\u{516c}]{10}$");
 
 // haikunator-0.1.2: r"^\w+-\w+$"
 consistent!(haikunator_4, r"^\w+-\w+$");
@@ -2456,22 +2456,22 @@ consistent!(haikunator_4, r"^\w+-\w+$");
 consistent!(haikunator_5, r"^\w+-\w+-[foo]{4}$");
 
 // haikunator-0.1.2: r"^\w+-\w+-[0123456789忠犬ハチ公]{5}$"
-consistent!(haikunator_6, r"^\w+-\w+-[0123456789忠犬ハチ公]{5}$");
+consistent!(haikunator_6, r"^\w+-\w+-[0123456789\u{5fe0}\u{72ac}\u{30cf}\u{30c1}\u{516c}]{5}$");
 
 // bobbin-cli-0.8.3: r"(.*)"
-consistent!(bobbin_cli_0, r"(.*)");
+consistent!(bobbin_cli_0, "(.*)");
 
 // bobbin-cli-0.8.3: r"rustc (.*)"
-consistent!(bobbin_cli_1, r"rustc (.*)");
+consistent!(bobbin_cli_1, "rustc (.*)");
 
 // bobbin-cli-0.8.3: r"cargo (.*)"
-consistent!(bobbin_cli_2, r"cargo (.*)");
+consistent!(bobbin_cli_2, "cargo (.*)");
 
 // bobbin-cli-0.8.3: r"xargo (.*)\n"
 consistent!(bobbin_cli_3, r"xargo (.*)\n");
 
 // bobbin-cli-0.8.3: r"Open On-Chip Debugger (.*)"
-consistent!(bobbin_cli_4, r"Open On-Chip Debugger (.*)");
+consistent!(bobbin_cli_4, "Open On-Chip Debugger (.*)");
 
 // bobbin-cli-0.8.3: r"arm-none-eabi-gcc \(GNU Tools for ARM Embedded Processors[^\)]*\) (.*)"
 consistent!(bobbin_cli_5, r"arm-none-eabi-gcc \(GNU Tools for ARM Embedded Processors[^\)]*\) (.*)");
@@ -2492,7 +2492,7 @@ consistent!(bobbin_cli_9, r"dfu-util (.*)\n");
 consistent!(borsholder_0, r"^/static/[\w.]+$");
 
 // borsholder-0.9.1: r"^/timeline/([0-9]+)$"
-consistent!(borsholder_1, r"^/timeline/([0-9]+)$");
+consistent!(borsholder_1, "^/timeline/([0-9]+)$");
 
 // fblog-1.0.1: "\u{001B}\\[[\\d;]*[^\\d;]"
 consistent!(fblog_0, "\u{001B}\\[[\\d;]*[^\\d;]");
@@ -2534,13 +2534,13 @@ consistent!(file_sniffer_4, r"(\.git|\.pijul|_darcs|\.hg)$");
 consistent!(file_logger_0, "test");
 
 // file_scanner-0.2.0: r"foo"
-consistent!(file_scanner_0, r"foo");
+consistent!(file_scanner_0, "foo");
 
 // file_scanner-0.2.0: r"a+b"
-consistent!(file_scanner_1, r"a+b");
+consistent!(file_scanner_1, "a+b");
 
 // file_scanner-0.2.0: r"a[ab]*b"
-consistent!(file_scanner_2, r"a[ab]*b");
+consistent!(file_scanner_2, "a[ab]*b");
 
 // file_scanner-0.2.0: r"\s+"
 consistent!(file_scanner_3, r"\s+");
@@ -2561,7 +2561,7 @@ consistent!(aterm_0, r"^[+\-]?[0-9]+");
 consistent!(aterm_1, r"^[+\-]?[0-9]+\.[0-9]*([eE][+\-]?[0-9]+)?");
 
 // atarashii_imap-0.3.0: r"^[*] OK"
-consistent!(atarashii_imap_0, r"^[*] OK");
+consistent!(atarashii_imap_0, "^[*] OK");
 
 // atarashii_imap-0.3.0: r"FLAGS\s\((.+)\)"
 consistent!(atarashii_imap_1, r"FLAGS\s\((.+)\)");
@@ -2606,7 +2606,7 @@ consistent!(editorconfig_5, r"\{([^,]+)\}");
 consistent!(editorconfig_6, r"\{(([^\}].*)?(,|\|)(.*[^\\])?)\}");
 
 // editorconfig-1.0.0: r"^/"
-consistent!(editorconfig_7, r"^/");
+consistent!(editorconfig_7, "^/");
 
 // editorconfig-1.0.0: r"(^|[^\\])(\{|\})"
 consistent!(editorconfig_8, r"(^|[^\\])(\{|\})");
@@ -2639,16 +2639,16 @@ consistent!(slippy_map_tiles_1, r"^(?P<minlon>-?[0-9]{1,3}(\.[0-9]{1,10})?) (?P<
 consistent!(slippy_map_tiles_2, r"^(?P<minlon>-?[0-9]{1,3}(\.[0-9]{1,10})?),(?P<minlat>-?[0-9]{1,3}(\.[0-9]{1,10})?),(?P<maxlon>-?[0-9]{1,3}(\.[0-9]{1,10})?),(?P<maxlat>-?[0-9]{1,3}(\.[0-9]{1,10})?)$");
 
 // sonos-0.1.2: r"^https?://(.+?):1400/xml"
-consistent!(sonos_0, r"^https?://(.+?):1400/xml");
+consistent!(sonos_0, "^https?://(.+?):1400/xml");
 
 // validator_derive-0.7.0: r"^[a-z]{2}$"
-consistent!(validator_derive_0, r"^[a-z]{2}$");
+consistent!(validator_derive_0, "^[a-z]{2}$");
 
 // validator_derive-0.7.0: r"[a-z]{2}"
-consistent!(validator_derive_1, r"[a-z]{2}");
+consistent!(validator_derive_1, "[a-z]{2}");
 
 // validator_derive-0.7.0: r"[a-z]{2}"
-consistent!(validator_derive_2, r"[a-z]{2}");
+consistent!(validator_derive_2, "[a-z]{2}");
 
 // nginx-config-0.8.0: r"one of \d+ options"
 consistent!(nginx_config_0, r"one of \d+ options");
@@ -2657,16 +2657,16 @@ consistent!(nginx_config_0, r"one of \d+ options");
 consistent!(waltz_0, r"[\s,]");
 
 // warheadhateus-0.2.1: r"^aws_access_key_id = (.*)"
-consistent!(warheadhateus_0, r"^aws_access_key_id = (.*)");
+consistent!(warheadhateus_0, "^aws_access_key_id = (.*)");
 
 // warheadhateus-0.2.1: r"^aws_secret_access_key = (.*)"
-consistent!(warheadhateus_1, r"^aws_secret_access_key = (.*)");
+consistent!(warheadhateus_1, "^aws_secret_access_key = (.*)");
 
 // warheadhateus-0.2.1: r"^aws_access_key_id = (.*)"
-consistent!(warheadhateus_2, r"^aws_access_key_id = (.*)");
+consistent!(warheadhateus_2, "^aws_access_key_id = (.*)");
 
 // warheadhateus-0.2.1: r"^aws_secret_access_key = (.*)"
-consistent!(warheadhateus_3, r"^aws_secret_access_key = (.*)");
+consistent!(warheadhateus_3, "^aws_secret_access_key = (.*)");
 
 // jieba-rs-0.2.2: r"([\u{4E00}-\u{9FD5}a-zA-Z0-9+#&\._%]+)"
 consistent!(jieba_rs_0, r"([\u{4E00}-\u{9FD5}a-zA-Z0-9+#&\._%]+)");
@@ -2726,10 +2726,10 @@ consistent!(pippin_4, "^.*pn(0|[1-9][0-9]*)(-ss(0|[1-9][0-9]*)(\\.pip|-cl(0|[1-9
 consistent!(pippin_5, "^(.*)-ss(?:0|[1-9][0-9]*)(?:\\.pip|-cl(?:0|[1-9][0-9]*)\\.piplog)$");
 
 // pinyin-0.3.0: r"(?i)[āáǎàēéěèōóǒòīíǐìūúǔùüǘǚǜńň]"
-consistent!(pinyin_0, r"(?i)[āáǎàēéěèōóǒòīíǐìūúǔùüǘǚǜńň]");
+consistent!(pinyin_0, r"(?i)[\u{101}\u{e1}\u{1ce}\u{e0}\u{113}\u{e9}\u{11b}\u{e8}\u{14d}\u{f3}\u{1d2}\u{f2}\u{12b}\u{ed}\u{1d0}\u{ec}\u{16b}\u{fa}\u{1d4}\u{f9}\u{fc}\u{1d8}\u{1da}\u{1dc}\u{144}\u{148}\u{e7c7}]");
 
 // pinyin-0.3.0: r"([aeoiuvnm])([0-4])$"
-consistent!(pinyin_1, r"([aeoiuvnm])([0-4])$");
+consistent!(pinyin_1, "([aeoiuvnm])([0-4])$");
 
 // duration-parser-0.2.0: r"(?P<value>\d+)(?P<units>[a-z])"
 consistent!(duration_parser_0, r"(?P<value>\d+)(?P<units>[a-z])");
@@ -2738,16 +2738,16 @@ consistent!(duration_parser_0, r"(?P<value>\d+)(?P<units>[a-z])");
 consistent!(dutree_0, r"^\d+\D?$");
 
 // djangohashers-0.3.0: r"^[A-Za-z0-9]*$"
-consistent!(djangohashers_0, r"^[A-Za-z0-9]*$");
+consistent!(djangohashers_0, "^[A-Za-z0-9]*$");
 
 // rtag-0.3.5: r"^[A-Z][A-Z0-9]{2,}$"
-consistent!(rtag_0, r"^[A-Z][A-Z0-9]{2,}$");
+consistent!(rtag_0, "^[A-Z][A-Z0-9]{2,}$");
 
 // rtag-0.3.5: r"^http://www\.emusic\.com"
 consistent!(rtag_1, r"^http://www\.emusic\.com");
 
 // rtag-0.3.5: r"^[A-Z][A-Z0-9]{2,}"
-consistent!(rtag_2, r"^[A-Z][A-Z0-9]{2,}");
+consistent!(rtag_2, "^[A-Z][A-Z0-9]{2,}");
 
 // rtag-0.3.5: r"(^[\x{0}|\x{feff}|\x{fffe}]*|[\x{0}|\x{feff}|\x{fffe}]*$)"
 consistent!(rtag_3, r"(^[\x{0}|\x{feff}|\x{fffe}]*|[\x{0}|\x{feff}|\x{fffe}]*$)");
@@ -2789,10 +2789,10 @@ consistent!(mongo_rub_0, r"^[rv]2\.6");
 consistent!(flow_0, "body value");
 
 // flow-0.3.5: "start marker"
-consistent!(flow_1, "start marker");
+consistent!(flow_1, "start marke");
 
 // flow-0.3.5: "end marker"
-consistent!(flow_2, "end marker");
+consistent!(flow_2, "end marke");
 
 // flow-0.3.5: "body value"
 consistent!(flow_3, "body value");
@@ -2858,7 +2858,7 @@ consistent!(voidmap_17, r"(?P<d>\d+)d");
 consistent!(voidmap_18, r"(?P<h>\d+)h");
 
 // voidmap-1.1.2: r"C-(.)"
-consistent!(voidmap_19, r"C-(.)");
+consistent!(voidmap_19, "C-(.)");
 
 // qt_generator-0.2.0: r"^\.\./qt[^/]+/"
 consistent!(qt_generator_0, r"^\.\./qt[^/]+/");
@@ -2867,7 +2867,7 @@ consistent!(qt_generator_0, r"^\.\./qt[^/]+/");
 consistent!(qt_generator_1, "(href|src)=\"([^\"]*)\"");
 
 // kryptos-0.6.1: r"[01]{5}"
-consistent!(kryptos_0, r"[01]{5}");
+consistent!(kryptos_0, "[01]{5}");
 
 // cifar_10_loader-0.2.0: "data_batch_[1-5].bin"
 consistent!(cifar_10_loader_0, "data_batch_[1-5].bin");
@@ -2885,10 +2885,10 @@ consistent!(circadian_1, r"^\d+:\d+$");
 consistent!(circadian_2, r"^\d+:\d+m$");
 
 // cicada-0.8.1: r"!!"
-consistent!(cicada_0, r"!!");
+consistent!(cicada_0, "!!");
 
 // cicada-0.8.1: r"^([^`]*)`([^`]+)`(.*)$"
-consistent!(cicada_1, r"^([^`]*)`([^`]+)`(.*)$");
+consistent!(cicada_1, "^([^`]*)`([^`]+)`(.*)$");
 
 // cicada-0.8.1: r"\*+"
 consistent!(cicada_2, r"\*+");
@@ -2900,7 +2900,7 @@ consistent!(cicada_3, r"([^\$]*)\$\{?([A-Za-z0-9\?\$_]+)\}?(.*)");
 consistent!(cicada_4, r"^ *alias +([a-zA-Z0-9_\.-]+)=(.*)$");
 
 // vterm-sys-0.1.0: r"hi"
-consistent!(vterm_sys_0, r"hi");
+consistent!(vterm_sys_0, "hi");
 
 // skim-0.5.0: r".*?\t"
 consistent!(skim_0, r".*?\t");
@@ -2960,7 +2960,7 @@ consistent!(ipaddress_0, r":.+\.");
 consistent!(ipaddress_1, r"\.");
 
 // ipaddress-0.1.2: r":"
-consistent!(ipaddress_2, r":");
+consistent!(ipaddress_2, ":");
 
 // iptables-0.2.2: r"v(\d+)\.(\d+)\.(\d+)"
 consistent!(iptables_0, r"v(\d+)\.(\d+)\.(\d+)");
@@ -2978,34 +2978,34 @@ consistent!(oatie_0, r"(\n|^)(\w+):([\n\w\W]+?)(\n(?:\w)|(\n\]))");
 consistent!(weld_0, "#.*$");
 
 // weld-0.2.0: r"^[A-Za-z$_][A-Za-z0-9$_]*$"
-consistent!(weld_1, r"^[A-Za-z$_][A-Za-z0-9$_]*$");
+consistent!(weld_1, "^[A-Za-z$_][A-Za-z0-9$_]*$");
 
 // weld-0.2.0: r"^[0-9]+[cC]$"
-consistent!(weld_2, r"^[0-9]+[cC]$");
+consistent!(weld_2, "^[0-9]+[cC]$");
 
 // weld-0.2.0: r"^0b[0-1]+[cC]$"
-consistent!(weld_3, r"^0b[0-1]+[cC]$");
+consistent!(weld_3, "^0b[0-1]+[cC]$");
 
 // weld-0.2.0: r"^0x[0-9a-fA-F]+[cC]$"
-consistent!(weld_4, r"^0x[0-9a-fA-F]+[cC]$");
+consistent!(weld_4, "^0x[0-9a-fA-F]+[cC]$");
 
 // weld-0.2.0: r"^[0-9]+$"
-consistent!(weld_5, r"^[0-9]+$");
+consistent!(weld_5, "^[0-9]+$");
 
 // weld-0.2.0: r"^0b[0-1]+$"
-consistent!(weld_6, r"^0b[0-1]+$");
+consistent!(weld_6, "^0b[0-1]+$");
 
 // weld-0.2.0: r"^0x[0-9a-fA-F]+$"
-consistent!(weld_7, r"^0x[0-9a-fA-F]+$");
+consistent!(weld_7, "^0x[0-9a-fA-F]+$");
 
 // weld-0.2.0: r"^[0-9]+[lL]$"
-consistent!(weld_8, r"^[0-9]+[lL]$");
+consistent!(weld_8, "^[0-9]+[lL]$");
 
 // weld-0.2.0: r"^0b[0-1]+[lL]$"
-consistent!(weld_9, r"^0b[0-1]+[lL]$");
+consistent!(weld_9, "^0b[0-1]+[lL]$");
 
 // weld-0.2.0: r"^0x[0-9a-fA-F]+[lL]$"
-consistent!(weld_10, r"^0x[0-9a-fA-F]+[lL]$");
+consistent!(weld_10, "^0x[0-9a-fA-F]+[lL]$");
 
 // webgl_generator-0.1.0: "([(, ])enum\\b"
 consistent!(webgl_generator_0, "([(, ])enum\\b");
@@ -3029,7 +3029,7 @@ consistent!(svgrep_0, r"^\d+.*$");
 consistent!(ignore_0, r"^[\pL\pN]+$");
 
 // ommui_string_patterns-0.1.2: r"^([A-Za-z][0-9A-Za-z_]*)?$"
-consistent!(ommui_string_patterns_0, r"^([A-Za-z][0-9A-Za-z_]*)?$");
+consistent!(ommui_string_patterns_0, "^([A-Za-z][0-9A-Za-z_]*)?$");
 
 // ommui_string_patterns-0.1.2: r"^(\S+(?:.*\S)?)?$"
 consistent!(ommui_string_patterns_1, r"^(\S+(?:.*\S)?)?$");
@@ -3038,7 +3038,7 @@ consistent!(ommui_string_patterns_1, r"^(\S+(?:.*\S)?)?$");
 consistent!(opcua_types_0, "^(?P<min>[0-9]{1,10})(:(?P<max>[0-9]{1,10}))?$");
 
 // opcua-types-0.3.0: r"^(ns=(?P<ns>[0-9]+);)?(?P<t>[isgb])=(?P<v>.+)$"
-consistent!(opcua_types_1, r"^(ns=(?P<ns>[0-9]+);)?(?P<t>[isgb])=(?P<v>.+)$");
+consistent!(opcua_types_1, "^(ns=(?P<ns>[0-9]+);)?(?P<t>[isgb])=(?P<v>.+)$");
 
 // open_read_later-1.1.1: r"^(.+?)\s*:\s*(.+)$"
 consistent!(open_read_later_0, r"^(.+?)\s*:\s*(.+)$");
@@ -3050,25 +3050,25 @@ consistent!(youtube_downloader_0, r"^.*(?:(?:youtu\.be/|v/|vi/|u/w/|embed/)|(?:(
 consistent!(yobot_0, ".");
 
 // yobot-0.1.1: r"."
-consistent!(yobot_1, r".");
+consistent!(yobot_1, ".");
 
 // yobot-0.1.1: r".+"
-consistent!(yobot_2, r".+");
+consistent!(yobot_2, ".+");
 
 // yobot-0.1.1: r"."
-consistent!(yobot_3, r".");
+consistent!(yobot_3, ".");
 
 // ubiquity-0.1.5: r"foo"
-consistent!(ubiquity_0, r"foo");
+consistent!(ubiquity_0, "foo");
 
 // ubiquity-0.1.5: r"/target/"
-consistent!(ubiquity_1, r"/target/");
+consistent!(ubiquity_1, "/target/");
 
 // ubiquity-0.1.5: r".DS_Store"
-consistent!(ubiquity_2, r".DS_Store");
+consistent!(ubiquity_2, ".DS_Store");
 
 // qasm-1.0.0: r"//.*"
-consistent!(qasm_0, r"//.*");
+consistent!(qasm_0, "//.*");
 
 // drill-0.3.5: r"\{\{ *([a-z\._]+) *\}\}"
 consistent!(drill_0, r"\{\{ *([a-z\._]+) *\}\}");
@@ -3083,19 +3083,19 @@ consistent!(queryst_1, r"(\[[^\]\[]*\])");
 consistent!(qui_vive_0, r"^/(\w+)$");
 
 // qui-vive-0.1.0: r"^/key$"
-consistent!(qui_vive_1, r"^/key$");
+consistent!(qui_vive_1, "^/key$");
 
 // qui-vive-0.1.0: r"^/key/(\w+)$"
 consistent!(qui_vive_2, r"^/key/(\w+)$");
 
 // qui-vive-0.1.0: r"^/url$"
-consistent!(qui_vive_3, r"^/url$");
+consistent!(qui_vive_3, "^/url$");
 
 // qui-vive-0.1.0: r"^/url/(\w+)$"
 consistent!(qui_vive_4, r"^/url/(\w+)$");
 
 // qui-vive-0.1.0: r"^/inv$"
-consistent!(qui_vive_5, r"^/inv$");
+consistent!(qui_vive_5, "^/inv$");
 
 // qui-vive-0.1.0: r"^/inv/(\w+)$"
 consistent!(qui_vive_6, r"^/inv/(\w+)$");
@@ -3110,10 +3110,10 @@ consistent!(substudy_0, r"^(\d+)/(\d+)$");
 consistent!(substudy_1, r"\s+");
 
 // substudy-0.4.5: r"<[a-z/][^>]*>"
-consistent!(substudy_2, r"<[a-z/][^>]*>");
+consistent!(substudy_2, "<[a-z/][^>]*>");
 
 // substudy-0.4.5: r"(\([^)]*\)|♪[^♪]*♪|[A-Z]{2,} ?:)"
-consistent!(substudy_3, r"(\([^)]*\)|♪[^♪]*♪|[A-Z]{2,} ?:)");
+consistent!(substudy_3, r"(\([^)]*\)|\u{266a}[^\u{266a}]*\u{266a}|[A-Z]{2,} ?:)");
 
 // substudy-0.4.5: r"\s+"
 consistent!(substudy_4, r"\s+");
@@ -3122,7 +3122,7 @@ consistent!(substudy_4, r"\s+");
 consistent!(isbnid_0, r"^(\d(-| )?){9}(x|X|\d|(\d(-| )?){3}\d)$");
 
 // isbnid-0.1.3: r"[^0-9X]"
-consistent!(isbnid_1, r"[^0-9X]");
+consistent!(isbnid_1, "[^0-9X]");
 
 // ispc-0.3.5: r"Intel\(r\) SPMD Program Compiler \(ispc\), (\d+\.\d+\.\d+)"
 consistent!(ispc_0, r"Intel\(r\) SPMD Program Compiler \(ispc\), (\d+\.\d+\.\d+)");

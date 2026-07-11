@@ -20,8 +20,11 @@
 
 use core::marker::PhantomData;
 
-use crate::strategy::*;
-use crate::test_runner::*;
+#[cfg(test)]
+use crate::strategy::check_strategy_sanity;
+use crate::strategy::{NewTree, Strategy, ValueTree};
+use crate::test_runner::Reason;
+use crate::test_runner::TestRunner;
 
 /// A `Strategy` which generates fixed-size arrays containing values drawn from
 /// an inner strategy.
@@ -40,8 +43,8 @@ use crate::test_runner::*;
 ///
 /// proptest! {
 ///   #[test]
-///   fn test_something(a in prop::array::uniform32(1u32..)) {
-///     let unexpected = [0u32;32];
+///   fn test_something(a in prop::array::uniform32(1_u32..)) {
+///     let unexpected = [0_u32;32];
 ///     // `a` is also a [u32;32], so we can compare them directly
 ///     assert_ne!(unexpected, a);
 ///   }
@@ -70,8 +73,8 @@ impl<S, T> UniformArrayStrategy<S, T> {
         clippy::single_call_fn,
         reason = "pair one inner strategy with its array-length marker to form a UniformArrayStrategy"
     )]
-    pub fn new(strategy: S) -> Self {
-        UniformArrayStrategy {
+    pub const fn new(strategy: S) -> Self {
+        Self {
             strategy,
             _marker: PhantomData,
         }
@@ -121,7 +124,7 @@ macro_rules! small_array {
         ///
         /// See [`UniformArrayStrategy`](struct.UniformArrayStrategy.html) for
         /// example usage.
-        pub fn $uni<S: Strategy>(
+        pub const fn $uni<S: Strategy>(
             strategy: S,
         ) -> UniformArrayStrategy<S, [S::Value; $n]> {
             UniformArrayStrategy {
@@ -137,8 +140,19 @@ impl<S: Strategy, const N: usize> Strategy for [S; N] {
     type Value = [S::Value; N];
 
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+        let mut strategies = self.iter();
         Ok(ArrayValueTree {
-            tree: unarray::build_array_result(|i| self[i].new_tree(runner))?,
+            tree: unarray::build_array_result(|_| {
+                strategies
+                    .next()
+                    .ok_or_else(|| {
+                        Reason::from(
+                            "array strategy index out of range \
+                             (internal invariant)",
+                        )
+                    })?
+                    .new_tree(runner)
+            })?,
             shrinker: 0,
             last_shrinker: None,
         })
@@ -164,17 +178,19 @@ impl<T: ValueTree, const N: usize> ValueTree for ArrayValueTree<[T; N]> {
     type Value = [T::Value; N];
 
     fn current(&self) -> [T::Value; N] {
-        core::array::from_fn(|i| self.tree[i].current())
+        self.tree.each_ref().map(ValueTree::current)
     }
 
     fn simplify(&mut self) -> bool {
         while self.shrinker < N {
-            if self.tree[self.shrinker].simplify() {
+            let Some(tree) = self.tree.get_mut(self.shrinker) else {
+                return false;
+            };
+            if tree.simplify() {
                 self.last_shrinker = Some(self.shrinker);
                 return true;
-            } else {
-                self.shrinker += 1;
             }
+            self.shrinker = self.shrinker.saturating_add(1);
         }
         false
     }
@@ -182,7 +198,11 @@ impl<T: ValueTree, const N: usize> ValueTree for ArrayValueTree<[T; N]> {
     fn complicate(&mut self) -> bool {
         if let Some(shrinker) = self.last_shrinker {
             self.shrinker = shrinker;
-            if self.tree[shrinker].complicate() {
+            let Some(tree) = self.tree.get_mut(shrinker) else {
+                self.last_shrinker = None;
+                return false;
+            };
+            if tree.complicate() {
                 true
             } else {
                 self.last_shrinker = None;
@@ -233,6 +253,28 @@ mod test {
 
     use super::*;
 
+    #[allow(
+        clippy::single_call_fn,
+        reason = "the array shrink test names the left-to-right minimal failing walk"
+    )]
+    fn shrink_to_minimal_failing_array<V, P>(case: &mut V, pass: P)
+    where
+        V: ValueTree<Value = [i32; 2]>,
+        P: Fn([i32; 2]) -> bool,
+    {
+        loop {
+            let advanced = if pass(case.current()) {
+                case.complicate()
+            } else {
+                case.simplify()
+            };
+            if advanced {
+                continue;
+            }
+            break;
+        }
+    }
+
     #[test]
     fn shrinks_fully_ltr() -> Result<(), TestFailure> {
         fn pass(pair: [i32; 2]) -> bool {
@@ -253,17 +295,7 @@ mod test {
                 continue;
             }
 
-            loop {
-                if pass(case.current()) {
-                    if !case.complicate() {
-                        break;
-                    }
-                } else {
-                    if !case.simplify() {
-                        break;
-                    }
-                }
-            }
+            shrink_to_minimal_failing_array(&mut case, pass);
 
             let last = case.current();
             ensure(!pass(last), "the shrunken case still fails")?;
@@ -285,7 +317,7 @@ mod test {
     }
 
     #[test]
-    fn test_sanity() {
-        check_strategy_sanity([(0i32..1000), (1i32..1000)], None);
+    fn test_sanity() -> Result<(), Reason> {
+        check_strategy_sanity([(0_i32..1000), (1_i32..1000)], None)
     }
 }

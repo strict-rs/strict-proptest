@@ -10,6 +10,7 @@ There are two completely different mechanisms in this directory, and conflating 
 
 - **Top-level `tests/*.rs`** are ordinary Cargo integration-test crates. Cargo compiles and links each one against freshly-built `proptest` + `proptest_derive` the normal way, then runs it. `compiletest.rs` has nothing to do with these.
 - **`compile-fail/*.rs`** are *not* compiled by Cargo. The `compiletest.rs` target shells out to raw `rustc` (via `compiletest_rs`) on each file and asserts it *fails* with specific diagnostics. Because Cargo isn't doing the build, `compiletest.rs` has to hand-assemble the `--extern`/`-L`/`--edition` flags itself — which is the entire reason the fingerprint machinery below exists.
+- Neither category is a lint or source-hygiene escape hatch. Top-level integration fixtures must use ordinary idiomatic Rust. Compile-diagnostic fixtures are allowed only when the behavior under test depends on full `rustc` integration; if a case is really parser, field-normalization, attribute, or expansion behavior, put it in `proptest-derive-internal` as quoted/parser input or an expansion snapshot instead.
 
 ## The custom compiletest harness (`compiletest.rs`)
 
@@ -41,6 +42,8 @@ struct T0<'a>(&'a ());
 
 Annotation forms used here: `//~ ERROR: <substr>` expects a diagnostic on that line; `//~| <substr>` adds another expected message to the same group; `//~^ <substr>` (and `//~^^`) bind the expectation to the line(s) above. Each `<substr>` is matched as a substring of the actual compiler output.
 
+Before adding or preserving a `compile-fail/*.rs` fixture, prove the failure requires the full compiler boundary: span placement, downstream trait solving, proc-macro diagnostics as rendered by `rustc`, hygiene across crate boundaries, or another behavior unavailable to `syn`/IR/unit/expansion tests. Keep unrelated syntax idiomatic inside the file; the fixture should have one intentional reason to fail, not a pile of tolerated weirdness.
+
 Two distinct flavors of expectation appear:
 
 - **proptest_derive diagnostics** — `[proptest_derive, E####]`. The `E####` code is the literal prefix `mk_err_msg!` stamps onto every derive error, so the codes map one-to-one to the `error!`/`fatal!` definitions in `src/error.rs` (e.g. `E0001` = generic lifetimes, `E0007` = strategy on the wrong shape, `E0034` = malformed regex). The macro batches non-fatal errors, so a single derive can emit `//~ ERROR: 2 errors:` followed by several `//~| [proptest_derive, E####]` lines (see `E0001-lifetime.rs`, `E0007-illegal-strategy.rs`). Filenames are by convention `E####-<slug>.rs`.
@@ -59,8 +62,8 @@ Each file targets one attribute / feature area:
 
 - **struct.rs** — baseline named-field structs of varying arity, no `#[proptest(...)]` attributes.
 - **lint_clean.rs** — derives compiled under `deny(warnings)` and `deny(unsafe_code)`, pinning that generated impls are item-scope and allowance-free for the rustc lint surfaces that used to require generated allowances.
-- **enum.rs** — enums from 1 to 25 variants mixing unit / `V()` / `V {}` shapes, plus payload-carrying enums; checks variant-count scaling and that every payload is generated.
-- **units.rs** — degenerate empty shapes: unit struct `T0;`, empty `T1 {}` / `T2()`, and unit/empty enum variants.
+- **enum.rs** — enums from 1 to 25 idiomatic unit variants, plus payload-carrying enums; checks variant-count scaling and that every payload is generated. Coverage for non-idiomatic zero-payload variant syntax belongs in `proptest-derive-internal` parser/expansion tests, not in this broad runtime fixture.
+- **units.rs** — degenerate empty shapes: unit struct `T0;`, empty `T1 {}` / `T2()`, and idiomatic unit enum variants. Coverage for empty tuple/struct enum variant syntax belongs in `proptest-derive-internal` parser/expansion tests.
 - **value.rs** — field `#[proptest(value = …)]` / `value(…)`: literals, expressions, and `fn`-path calls yielding a constant field.
 - **value_param.rs** — `value` combined with `params`, where the value expression reads `params`; driven by `any_with`.
 - **strategy.rs** — field `#[proptest(strategy = …)]` / `strategy(…)` / `strategy(fn)` on structs and enum variants.

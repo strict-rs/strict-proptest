@@ -11,9 +11,9 @@
 use std::fmt::Display;
 
 use proc_macro2::TokenStream;
-use quote::{ToTokens, quote};
+use quote::{ToTokens as _, quote};
 
-use crate::attr::ParsedAttributes;
+use crate::attr::{ParsedAttributes, StratMode};
 
 //==============================================================================
 // Item descriptions
@@ -107,12 +107,15 @@ pub(crate) fn if_strategy_present(
     attrs: &ParsedAttributes,
     item_kind: &str,
 ) {
-    use crate::attr::StratMode::*;
     match attrs.strategy {
-        Arbitrary => {}
-        Strategy(_) => illegal_strategy(ctx, "strategy", item_kind),
-        Value(_) => illegal_strategy(ctx, "value", item_kind),
-        Regex(_) => illegal_regex(ctx, item_kind),
+        StratMode::Arbitrary => {}
+        StratMode::Strategy(_) => {
+            illegal_strategy(ctx, "strategy", item_kind);
+        }
+        StratMode::Value(_) => {
+            illegal_strategy(ctx, "value", item_kind);
+        }
+        StratMode::Regex(_) => illegal_regex(ctx, item_kind),
     }
 }
 
@@ -125,13 +128,16 @@ pub(crate) fn if_present_on_unit_variant(
     ctx: Ctx<'_>,
     attrs: &ParsedAttributes,
 ) {
-    /// Ensures that an explicit strategy or value is not present on a unit variant.
-    use crate::attr::StratMode::*;
+    // Ensures that an explicit strategy or value is not present on a unit variant.
     match attrs.strategy {
-        Arbitrary => {}
-        Strategy(_) => strategy_on_unit_variant(ctx, "strategy"),
-        Value(_) => strategy_on_unit_variant(ctx, "value"),
-        Regex(_) => regex_on_unit_variant(ctx),
+        StratMode::Arbitrary => {}
+        StratMode::Strategy(_) => {
+            strategy_on_unit_variant(ctx, "strategy");
+        }
+        StratMode::Value(_) => {
+            strategy_on_unit_variant(ctx, "value");
+        }
+        StratMode::Regex(_) => regex_on_unit_variant(ctx),
     }
 
     if attrs.params.is_set() {
@@ -236,7 +242,10 @@ impl Context {
 
         match self.errors.len() {
             0 => Ok(()),
-            1 => Err(compile_error(&self.errors.pop().unwrap())),
+            1 => self
+                .errors
+                .pop()
+                .map_or(Ok(()), |error| Err(compile_error(&error))),
             n => {
                 let mut msg = format!("{n} errors:");
                 for err in self.errors {

@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, quote, quote_spanned};
 use syn::{
     Expr, Ident, LitStr, MetaNameValue, Path, Token, parse::Parse,
-    punctuated::Punctuated, spanned::Spanned,
+    parse::ParseStream, punctuated::Punctuated, spanned::Spanned as _,
 };
 
 /// Options parsed from the attribute itself (e.g. the config from `#[property_test(config = ...)]`)
@@ -23,10 +23,9 @@ impl Options {
     /// Resolve the crate path codegen prefixes onto every emitted item: the
     /// user's `proptest_path` if set, otherwise `::proptest`.
     pub(super) fn true_proptest_path(&self) -> TokenStream {
-        match &self.proptest_path {
-            None => quote! { ::proptest },
-            Some(path) => path.to_token_stream(),
-        }
+        self.proptest_path
+            .as_ref()
+            .map_or_else(|| quote! { ::proptest }, ToTokens::to_token_stream)
     }
 }
 
@@ -44,7 +43,7 @@ fn parse_proptest_path(attr_value: &Expr) -> Result<Path, TokenStream> {
             compile_error!("argument to `proptest_path` must be a path to the proptest crate, e.g. `proptest_path = ::path::to::proptest`");
         )
     };
-    let Expr::Path(path) = attr_value else {
+    let Expr::Path(ref path) = *attr_value else {
         return Err(bad_path(attr_value.span()));
     };
     if path.qself.is_some() {
@@ -56,7 +55,7 @@ fn parse_proptest_path(attr_value: &Expr) -> Result<Path, TokenStream> {
 impl Parse for Options {
     // note: this impl takes only the contents of the attr, not the attr itself
     // e.g. it will get `foo = bar, baz = qux`, not `#[macro(foo = bar, baz = qux)]`
-    fn parse(input: syn::parse::ParseStream<'_>) -> syn::Result<Self> {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let pairs =
             Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
 
@@ -78,14 +77,14 @@ impl Parse for Options {
                 Some("config") => config = Some(attr_value),
                 Some("proptest_path") => {
                     match parse_proptest_path(&attr_value) {
-                        Ok(path) => proptest_path = Some(path),
+                        Ok(parsed_path) => proptest_path = Some(parsed_path),
                         Err(error) => errors.push(error),
                     }
                 }
                 Some(other) => {
-                    let error_message = format!("unknown argument: {other}");
-                    let error_message = LitStr::new(&error_message, other.span());
-                    let error = quote_spanned!(other.span() => compile_error!(#error_message););
+                    let message_text = format!("unknown argument: {other}");
+                    let message = LitStr::new(&message_text, other.span());
+                    let error = quote_spanned!(other.span() => compile_error!(#message););
                     errors.push(error);
                 }
             }
@@ -119,7 +118,7 @@ mod tests {
             "the attribute contents parse recoverably",
         )?;
 
-        let proptest_path =
+        let parsed_proptest_path =
             ensure_some(proptest_path, "the proptest_path value is captured")?;
 
         ensure(config.is_some(), "the config expression is captured")?;
@@ -129,10 +128,10 @@ mod tests {
             "the unknown key records one deferred error",
         )?;
         ensure(
-            proptest_path.leading_colon.is_some(),
+            parsed_proptest_path.leading_colon.is_some(),
             "the path keeps its leading colons",
         )?;
-        let segments = proptest_path
+        let segments = parsed_proptest_path
             .segments
             .iter()
             .map(|seg| seg.ident.to_string())

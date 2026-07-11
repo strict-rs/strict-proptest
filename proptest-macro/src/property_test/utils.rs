@@ -1,4 +1,11 @@
-use syn::{AttrStyle, Attribute, Expr, FnArg, ItemFn, Meta, PatType};
+use std::mem::take;
+
+use proc_macro2::TokenStream;
+use quote::quote_spanned;
+use syn::{
+    AttrStyle, Attribute, Expr, FnArg, ItemFn, Meta, PatType,
+    spanned::Spanned as _,
+};
 
 /// A parsed argument, with an optional custom strategy
 pub(super) struct Argument {
@@ -12,32 +19,31 @@ pub(super) struct Argument {
 
 /// Convert a function to a zero-arg function, and return the args
 ///
-/// Panics on any invalid function
 #[allow(
     clippy::single_call_fn,
     reason = "split a function into its argument-less form plus the extracted argument list"
 )]
-pub(super) fn strip_args(mut f: ItemFn) -> (ItemFn, Vec<Argument>) {
-    let args = std::mem::take(&mut f.sig.inputs);
-    let args = args
-        .into_iter()
-        .map(|arg| match arg {
-            FnArg::Typed(arg) => strip_strategy(arg),
-            FnArg::Receiver(_) => panic!(
-                "receivers aren't allowed - should be filtered by `validate`"
-            ),
-        })
-        .collect();
+pub(super) fn strip_args(
+    mut f: ItemFn,
+) -> Result<(ItemFn, Vec<Argument>), TokenStream> {
+    let inputs = take(&mut f.sig.inputs);
+    let mut arguments = Vec::new();
 
-    (f, args)
+    for fn_arg in inputs {
+        let FnArg::Typed(typed_arg) = fn_arg else {
+            return Err(quote_spanned! {
+                fn_arg.span() => compile_error!("`self` parameters are forbidden");
+            });
+        };
+        arguments.push(strip_strategy(typed_arg));
+    }
+
+    Ok((f, arguments))
 }
 
 /// Split a parameter into its `#[strategy = <expr>]` override (if any) and the
 /// remaining `PatType`.
 ///
-/// Assumes `validate` has already rejected malformed or duplicate strategy
-/// attributes, so the `panic!`s here mark internal bugs rather than user
-/// error.
 #[allow(
     clippy::single_call_fn,
     reason = "split one parameter into its strategy override and its bare pattern type"
@@ -47,14 +53,10 @@ fn strip_strategy(mut pat_ty: PatType) -> Argument {
 
     pat_ty.attrs = others;
 
-    let strategy = match &strategies[..] {
-        [] => None,
-        [attr] => match &attr.meta {
-            Meta::NameValue(name_value) => Some(name_value.value.clone()),
-            _ => panic!("invalid strategies should be filtered by validate"),
-        },
-        _ => panic!("multiple strategies should be filtered by validate"),
-    };
+    let strategy = strategies.iter().find_map(|attr| match attr.meta {
+        Meta::NameValue(ref name_value) => Some(name_value.value.clone()),
+        Meta::List(_) | Meta::Path(_) => None,
+    });
 
     Argument { pat_ty, strategy }
 }
@@ -79,19 +81,28 @@ pub(super) fn is_strategy(attr: &Attribute) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use quote::ToTokens;
+    use quote::ToTokens as _;
     use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
     use syn::parse_quote;
 
     use super::*;
 
+    fn ensure_stripped_args(
+        fixture_fn: ItemFn,
+    ) -> Result<(ItemFn, Vec<Argument>), TestFailure> {
+        strip_args(fixture_fn).map_err(|error| TestFailure::WasErr {
+            context: "fixture args strip",
+            cause: error.to_string(),
+        })
+    }
+
     #[test]
     fn strip_args_works() -> Result<(), TestFailure> {
-        let f = parse_quote! { fn foo(i: i32) {} };
-        let (f, mut args) = strip_args(f);
+        let fixture_fn = parse_quote! { fn foo(i: i32) {} };
+        let (stripped_fn, mut args) = ensure_stripped_args(fixture_fn)?;
 
         ensure_eq(
-            &f.to_token_stream().to_string(),
+            &stripped_fn.to_token_stream().to_string(),
             &"fn foo () { }".to_owned(),
             "stripped fn renders without arguments",
         )?;
@@ -106,40 +117,50 @@ mod tests {
         ensure(arg.strategy.is_none(), "no strategy attribute extracted")
     }
 
-    // Kept as a `#[should_panic]` contract test on purpose: it pins
-    // `strip_args`'s documented invariant that receivers are rejected by
-    // `validate` first, so reaching one here is an internal bug, not a
-    // user-facing failure path.
     #[test]
-    #[should_panic]
-    fn strip_args_panics_with_self() {
-        let f = parse_quote! { fn foo(self) {} };
-        let _unreachable = strip_args(f);
+    fn strip_args_reports_self() -> Result<(), TestFailure> {
+        let fixture_fn = parse_quote! { fn foo(self) {} };
+        ensure(
+            strip_args(fixture_fn).is_err(),
+            "receiver extraction emits a compile_error",
+        )
     }
 
     #[test]
     fn is_strategy_works() -> Result<(), TestFailure> {
-        let attr = parse_quote! { #[strategy = 123] };
-        ensure(is_strategy(&attr), "outer name-value strategy is accepted")?;
+        let outer_name_value = parse_quote! { #[strategy = 123] };
+        ensure(
+            is_strategy(&outer_name_value),
+            "outer name-value strategy is accepted",
+        )?;
 
-        let attr = parse_quote! { #![strategy = 123] };
-        ensure(!is_strategy(&attr), "inner strategy attribute is rejected")?;
+        let inner_name_value = parse_quote! { #![strategy = 123] };
+        ensure(
+            !is_strategy(&inner_name_value),
+            "inner strategy attribute is rejected",
+        )?;
 
-        let attr = parse_quote! { #[not_strategy = 123] };
-        ensure(!is_strategy(&attr), "other attribute names are rejected")?;
+        let other_name = parse_quote! { #[not_strategy = 123] };
+        ensure(
+            !is_strategy(&other_name),
+            "other attribute names are rejected",
+        )?;
 
-        let attr = parse_quote! { #[strategy(but, no, equals)] };
-        ensure(!is_strategy(&attr), "list-form strategy is rejected")?;
+        let list_form = parse_quote! { #[strategy(but, no, equals)] };
+        ensure(!is_strategy(&list_form), "list-form strategy is rejected")?;
 
-        let attr = parse_quote! { #[strategy] };
-        ensure(!is_strategy(&attr), "bare strategy attribute is rejected")
+        let bare_name = parse_quote! { #[strategy] };
+        ensure(
+            !is_strategy(&bare_name),
+            "bare strategy attribute is rejected",
+        )
     }
 
     #[test]
     fn strip_strategy_works() -> Result<(), TestFailure> {
-        let f = parse_quote! {fn foo(#[strategy = 123] x: i32) {} };
+        let fixture_fn = parse_quote! {fn foo(#[strategy = 123] x: i32) {} };
         let Argument { pat_ty, strategy } = ensure_some(
-            strip_args(f).1.pop(),
+            ensure_stripped_args(fixture_fn)?.1.pop(),
             "one argument extracted from the fixture",
         )?;
         ensure_eq(

@@ -32,12 +32,13 @@ mod internal {
         static SUPPRESSED: Cell<bool> = const { Cell::new(false) };
     }
 
+    /// Boxed process panic hook stored before the dispatcher is installed.
+    type PanicHook = Box<dyn for<'a> Fn(&PanicHookInfo<'a>) + Send + Sync>;
+
     /// The panic hook that was installed before this module took over. The
     /// dispatcher forwards to it whenever suppression is inactive. Populated
     /// exactly once, when the dispatching hook is installed.
-    static PREVIOUS_HOOK: OnceLock<
-        Box<dyn Fn(&PanicHookInfo<'_>) + Send + Sync>,
-    > = OnceLock::new();
+    static PREVIOUS_HOOK: OnceLock<PanicHook> = OnceLock::new();
 
     /// Installs the process-global dispatching panic hook on first use,
     /// recording the hook it replaces so the dispatcher can forward to it.

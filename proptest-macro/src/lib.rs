@@ -8,6 +8,20 @@
 
 use proc_macro::TokenStream;
 
+/// Token streams for one `#[property_test]` expansion.
+struct PropertyTestInput {
+    /// The attribute body supplied to `#[property_test(...)]`.
+    attr: proc_macro2::TokenStream,
+    /// The function annotated with `#[property_test]`.
+    annotated_fn: proc_macro2::TokenStream,
+}
+
+/// Expands a parsed `#[property_test]` invocation.
+trait ExpandPropertyTest {
+    /// Rewrite the annotated function into the generated strict property test.
+    fn expand(self) -> proc_macro2::TokenStream;
+}
+
 /// The parse / validate / options / codegen pipeline that rewrites an
 /// annotated function into the generated strict property test.
 mod property_test;
@@ -126,5 +140,10 @@ pub fn property_test(
     attr: TokenStream,
     annotated_fn: TokenStream,
 ) -> TokenStream {
-    property_test::property_test(attr.into(), annotated_fn.into()).into()
+    PropertyTestInput {
+        attr: attr.into(),
+        annotated_fn: annotated_fn.into(),
+    }
+    .expand()
+    .into()
 }

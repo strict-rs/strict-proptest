@@ -22,22 +22,26 @@ pub struct PathParams {
 
 impl PathParams {
     /// Gets the number of components in the path.
+    #[must_use]
     pub fn components(&self) -> SizeRange {
         self.components.clone()
     }
 
     /// Sets the number of components in the path.
+    #[must_use]
     pub fn with_components(mut self, components: impl Into<SizeRange>) -> Self {
         self.components = components.into();
         self
     }
 
     /// Gets the regular expression to generate individual components.
-    pub fn component_regex(&self) -> StringParam {
+    #[must_use]
+    pub const fn component_regex(&self) -> StringParam {
         self.component_regex
     }
 
     /// Sets the regular expression to generate individual components.
+    #[must_use]
     pub fn with_component_regex(
         mut self,
         component_regex: impl Into<StringParam>,

@@ -10,11 +10,17 @@
 //! Arbitrary implementations for `std::sync`.
 
 use crate::std_facade::Arc;
-use core::sync::atomic::*;
+use core::sync::atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering};
+#[cfg(feature = "unstable")]
+use core::sync::atomic::{
+    AtomicI8, AtomicI16, AtomicI32, AtomicU8, AtomicU16, AtomicU32,
+};
+#[cfg(all(feature = "unstable", feature = "atomic64bit"))]
+use core::sync::atomic::{AtomicI64, AtomicU64};
 
-use crate::arbitrary::*;
+use crate::arbitrary::{SMapped, any};
 use crate::strategy::statics::static_map;
-use crate::strategy::*;
+use crate::strategy::{Just, TupleUnion, WeightedStrategy};
 
 wrap_from!(Arc);
 
@@ -42,8 +48,8 @@ atomic!(AtomicI8, i8; AtomicI16, i16; AtomicI32, i32;
 atomic!(AtomicI64, i64; AtomicU64, u64);
 
 arbitrary!(Ordering,
-    TupleUnion<(WA<Just<Self>>, WA<Just<Self>>, WA<Just<Self>>,
-                WA<Just<Self>>, WA<Just<Self>>)>;
+    TupleUnion<(WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>,
+                WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>)>;
     prop_oneof![
         Just(Ordering::Relaxed),
         Just(Ordering::Release),

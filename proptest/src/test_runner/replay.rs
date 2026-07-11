@@ -7,8 +7,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(dead_code)]
-
 use std::fs;
 use std::io::{self, BufRead, Read, Seek, Write};
 use std::path::Path;
@@ -42,28 +40,17 @@ const SENTINEL: &str = "proptest-forkfile";
 /// to the file without having to worry about the possibility of appends being
 /// non-atomic.
 #[derive(Clone, Debug)]
-pub(crate) struct Replay {
+pub(super) struct Replay {
     /// The seed of the RNG used to start running the test cases.
-    pub(crate) seed: Seed,
+    pub(super) seed: Seed,
     /// A log of whether certain test cases passed or failed. The runner will
     /// assume the same results occur without actually running the test cases.
-    pub(crate) steps: Vec<TestCaseResult>,
-}
-
-impl Replay {
-    /// If `other` is longer than `self`, add the extra elements to `self`.
-    pub(super) fn merge(&mut self, other: &Replay) {
-        if other.steps.len() > self.steps.len() {
-            let sl = self.steps.len();
-            self.steps
-                .extend_from_slice(other.steps.get(sl..).unwrap_or(&[]));
-        }
-    }
+    pub(super) steps: Vec<TestCaseResult>,
 }
 
 /// Result of loading a replay file.
 #[derive(Clone, Debug)]
-pub(crate) enum ReplayFileStatus {
+pub(super) enum ReplayFileStatus {
     /// The file is valid and represents a currently-in-progress test.
     InProgress(Replay),
     /// The file is valid, but indicates that all testing has completed.
@@ -77,7 +64,7 @@ pub(crate) enum ReplayFileStatus {
     clippy::single_call_fn,
     reason = "open the fork replay file in the append-create-without-truncate mode the log format needs"
 )]
-pub(crate) fn open_file(path: impl AsRef<Path>) -> io::Result<fs::File> {
+pub(super) fn open_file(path: impl AsRef<Path>) -> io::Result<fs::File> {
     fs::OpenOptions::new()
         .read(true)
         .append(true)
@@ -88,16 +75,16 @@ pub(crate) fn open_file(path: impl AsRef<Path>) -> io::Result<fs::File> {
 
 /// Encode one case outcome as its single replay-log character: `+`
 /// pass, `-` fail, `!` reject.
-fn step_to_char(step: &TestCaseResult) -> char {
+const fn step_to_char(step: &TestCaseResult) -> char {
     match *step {
-        Ok(_) => '+',
+        Ok(()) => '+',
         Err(TestCaseError::Reject(_)) => '!',
         Err(TestCaseError::Fail(_)) => '-',
     }
 }
 
 /// Append the given step to the given output.
-pub(crate) fn append(
+pub(super) fn append(
     mut file: impl Write,
     step: &TestCaseResult,
 ) -> io::Result<()> {
@@ -119,7 +106,7 @@ fn read_required_line(
     clippy::single_call_fn,
     reason = "append a no-op ping character marking that the fork child is still alive"
 )]
-pub(crate) fn ping(mut file: impl Write) -> io::Result<()> {
+pub(super) fn ping(mut file: impl Write) -> io::Result<()> {
     write!(file, " ")
 }
 
@@ -128,29 +115,27 @@ pub(crate) fn ping(mut file: impl Write) -> io::Result<()> {
     clippy::single_call_fn,
     reason = "append the termination marker closing out a fork replay log"
 )]
-pub(crate) fn terminate(mut file: impl Write) -> io::Result<()> {
+pub(super) fn terminate(mut file: impl Write) -> io::Result<()> {
     write!(file, ".")
 }
 
 impl Replay {
     /// Write the full state of this `Replay` to the given output.
     pub(super) fn init_file(&self, mut file: impl Write) -> io::Result<()> {
-        writeln!(file, "{}", SENTINEL)?;
-        writeln!(file, "{}", self.seed.to_persistence())?;
+        writeln!(file, "{SENTINEL}")?;
+        let seed = self.seed.to_persistence();
+        writeln!(file, "{seed}")?;
 
         let mut step_data = Vec::<u8>::new();
         for step in &self.steps {
-            step_data.push(step_to_char(step) as u8);
+            step_data.push(
+                u8::try_from(u32::from(step_to_char(step))).unwrap_or(b'?'),
+            );
         }
 
         file.write_all(&step_data)?;
 
         Ok(())
-    }
-
-    /// Mark the replay as complete in the file.
-    pub(super) fn complete(mut file: impl Write) -> io::Result<()> {
-        write!(file, ".")
     }
 
     /// Parse a `Replay` out of the given file.
@@ -186,9 +171,8 @@ impl Replay {
         if !read_required_line(&mut reader, &mut line)? {
             return Ok(ReplayFileStatus::Corrupt);
         }
-        let seed = match Seed::from_persistence(&line) {
-            Some(seed) => seed,
-            None => return Ok(ReplayFileStatus::Corrupt),
+        let Some(seed) = Seed::from_persistence(&line) else {
+            return Ok(ReplayFileStatus::Corrupt);
         };
 
         line.clear();
@@ -204,7 +188,7 @@ impl Replay {
                     "rejected in other process",
                 ))),
                 '.' => {
-                    return Ok(ReplayFileStatus::Terminated(Replay {
+                    return Ok(ReplayFileStatus::Terminated(Self {
                         seed,
                         steps,
                     }));
@@ -214,7 +198,7 @@ impl Replay {
             }
         }
 
-        Ok(ReplayFileStatus::InProgress(Replay { seed, steps }))
+        Ok(ReplayFileStatus::InProgress(Self { seed, steps }))
     }
 }
 
@@ -222,7 +206,9 @@ impl Replay {
 mod tests {
     use std::io::Cursor;
 
-    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_ok};
+    use strict_test_support::{
+        TestFailure, ensure, ensure_eq, ensure_ok, ensure_some,
+    };
 
     use super::*;
 
@@ -288,13 +274,25 @@ mod tests {
                     &parsed.steps.len(),
                     "the parser stores pass, fail, and reject before the terminator",
                 )?;
-                ensure(parsed.steps[0].is_ok(), "the first step is a pass")?;
-                ensure(
-                    matches!(parsed.steps[1], Err(TestCaseError::Fail(_))),
-                    "the second step is a failure",
+                let first_step = ensure_some(
+                    parsed.steps.first(),
+                    "the first replay step exists",
+                )?;
+                ensure(first_step.is_ok(), "the first step is a pass")?;
+                let second_step = ensure_some(
+                    parsed.steps.get(1),
+                    "the second replay step exists",
                 )?;
                 ensure(
-                    matches!(parsed.steps[2], Err(TestCaseError::Reject(_))),
+                    matches!(second_step, Err(TestCaseError::Fail(_))),
+                    "the second step is a failure",
+                )?;
+                let third_step = ensure_some(
+                    parsed.steps.get(2),
+                    "the third replay step exists",
+                )?;
+                ensure(
+                    matches!(third_step, Err(TestCaseError::Reject(_))),
                     "the third step is a rejection",
                 )
             }

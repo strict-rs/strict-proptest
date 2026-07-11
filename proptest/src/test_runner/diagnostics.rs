@@ -18,12 +18,12 @@
 
 use std::fmt;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::string::String;
 
 /// One structured runner diagnostic, rendered to the exact text the
 /// runner has historically printed for that situation.
-pub(crate) enum RunnerDiagnostic {
+pub(super) enum RunnerDiagnostic {
     /// A `PROPTEST_*` env-var value failed to parse as its target type.
     EnvVarUnparsable {
         /// The `PROPTEST_*` variable name whose value was rejected.
@@ -104,98 +104,56 @@ pub(crate) enum RunnerDiagnostic {
 
 impl fmt::Display for RunnerDiagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use self::RunnerDiagnostic::*;
-        match self {
-            EnvVarUnparsable {
+        match *self {
+            Self::EnvVarUnparsable {
                 var,
-                value: raw_value,
+                value: ref raw_value,
                 typ,
-                default,
-            } => write!(
-                f,
-                "proptest: The env-var {}={} can't be parsed as {}, \
-                 using default of {}.",
-                var, raw_value, typ, default
-            ),
-            EnvVarNotUnicode { var, default } => write!(
-                f,
-                "proptest: The env-var {} is not valid, using \
-                 default of {}.",
-                var, default
-            ),
-            EnvVarUnknown { var } => {
-                write!(f, "proptest: Ignoring unknown env-var {}.", var)
+                ref default,
+            } => fmt_env_var_unparsable(f, var, raw_value, typ, default),
+            Self::EnvVarNotUnicode { var, ref default } => {
+                fmt_env_var_not_unicode(f, var, default)
             }
-            PersistenceOpenFailed { path, error } => write!(
-                f,
-                "proptest: failed to open {}: {}",
-                path.as_deref()
-                    .unwrap_or_else(|| std::path::Path::new("??"))
-                    .display(),
-                error
-            ),
-            PersistenceAppendFailed { path, error } => write!(
-                f,
-                "proptest: failed to append to {}: {}",
-                path.display(),
-                error
-            ),
-            PersistenceSaved {
-                path,
+            Self::EnvVarUnknown { ref var } => fmt_env_var_unknown(f, var),
+            Self::PersistenceOpenFailed {
+                ref path,
+                ref error,
+            } => fmt_persistence_open_failed(f, path.as_deref(), error),
+            Self::PersistenceAppendFailed {
+                ref path,
+                ref error,
+            } => fmt_persistence_append_failed(f, path, error),
+            Self::PersistenceSaved {
+                ref path,
                 created,
-                seed,
-            } => write!(
-                f,
-                "proptest: Saving this and future failures in {}\n\
-                 proptest: If this test was run on a CI system, you may \
-                 wish to add the following line to your copy of the \
-                 file.{}\n\
-                 {}",
-                path.display(),
-                if *created {
-                    " (You may need to create it.)"
-                } else {
-                    ""
-                },
-                seed
-            ),
-            SourceNotAbsolutizable { source } => write!(
-                f,
-                "proptest: Failed to find absolute path of \
-                 source file '{:?}'. Ensure the test is \
-                 being run from somewhere within the crate \
-                 directory hierarchy.",
-                source
-            ),
-            CwdUnresolvable { source, error } => write!(
-                f,
-                "proptest: Failed to determine current \
-                 directory, so the relative source path \
-                 '{:?}' cannot be resolved: {}",
-                source, error
-            ),
-            UnparsableSeedLine { path, line } => write!(
-                f,
-                "proptest: {}:{}: unparsable line, ignoring",
-                path.display(),
-                line
-            ),
-            SourceParallelRootless => write!(
+                ref seed,
+            } => fmt_persistence_saved(f, path, created, seed),
+            Self::SourceNotAbsolutizable { ref source } => {
+                fmt_source_not_absolutizable(f, source)
+            }
+            Self::CwdUnresolvable {
+                ref source,
+                ref error,
+            } => fmt_cwd_unresolvable(f, source, error),
+            Self::UnparsableSeedLine { ref path, line } => {
+                fmt_unparsable_seed_line(f, path, line)
+            }
+            Self::SourceParallelRootless => write!(
                 f,
                 "proptest: FileFailurePersistence::SourceParallel set, \
                  but failed to find lib.rs or main.rs"
             ),
-            SourceParallelSourceless => write!(
+            Self::SourceParallelSourceless => write!(
                 f,
                 "proptest: FileFailurePersistence::SourceParallel set, \
                  but no source file known"
             ),
-            WithSourceSourceless => write!(
+            Self::WithSourceSourceless => write!(
                 f,
                 "proptest: FileFailurePersistence::WithSource set, \
                  but no source file known"
             ),
-            ClosureForkUnsupported => write!(
+            Self::ClosureForkUnsupported => write!(
                 f,
                 "proptest: Forking/timeout not supported in \
                  closure-style invocations; ignoring"
@@ -204,24 +162,194 @@ impl fmt::Display for RunnerDiagnostic {
     }
 }
 
+/// Format an unparsable environment-variable diagnostic.
+#[allow(
+    clippy::single_call_fn,
+    reason = "format the EnvVarUnparsable diagnostic as a named entry in the runner message catalog"
+)]
+fn fmt_env_var_unparsable(
+    f: &mut fmt::Formatter<'_>,
+    var: &str,
+    raw_value: &str,
+    typ: &str,
+    default: &str,
+) -> fmt::Result {
+    write!(
+        f,
+        "proptest: The env-var {var}={raw_value} can't be parsed as \
+         {typ}, using default of {default}."
+    )
+}
+
+/// Format a non-Unicode environment-variable diagnostic.
+#[allow(
+    clippy::single_call_fn,
+    reason = "format the EnvVarNotUnicode diagnostic as a named entry in the runner message catalog"
+)]
+fn fmt_env_var_not_unicode(
+    f: &mut fmt::Formatter<'_>,
+    var: &str,
+    default: &str,
+) -> fmt::Result {
+    write!(
+        f,
+        "proptest: The env-var {var} is not valid, using \
+         default of {default}."
+    )
+}
+
+/// Format an unknown environment-variable diagnostic.
+#[allow(
+    clippy::single_call_fn,
+    reason = "format the EnvVarUnknown diagnostic as a named entry in the runner message catalog"
+)]
+fn fmt_env_var_unknown(f: &mut fmt::Formatter<'_>, var: &str) -> fmt::Result {
+    write!(f, "proptest: Ignoring unknown env-var {var}.")
+}
+
+/// Format a persistence-open diagnostic.
+#[allow(
+    clippy::single_call_fn,
+    reason = "format the PersistenceOpenFailed diagnostic as a named entry in the runner message catalog"
+)]
+fn fmt_persistence_open_failed(
+    f: &mut fmt::Formatter<'_>,
+    path: Option<&Path>,
+    error: &io::Error,
+) -> fmt::Result {
+    write!(
+        f,
+        "proptest: failed to open {path}: {error}",
+        path = path.unwrap_or_else(|| Path::new("??")).display()
+    )
+}
+
+/// Format a persistence-append diagnostic.
+#[allow(
+    clippy::single_call_fn,
+    reason = "format the PersistenceAppendFailed diagnostic as a named entry in the runner message catalog"
+)]
+fn fmt_persistence_append_failed(
+    f: &mut fmt::Formatter<'_>,
+    path: &Path,
+    error: &io::Error,
+) -> fmt::Result {
+    write!(
+        f,
+        "proptest: failed to append to {path}: {error}",
+        path = path.display()
+    )
+}
+
+/// Format the persistence-saved hint.
+#[allow(
+    clippy::single_call_fn,
+    reason = "format the PersistenceSaved diagnostic as a named entry in the runner message catalog"
+)]
+fn fmt_persistence_saved(
+    f: &mut fmt::Formatter<'_>,
+    path: &Path,
+    created: bool,
+    seed: &str,
+) -> fmt::Result {
+    let suffix = if created {
+        " (You may need to create it.)"
+    } else {
+        ""
+    };
+    write!(
+        f,
+        "proptest: Saving this and future failures in {path}\n\
+         proptest: If this test was run on a CI system, you may \
+         wish to add the following line to your copy of the \
+         file.{suffix}\n\
+         {seed}",
+        path = path.display()
+    )
+}
+
+/// Format a relative source path that could not be absolutized.
+#[allow(
+    clippy::single_call_fn,
+    reason = "format the SourceNotAbsolutizable diagnostic as a named entry in the runner message catalog"
+)]
+fn fmt_source_not_absolutizable(
+    f: &mut fmt::Formatter<'_>,
+    source: &Path,
+) -> fmt::Result {
+    write!(
+        f,
+        "proptest: Failed to find absolute path of \
+         source file '{}'. Ensure the test is \
+         being run from somewhere within the crate \
+         directory hierarchy.",
+        source.display()
+    )
+}
+
+/// Format a current-directory lookup failure.
+#[allow(
+    clippy::single_call_fn,
+    reason = "format the CwdUnresolvable diagnostic as a named entry in the runner message catalog"
+)]
+fn fmt_cwd_unresolvable(
+    f: &mut fmt::Formatter<'_>,
+    source: &Path,
+    error: &io::Error,
+) -> fmt::Result {
+    write!(
+        f,
+        "proptest: Failed to determine current \
+         directory, so the relative source path \
+         '{}' cannot be resolved: {error}",
+        source.display()
+    )
+}
+
+/// Format an unparsable persisted-seed line diagnostic.
+#[allow(
+    clippy::single_call_fn,
+    reason = "format the UnparsableSeedLine diagnostic as a named entry in the runner message catalog"
+)]
+fn fmt_unparsable_seed_line(
+    f: &mut fmt::Formatter<'_>,
+    path: &Path,
+    line: usize,
+) -> fmt::Result {
+    write!(
+        f,
+        "proptest: {path}:{line}: unparsable line, ignoring",
+        path = path.display()
+    )
+}
+
 /// Whether a message at `level` passes the runner's verbosity gate.
 ///
 /// Routing the comparison through a function (instead of inlining it in
 /// the `verbose_message!` macro) keeps `level == ALWAYS` (`0`) from
 /// tripping `unused_comparisons` at every expansion site.
-pub(crate) fn verbose_at_least(verbose: u32, level: u32) -> bool {
+pub(super) const fn verbose_at_least(verbose: u32, level: u32) -> bool {
     verbose >= level
 }
 
 /// Emit one structured diagnostic to stderr, best-effort.
-pub(crate) fn emit(diagnostic: RunnerDiagnostic) {
-    write_best_effort(format_args!("{}", diagnostic));
+pub(super) fn emit(diagnostic: &RunnerDiagnostic) {
+    write_best_effort(format_args!("{diagnostic}"));
 }
 
 /// Emit one pre-formatted verbose-channel message to stderr,
 /// best-effort, with the historical `proptest: ` prefix.
-pub(crate) fn emit_verbose(args: fmt::Arguments<'_>) {
-    write_best_effort(format_args!("proptest: {}", args));
+pub(super) fn emit_verbose(args: fmt::Arguments<'_>) {
+    write_best_effort(format_args!("proptest: {args}"));
+}
+
+/// Emit one already-rendered diagnostic line to stderr, best-effort.
+#[allow(
+    clippy::single_call_fn,
+    reason = "bridge externally rendered state-machine diagnostics into the shared best-effort stderr seam"
+)]
+pub(super) fn emit_line(args: fmt::Arguments<'_>) {
+    write_best_effort(args);
 }
 
 /// Write `args` plus a trailing newline to stderr, consciously
@@ -248,10 +376,10 @@ fn write_line(
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::ToOwned;
+    use std::borrow::ToOwned as _;
     use std::io;
     use std::path::PathBuf;
-    use std::string::{String, ToString};
+    use std::string::{String, ToString as _};
     use std::vec::Vec;
 
     use strict_test_support::{TestFailure, ensure, ensure_all, ensure_eq};
@@ -352,15 +480,6 @@ mod tests {
     #[test]
     fn writer_core_appends_newline_and_survives_write_failure()
     -> Result<(), TestFailure> {
-        let mut captured = Vec::new();
-        let written = write_line(&mut captured, format_args!("proptest: x"));
-        ensure(written.is_ok(), "writing into a buffer succeeds")?;
-        ensure_eq(
-            &String::from_utf8_lossy(&captured).into_owned(),
-            &"proptest: x\n".to_owned(),
-            "the seam writes the message plus exactly one newline",
-        )?;
-
         struct BrokenPipe;
         impl io::Write for BrokenPipe {
             fn write(&mut self, _: &[u8]) -> io::Result<usize> {
@@ -370,6 +489,16 @@ mod tests {
                 Err(io::Error::from(io::ErrorKind::BrokenPipe))
             }
         }
+
+        let mut captured = Vec::new();
+        let written = write_line(&mut captured, format_args!("proptest: x"));
+        ensure(written.is_ok(), "writing into a buffer succeeds")?;
+        ensure_eq(
+            &String::from_utf8_lossy(&captured).into_owned(),
+            &"proptest: x\n".to_owned(),
+            "the seam writes the message plus exactly one newline",
+        )?;
+
         let failed = write_line(&mut BrokenPipe, format_args!("dropped"));
         ensure(
             failed.is_err(),

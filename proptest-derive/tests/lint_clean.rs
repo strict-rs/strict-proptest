@@ -10,7 +10,9 @@
 
 #![deny(warnings, unsafe_code)]
 
+use proptest::arbitrary::Arbitrary as ProptestArbitrary;
 use proptest_derive::Arbitrary;
+use std::{hint::black_box, vec::IntoIter};
 
 #[derive(Debug, Arbitrary)]
 struct LintCleanUnit;
@@ -21,23 +23,28 @@ struct LintCleanProjection<T: Iterator> {
     _second: T::Item,
 }
 
-#[test]
-fn generated_impls_resolve_under_rustc_lint_denies() {
-    fn assert_arbitrary<T: proptest::arbitrary::Arbitrary>() {}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    assert_arbitrary::<LintCleanUnit>();
-    assert_arbitrary::<LintCleanProjection<std::vec::IntoIter<u8>>>();
+    fn assert_arbitrary<T: ProptestArbitrary>() {}
 
-    let unit = LintCleanUnit;
-    let _unit = std::hint::black_box(unit);
+    #[test]
+    fn generated_impls_resolve_under_rustc_lint_denies() {
+        assert_arbitrary::<LintCleanUnit>();
+        assert_arbitrary::<LintCleanProjection<IntoIter<u8>>>();
 
-    let value = LintCleanProjection::<std::vec::IntoIter<u8>> {
-        _first: 1,
-        _second: 2,
-    };
-    let LintCleanProjection {
-        _first: first,
-        _second: second,
-    } = value;
-    let _fields = std::hint::black_box((first, second));
+        let unit = LintCleanUnit;
+        let _unit: LintCleanUnit = black_box(unit);
+
+        let value = LintCleanProjection::<IntoIter<u8>> {
+            _first: 1,
+            _second: 2,
+        };
+        let LintCleanProjection {
+            _first: first,
+            _second: second,
+        } = value;
+        let _fields: (u8, u8) = black_box((first, second));
+    }
 }

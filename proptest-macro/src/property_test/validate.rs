@@ -1,5 +1,7 @@
+use std::mem::take;
+
 use proc_macro2::TokenStream;
-use quote::{ToTokens, quote_spanned};
+use quote::{ToTokens as _, quote_spanned};
 use syn::{FnArg, ItemFn, Meta, PatType, ReturnType, Type, spanned::Spanned};
 
 use super::utils::is_strategy;
@@ -39,13 +41,28 @@ const UNIT_RETURN_ERROR: &str = "strict property tests must return `Result<(), T
     reason = "reject a property test signature that returns unit instead of TestResult"
 )]
 fn returns_strict_result(f: &ItemFn) -> Result<(), TokenStream> {
-    match &f.sig.output {
+    match f.sig.output {
         ReturnType::Default => err(&f.sig.ident, UNIT_RETURN_ERROR),
-        ReturnType::Type(_, ty) => match ty.as_ref() {
-            Type::Tuple(tuple) if tuple.elems.is_empty() => {
+        ReturnType::Type(_, ref ty) => match **ty {
+            Type::Tuple(ref tuple) if tuple.elems.is_empty() => {
                 err(ty, UNIT_RETURN_ERROR)
             }
-            _ => Ok(()),
+            Type::Array(_)
+            | Type::BareFn(_)
+            | Type::Group(_)
+            | Type::ImplTrait(_)
+            | Type::Infer(_)
+            | Type::Macro(_)
+            | Type::Never(_)
+            | Type::Paren(_)
+            | Type::Path(_)
+            | Type::Ptr(_)
+            | Type::Reference(_)
+            | Type::Slice(_)
+            | Type::TraitObject(_)
+            | Type::Tuple(_)
+            | Type::Verbatim(_)
+            | _ => Ok(()),
         },
     }
 }
@@ -59,17 +76,17 @@ fn returns_strict_result(f: &ItemFn) -> Result<(), TokenStream> {
     clippy::single_call_fn,
     reason = "reject any self receiver on the annotated property test function"
 )]
-fn all_args_non_self(f: &mut ItemFn) -> Result<(), TokenStream> {
+fn all_args_non_self(f: &ItemFn) -> Result<(), TokenStream> {
     let first_self_arg = f
         .sig
         .inputs
         .iter()
         .find(|arg| matches!(arg, FnArg::Receiver(_)));
 
-    match first_self_arg {
-        None => Ok(()),
-        Some(arg) => err(arg, "`self` parameters are forbidden"),
-    }
+    first_self_arg.map_or_else(
+        || Ok(()),
+        |arg| err(arg, "`self` parameters are forbidden"),
+    )
 }
 
 /// Make sure we only have `#[strategy = <expr>]` attributes on function parameters
@@ -81,8 +98,8 @@ fn validate_parameter_attrs(f: &mut ItemFn) -> Result<(), TokenStream> {
     let mut error = quote::quote! {};
 
     for param in &mut f.sig.inputs {
-        let FnArg::Typed(pat_ty) = param else {
-            unreachable!("should be impossible due to `all_args_non_self`");
+        let &mut FnArg::Typed(ref mut pat_ty) = param else {
+            return err(param, "`self` parameters are forbidden");
         };
 
         // add error for any non-`strategy` error or inner attributes (i.e. `#![...]` )
@@ -109,7 +126,7 @@ fn validate_parameter_attrs(f: &mut ItemFn) -> Result<(), TokenStream> {
 fn retain_single_strategy_attr(pat_ty: &mut PatType, error: &mut TokenStream) {
     let mut first_strategy_seen = false;
     let mut final_attrs = Vec::with_capacity(pat_ty.attrs.len());
-    let old_attrs = std::mem::take(&mut pat_ty.attrs);
+    let old_attrs = take(&mut pat_ty.attrs);
 
     // every strategy attr should have the form `#[strategy = <expr>]`
     for attr in old_attrs.into_iter().filter(is_strategy) {
@@ -143,7 +160,7 @@ fn retain_single_strategy_attr(pat_ty: &mut PatType, error: &mut TokenStream) {
 /// whole macro output, and `compile_error!(...)` without one is malformed in
 /// item position, which would bury the real diagnostic under a delimiter
 /// error.
-fn err(span: impl Spanned, message: &str) -> Result<(), TokenStream> {
+fn err(span: &impl Spanned, message: &str) -> Result<(), TokenStream> {
     Err(quote_spanned! { span.span() => compile_error!(#message); })
 }
 

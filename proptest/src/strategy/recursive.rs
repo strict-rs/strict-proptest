@@ -9,9 +9,10 @@
 
 use crate::std_facade::{Arc, Box, Vec, fmt};
 
-use crate::strategy::traits::*;
+use crate::strategy::traits::{BoxedStrategy, NewTree, Strategy, ValueTree};
 use crate::strategy::unions::float_to_weight;
-use crate::test_runner::*;
+use crate::test_runner::TestRunner;
+use num_traits::ToPrimitive as _;
 
 /// Return type from `Strategy::prop_recursive()`.
 #[must_use = "strategies do nothing unless used"]
@@ -46,7 +47,7 @@ impl<T: fmt::Debug, F> fmt::Debug for Recursive<T, F> {
 
 impl<T, F> Clone for Recursive<T, F> {
     fn clone(&self) -> Self {
-        Recursive {
+        Self {
             base: self.base.clone(),
             recurse: Arc::clone(&self.recurse),
             depth: self.depth,
@@ -128,7 +129,10 @@ impl<
         let mut branch_probabilities = Vec::new();
         let mut k2 = u64::from(self.expected_branch_size) * 2;
         for _ in 0..self.depth {
-            branch_probabilities.push(f64::from(self.desired_size) / k2 as f64);
+            let denominator = k2.to_f64().unwrap_or(f64::INFINITY);
+            branch_probabilities.push(
+                f64::from(self.desired_size).mul_add(denominator.recip(), 0.0),
+            );
             k2 = k2.saturating_mul(u64::from(self.expected_branch_size) * 2);
         }
 
@@ -139,9 +143,9 @@ impl<
             let non_recursive_choice = strat;
             // Clamp the maximum branch probability to 0.9 to ensure we can
             // generate non-recursive cases reasonably often.
-            let branch_probability = branch_probability.min(0.9);
+            let clamped_branch_probability = branch_probability.min(0.9);
             let (weight_branch, weight_leaf) =
-                float_to_weight(branch_probability);
+                float_to_weight(clamped_branch_probability);
             let branch = prop_oneof![
                 weight_leaf => non_recursive_choice,
                 weight_branch => recursive_choice,
@@ -160,29 +164,29 @@ mod test {
     use strict_test_support::{TestFailure, ensure, ensure_some};
 
     use super::*;
+    use crate::collection::vec;
     use crate::strategy::just::Just;
 
     #[derive(Clone, Debug, PartialEq)]
     enum Tree {
         Leaf,
-        Branch(Vec<Tree>),
+        Branch(Vec<Self>),
     }
 
     impl Tree {
         fn stats(&self) -> (u32, u32) {
             match *self {
-                Tree::Leaf => (0, 1),
-                Tree::Branch(ref children) => {
-                    let mut depth = 0;
-                    let mut count = 0;
-                    for child in children {
+                Self::Leaf => (0, 1),
+                Self::Branch(ref children) => children.iter().fold(
+                    (1_u32, 1_u32),
+                    |(depth, count), child| {
                         let (child_depth, child_count) = child.stats();
-                        depth = max(child_depth, depth);
-                        count += child_count;
-                    }
-
-                    (depth + 1, count + 1)
-                }
+                        (
+                            max(child_depth.saturating_add(1), depth),
+                            count.saturating_add(child_count),
+                        )
+                    },
+                ),
             }
         }
     }
@@ -193,7 +197,7 @@ mod test {
         let mut max_count = 0;
 
         let strat = Just(Tree::Leaf).prop_recursive(4, 64, 16, |element| {
-            crate::collection::vec(element, 8..16).prop_map(Tree::Branch)
+            vec(element, 8..16).prop_map(Tree::Branch)
         });
 
         let mut runner = TestRunner::deterministic();
@@ -217,7 +221,7 @@ mod test {
     #[test]
     fn simplifies_to_non_recursive() -> Result<(), TestFailure> {
         let strat = Just(Tree::Leaf).prop_recursive(4, 64, 16, |element| {
-            crate::collection::vec(element, 8..16).prop_map(Tree::Branch)
+            vec(element, 8..16).prop_map(Tree::Branch)
         });
 
         let mut runner = TestRunner::deterministic();

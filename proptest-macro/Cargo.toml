@@ -3,6 +3,7 @@ name = "proptest-macro"
 description = "Procedural macros for the proptest crate"
 version = "0.5.0"
 authors = ["The Proptest Developers"]
+readme = "README.md"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

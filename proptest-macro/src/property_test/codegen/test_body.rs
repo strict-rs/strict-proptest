@@ -4,7 +4,7 @@ use syn::{Block, Ident, Pat, parse_quote, parse2};
 
 use crate::property_test::{options::Options, utils::Argument};
 
-use super::{nth_field_name, struct_name};
+use super::{field_name_for_arg, struct_name};
 
 /// Generate the new test body by putting the struct and arbitrary impl at the
 /// start, then handing the labeled strategy to the strict runner: the final
@@ -16,9 +16,9 @@ use super::{nth_field_name, struct_name};
     reason = "the strict-runner block wrapping the original property body"
 )]
 pub(super) fn body(
-    block: Block,
+    block: &Block,
     args: &[Argument],
-    struct_and_impl: TokenStream,
+    struct_and_impl: &TokenStream,
     fn_name: &Ident,
     options: &Options,
 ) -> Block {
@@ -27,25 +27,23 @@ pub(super) fn body(
     // convert each arg to `field0: x`
     let struct_fields = args.iter().enumerate().map(|(index, arg)| {
         let pat = arg.pat_ty.pat.as_ref();
-        let field_name = nth_field_name(args, index);
+        let field_name = field_name_for_arg(arg, index);
 
         // If the pattern is an ident, we know that the field name is equal to the pattern name.
         // This means we need to avoid generating: `x: x`, which would trigger a lint suggesting
         // shorthand struct initialization.
 
-        match pat {
-            // We need to make sure to handle any mutability modifiers here, i.e. if the user wrote
-            // `mut x: i32`, we have to generate `mut x`, not `x: mut x`
-            //
-            // See https://github.com/proptest-rs/proptest/issues/601
-            Pat::Ident(i) => {
-                if let Some(mutability) = i.mutability {
-                    quote!(#mutability #field_name,)
-                } else {
-                    quote!(#field_name,)
-                }
-            }
-            _ => quote!(#field_name: #pat,),
+        // We need to make sure to handle any mutability modifiers here, i.e. if the user wrote
+        // `mut x: i32`, we have to generate `mut x`, not `x: mut x`
+        //
+        // See https://github.com/proptest-rs/proptest/issues/601
+        if let Pat::Ident(ref i) = *pat {
+            i.mutability.map_or_else(
+                || quote!(#field_name,),
+                |mutability| quote!(#mutability #field_name,),
+            )
+        } else {
+            quote!(#field_name: #pat,)
         }
     });
 
@@ -69,11 +67,13 @@ pub(super) fn body(
     // annotated test (matching the pre-strict runner glue); the config is then
     // used verbatim by the strict runner. Without one, the strict defaults
     // apply (deterministic `STRICT_TEST_SEED` seeding, persistence disabled).
-    let run = match options.config.as_ref() {
-        None => quote! {
+    let default_ensure_property_tokens = || {
+        quote! {
             #proptest::strict::ensure_property(&strategy, #context, #property)
-        },
-        Some(config) => quote! {
+        }
+    };
+    let configured_ensure_property_tokens = |config| {
+        quote! {
             #proptest::strict::ensure_property_with_config(
                 &strategy,
                 #context,
@@ -84,8 +84,12 @@ pub(super) fn body(
                 },
                 #property,
             )
-        },
+        }
     };
+    let run = options.config.as_ref().map_or_else(
+        default_ensure_property_tokens,
+        configured_ensure_property_tokens,
+    );
 
     let tokens = quote!( {
 

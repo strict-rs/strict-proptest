@@ -2,7 +2,7 @@
 
 This file provides guidance to coding agents when working with code in this repository.
 
-Scope: `proptest/src/test_runner/` — the engine that drives test execution and shrinking. It owns the `TestRunner` loop, the `Config` / `PROPTEST_*` env-var surface, the seedable `TestRng`, the `TestCaseError` / `TestError` outcome types, the optional result cache, and (feature-gated) fork replay and scoped panic-hook handling. `mod.rs` declares every submodule and glob-re-exports the public ones (`config`, `errors`, `failure_persistence`, `reason`, `result_cache`, `rng`, `runner`); `replay` and `scoped_panic_hook` are crate-internal and are *not* re-exported. You normally only touch this module when implementing low-level strategies. For the build/test matrix, the no_std rules, copyright headers, and commit conventions see the workspace-root `AGENTS.md`.
+Scope: `proptest/src/test_runner/` — the engine that drives test execution and shrinking. It owns the `TestRunner` loop, the `Config` / `PROPTEST_*` env-var surface, the seedable `TestRng`, the `TestCaseError` / `TestError` outcome types, the optional result cache, and (feature-gated) fork replay and scoped panic-hook handling. `test_runner.rs` declares every submodule and glob-re-exports the public ones (`config`, `errors`, `failure_persistence`, `reason`, `result_cache`, `rng`, `runner`); `replay` and `scoped_panic_hook` are crate-internal and are *not* re-exported. You normally only touch this module when implementing low-level strategies. For the build/test matrix, the no-`std` rules, copyright headers, and commit conventions see the workspace-root `AGENTS.md`.
 
 ## Control flow: a single `run()`, top to bottom
 

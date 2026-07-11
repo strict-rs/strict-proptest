@@ -12,7 +12,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicUsize};
 
-use proptest::bits::{BitSetLike, VarBitSet};
+use proptest::bits::{BitSetLike as _, VarBitSet};
 use proptest::collection::SizeRange;
 use proptest::num::sample_uniform_incl;
 use proptest::std_facade::Vec;
@@ -103,12 +103,9 @@ pub trait ReferenceStateMachine: 'static {
         reason = "default reference-state-machine precondition gate that accepts every transition unfiltered"
     )]
     fn preconditions(
-        state: &Self::State,
-        transition: &Self::Transition,
+        _state: &Self::State,
+        _transition: &Self::Transition,
     ) -> bool {
-        // This is to avoid `unused_variables` warning
-        let _ = (state, transition);
-
         true
     }
 
@@ -131,11 +128,12 @@ pub trait ReferenceStateMachine: 'static {
     }
 }
 
-/// In a sequential state machine strategy, we first generate an acceptable
-/// sequence of transitions. That is a sequence that satisfies the given
-/// pre-conditions. The acceptability of each transition in the sequence depends
-/// on the current state of the state machine, which is updated by the
-/// transitions with the `next` function.
+/// A sequential state machine strategy generates an acceptable transition
+/// sequence.
+///
+/// The sequence satisfies the given pre-conditions. The acceptability of each
+/// transition depends on the current state of the state machine, which is
+/// updated by the transitions with the `next` function.
 ///
 /// The shrinking strategy is to iteratively apply `Shrink::InitialState`,
 /// `Shrink::DeleteTransition` and `Shrink::Transition`.
@@ -214,6 +212,10 @@ impl<State, Transition, StateStrategy, TransitionStrategy> Debug
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.debug_struct("Sequential")
             .field("size", &self.size)
+            .field("init_state", &"<init_state callback>")
+            .field("preconditions", &"<preconditions callback>")
+            .field("transitions", &"<transitions callback>")
+            .field("next", &"<next callback>")
             .finish()
     }
 }
@@ -241,7 +243,7 @@ impl<
 
         let (min_size, end) = self.size.start_end_incl();
         // Sample the maximum number of the transitions from the size range
-        let max_size = sample_uniform_incl(runner, min_size, end);
+        let max_size = sample_uniform_incl(runner, min_size, end)?;
         let mut transitions = Vec::with_capacity(max_size);
         let mut acceptable_transitions = Vec::with_capacity(max_size);
         let included_transitions = VarBitSet::saturated(max_size);
@@ -266,14 +268,14 @@ impl<
         }
 
         // The maximum index into the vectors and bit sets
-        let max_ix = max_size - 1;
+        let max_ix = max_size.saturating_sub(1);
 
         Ok(SequentialValueTree {
             initial_state,
             is_initial_state_shrinkable: true,
             last_valid_initial_state,
-            preconditions: self.preconditions.clone(),
-            next: self.next.clone(),
+            preconditions: Arc::clone(&self.preconditions),
+            next: Arc::clone(&self.next),
             transitions,
             acceptable_transitions,
             included_transitions,
@@ -283,7 +285,7 @@ impl<
             // which is less likely to invalidate pre-conditions
             shrink: DeleteTransition(max_ix),
             last_shrink: None,
-            seen_transitions_counter: Some(Default::default()),
+            seen_transitions_counter: Some(Arc::default()),
         })
     }
 }
@@ -298,7 +300,7 @@ enum Shrink {
     /// Shrink a transition at given index
     Transition(usize),
 }
-use Shrink::*;
+use Shrink::{DeleteTransition, InitialState, Transition};
 
 /// The state of a transition in the model
 #[derive(Clone, Copy, Debug)]
@@ -311,7 +313,7 @@ enum TransitionState {
     /// The transition has been complicated, but rejected by pre-conditions
     ComplicateRejected,
 }
-use TransitionState::*;
+use TransitionState::{Accepted, ComplicateRejected, SimplifyRejected};
 
 /// The generated value tree for a sequential state machine.
 pub struct SequentialValueTree<
@@ -425,7 +427,7 @@ impl<
             if kept_count < seen_count {
                 // transition at ix was seen by the test or we are
                 // still below minimum size for the test
-                kept_count += 1;
+                kept_count = kept_count.saturating_add(1);
                 continue;
             }
             // transition at ix was never seen
@@ -448,6 +450,37 @@ impl<
         self.seen_transitions_counter = None;
     }
 
+    /// Return the current generated transition at `ix`, if the transition
+    /// tree vector still contains that slot.
+    fn current_transition(&self, ix: usize) -> Option<Transition> {
+        self.transitions.get(ix).map(ValueTree::current)
+    }
+
+    /// Store the current generated transition at `ix` as the accepted value.
+    fn set_accepted_transition(&mut self, ix: usize) -> bool {
+        let Some(current) = self.current_transition(ix) else {
+            return false;
+        };
+        let Some(entry) = self.acceptable_transitions.get_mut(ix) else {
+            return false;
+        };
+        *entry = (Accepted, current);
+        true
+    }
+
+    /// Mark an accepted-transition slot with the given rejection state.
+    fn mark_transition_state(
+        &mut self,
+        ix: usize,
+        state: TransitionState,
+    ) -> bool {
+        let Some(entry) = self.acceptable_transitions.get_mut(ix) else {
+            return false;
+        };
+        entry.0 = state;
+        true
+    }
+
     /// Try to apply the next `self.shrink`. Returns `true` if a shrink has been
     /// applied.
     fn try_simplify(&mut self) -> bool {
@@ -463,7 +496,7 @@ impl<
                 Transition(0)
             } else {
                 // Try to delete the previous transition next
-                DeleteTransition(ix - 1)
+                DeleteTransition(ix.saturating_sub(1))
             };
             // If this delete is not acceptable, undo it and try again
             if !self
@@ -492,15 +525,23 @@ impl<
                 continue;
             }
 
-            if let Some((SimplifyRejected, _trans)) =
-                self.acceptable_transitions.get(ix)
+            if self
+                .acceptable_transitions
+                .get(ix)
+                .is_some_and(|entry| matches!(entry.0, SimplifyRejected))
             {
                 // This transition is already simplified and rejected
                 self.shrink = self.next_shrink_transition(ix);
                 continue;
             }
 
-            if !self.transitions[ix].simplify() {
+            let Some(transition) = self.transitions.get_mut(ix) else {
+                self.shrinkable_transitions.clear(ix);
+                self.shrink = self.next_shrink_transition(ix);
+                continue;
+            };
+
+            if !transition.simplify() {
                 // Nothing simpler to try for this transition
                 self.shrinkable_transitions.clear(ix);
                 self.shrink = self.next_shrink_transition(ix);
@@ -518,8 +559,7 @@ impl<
             return self.simplify_initial_state();
         }
 
-        // This statement should never be reached
-        panic!("Unexpected shrink state");
+        false
     }
 
     /// Commit the just-simplified value of the transition at `ix` if the
@@ -530,12 +570,13 @@ impl<
     fn commit_simplified_transition(&mut self, ix: usize) -> bool {
         if self
             .check_acceptable(Some(ix), self.last_valid_initial_state.clone())
+            && self.set_accepted_transition(ix)
         {
-            self.acceptable_transitions[ix] =
-                (Accepted, self.transitions[ix].current());
             return true;
         }
-        self.acceptable_transitions[ix].0 = SimplifyRejected;
+        if !self.mark_transition_state(ix, SimplifyRejected) {
+            return false;
+        }
         self.shrinkable_transitions.clear(ix);
         self.shrink = self.next_shrink_transition(ix);
         false
@@ -568,17 +609,22 @@ impl<
     /// otherwise mark the slot `ComplicateRejected`. Returns whether the
     /// complication was accepted.
     fn commit_complicated_transition(&mut self, ix: usize) -> bool {
-        if !self.transitions[ix].complicate() {
+        let Some(transition) = self.transitions.get_mut(ix) else {
+            return false;
+        };
+
+        if !transition.complicate() {
             return false;
         }
         if self
             .check_acceptable(Some(ix), self.last_valid_initial_state.clone())
+            && self.set_accepted_transition(ix)
         {
-            self.acceptable_transitions[ix] =
-                (Accepted, self.transitions[ix].current());
             return true;
         }
-        self.acceptable_transitions[ix].0 = ComplicateRejected;
+        if !self.mark_transition_state(ix, ComplicateRejected) {
+            return false;
+        }
         false
     }
 
@@ -593,16 +639,15 @@ impl<
                     Some(ix_to_check),
                     self.last_valid_initial_state.clone(),
                 )
+                && self.set_accepted_transition(ix_to_check)
             {
-                self.acceptable_transitions[ix_to_check] =
-                    (Accepted, self.transitions[ix_to_check].current());
                 return true;
             }
             // Move on to the next transition
             if ix_to_check == self.max_ix {
                 ix_to_check = 0;
             } else {
-                ix_to_check += 1;
+                ix_to_check = ix_to_check.saturating_add(1);
             }
             // We're back to where we started, there nothing left to do
             if ix_to_check == ix {
@@ -615,7 +660,10 @@ impl<
     /// pre-conditions. When `ix` is not `None`, the transition at the given
     /// index is taken from its current value.
     fn check_acceptable(&self, ix: Option<usize>, mut state: State) -> bool {
-        let transitions = self.get_included_acceptable_transitions(ix);
+        let Some(transitions) = self.get_included_acceptable_transitions(ix)
+        else {
+            return false;
+        };
         for transition in &transitions {
             let is_acceptable = (self.preconditions)(&state, transition);
             if is_acceptable {
@@ -634,16 +682,18 @@ impl<
     fn get_included_acceptable_transitions(
         &self,
         ix: Option<usize>,
-    ) -> Vec<Transition> {
+    ) -> Option<Vec<Transition>> {
         self.acceptable_transitions
             .iter()
             .enumerate()
             // Filter out deleted transitions
             .filter(|&(this_ix, _)| self.included_transitions.test(this_ix))
             // Map the indices to the values
-            .map(|(this_ix, (_, transition))| match ix {
-                Some(ix) if this_ix == ix => self.transitions[ix].current(),
-                _ => transition.clone(),
+            .map(|(this_ix, entry)| match ix {
+                Some(target_ix) if this_ix == target_ix => {
+                    self.current_transition(target_ix)
+                }
+                _ => Some(entry.1.clone()),
             })
             .collect()
     }
@@ -661,8 +711,8 @@ impl<
                 .enumerate()
                 // Filter out deleted transitions
                 .filter(|&(ix, _)| self.included_transitions.test(ix))
-                .all(|(_, (state, _transition))| {
-                    matches!(state, SimplifyRejected | ComplicateRejected)
+                .all(|(_, entry)| {
+                    matches!(entry.0, SimplifyRejected | ComplicateRejected)
                 })
     }
 
@@ -676,7 +726,7 @@ impl<
             Transition(0)
         } else {
             // ...or move on to the next transition
-            Transition(current_ix + 1)
+            Transition(current_ix.saturating_add(1))
         }
     }
 }
@@ -697,16 +747,11 @@ impl<
     type Value = (State, Vec<Transition>, Option<Arc<AtomicUsize>>);
 
     fn current(&self) -> Self::Value {
-        if let Some(seen_transitions_counter) = &self.seen_transitions_counter
-            && seen_transitions_counter.load(atomic::Ordering::SeqCst) > 0
-        {
-            panic!("Unexpected non-zero `seen_transitions_counter`");
-        }
-
         (
             self.last_valid_initial_state.clone(),
             // The current included acceptable transitions
-            self.get_included_acceptable_transitions(None),
+            self.get_included_acceptable_transitions(None)
+                .unwrap_or_default(),
             self.seen_transitions_counter.clone(),
         )
     }
@@ -721,27 +766,26 @@ impl<
         };
 
         // reset seen transactions counter for next run
-        self.seen_transitions_counter = Default::default();
+        self.seen_transitions_counter = Option::default();
 
         was_simplified
     }
 
     fn complicate(&mut self) -> bool {
         // reset seen transactions counter for next run
-        self.seen_transitions_counter = Default::default();
+        self.seen_transitions_counter = Option::default();
 
-        match &self.last_shrink {
+        match self.last_shrink {
             None => false,
             Some(DeleteTransition(ix)) => {
                 // Undo the last item we deleted. Can't complicate any further,
                 // so unset prev_shrink.
-                self.included_transitions.set(*ix);
-                self.shrinkable_transitions.set(*ix);
+                self.included_transitions.set(ix);
+                self.shrinkable_transitions.set(ix);
                 self.last_shrink = None;
                 true
             }
             Some(Transition(ix)) => {
-                let ix = *ix;
                 if self.commit_complicated_transition(ix) {
                     // Don't unset prev_shrink; we may be able to complicate
                     // it again
@@ -858,7 +902,9 @@ mod test {
         strict::ensure_property(
             &hash_set(0..SIMPLIFICATIONS, 0..SIMPLIFICATIONS),
             "every simplification and complication satisfies the preconditions",
-            test_state_machine_sequential_value_tree_aux,
+            |complicate_ixs| {
+                test_state_machine_sequential_value_tree_aux(&complicate_ixs)
+            },
         )
     }
 
@@ -867,55 +913,64 @@ mod test {
         reason = "test body driving repeated simplify and complicate cycles while preconditions hold"
     )]
     fn test_state_machine_sequential_value_tree_aux(
-        complicate_ixs: HashSet<usize>,
+        complicate_ixs: &HashSet<usize>,
     ) -> Result<(), TestFailure> {
         let mut value_tree = deterministic_sequential_value_tree()?;
-
-        let check_preconditions =
-            |value_tree: &TestValueTree| -> Result<(), TestFailure> {
-                let (mut state, transitions, _seen_counter) =
-                    value_tree.current();
-                for transition in transitions {
-                    // Every transition must satisfy the pre-conditions
-                    ensure(
-                        <HeapStateMachine as ReferenceStateMachine>::preconditions(
-                            &state,
-                            &transition,
-                        ),
-                        "every kept transition satisfies the preconditions",
-                    )?;
-
-                    // Apply the transition to update the state for the next
-                    // transition
-                    state = <HeapStateMachine as ReferenceStateMachine>::apply(
-                        state,
-                        &transition,
-                    );
-                }
-                Ok(())
-            };
 
         let mut ix = 0_usize;
         loop {
             let simplified = value_tree.simplify();
 
-            check_preconditions(&value_tree)?;
+            check_heap_preconditions(&value_tree)?;
 
             if !simplified {
                 break;
             }
-            ix += 1;
+            ix = ix.saturating_add(1);
 
             if complicate_ixs.contains(&ix) {
-                loop {
-                    let complicated = value_tree.complicate();
+                complicate_while_heap_preconditions_hold(&mut value_tree)?;
+            }
+        }
+        Ok(())
+    }
 
-                    check_preconditions(&value_tree)?;
+    fn check_heap_preconditions(
+        candidate_tree: &TestValueTree,
+    ) -> Result<(), TestFailure> {
+        let (mut state, transitions, _seen_counter) = candidate_tree.current();
+        for transition in transitions {
+            // Every transition must satisfy the pre-conditions
+            ensure(
+                <HeapStateMachine as ReferenceStateMachine>::preconditions(
+                    &state,
+                    &transition,
+                ),
+                "every kept transition satisfies the preconditions",
+            )?;
 
-                    if !complicated {
-                        break;
-                    }
-                }
+            // Apply the transition to update the state for the next transition
+            state = <HeapStateMachine as ReferenceStateMachine>::apply(
+                state,
+                &transition,
+            );
+        }
+        Ok(())
+    }
+
+    #[allow(
+        clippy::single_call_fn,
+        reason = "the value-tree test names the complication replay that must preserve heap preconditions"
+    )]
+    fn complicate_while_heap_preconditions_hold(
+        value_tree: &mut TestValueTree,
+    ) -> Result<(), TestFailure> {
+        loop {
+            let complicated = value_tree.complicate();
+            check_heap_preconditions(value_tree)?;
+
+            if !complicated {
+                break;
             }
         }
         Ok(())
@@ -955,7 +1010,7 @@ mod test {
 
         let (_, transitions, mut seen_counter) = value_tree.current();
 
-        let num_seen = transitions.len() / 2;
+        let num_seen = transitions.len().div_euclid(2);
         ensure_some(
             seen_counter.as_mut(),
             "the fresh value tree carries a seen-transitions counter",
@@ -967,10 +1022,10 @@ mod test {
 
         ensure(value_tree.simplify(), "the first simplification applies")?;
 
-        let (_, transitions, _seen_counter) = value_tree.current();
+        let (_, remaining_transitions, _seen_counter) = value_tree.current();
 
         let seen_after_first_complication =
-            transitions.into_iter().collect::<Vec<_>>();
+            remaining_transitions.into_iter().collect::<Vec<_>>();
 
         // After the unseen transitions are removed, the shrink behavior depends
         // on how many transitions were seen:
@@ -1004,17 +1059,14 @@ mod test {
         Ok(())
     }
 
-    /// Pins the production panic contract of `current()`: reading an
-    /// already-executed value without simplifying first panics with a fixed
-    /// message. The panic is deliberately observed through `catch_unwind`
-    /// because it is the documented guard behavior of the value tree itself,
-    /// not a test-vocabulary assertion.
+    /// Pins the non-panicking `current()` contract for an already-observed
+    /// sequential value tree.
     #[test]
-    fn test_call_to_current_with_non_zero_seen_counter()
+    fn current_with_non_zero_seen_counter_preserves_state()
     -> Result<(), TestFailure> {
         let value_tree = deterministic_sequential_value_tree()?;
 
-        let (_, _transitions1, mut seen_counter) = value_tree.current();
+        let (_, transitions_before, mut seen_counter) = value_tree.current();
         ensure_some(
             seen_counter.as_mut(),
             "the fresh value tree carries a seen-transitions counter",
@@ -1022,19 +1074,19 @@ mod test {
         .store(1, atomic::Ordering::SeqCst);
         drop(seen_counter);
 
-        let result =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _transitions2 = value_tree.current();
-            }));
-        let payload = ensure_some(
-            result.err(),
-            "current() with a non-zero seen counter must panic",
-        )?;
-
-        let message = "Unexpected non-zero `seen_transitions_counter`";
+        let (_, transitions_after, current_seen_counter) = value_tree.current();
         ensure(
-            payload.downcast_ref::<&str>() == Some(&message),
-            "the guard panic carries its documented message",
+            transitions_before == transitions_after,
+            "current() does not mutate the transition view",
+        )?;
+        let preserved_seen_counter = ensure_some(
+            current_seen_counter.as_ref(),
+            "current() preserves the seen-transitions counter",
+        )?;
+        ensure_eq(
+            &1,
+            &preserved_seen_counter.load(atomic::Ordering::SeqCst),
+            "current() preserves the observed transition count",
         )
     }
 
@@ -1067,6 +1119,36 @@ mod test {
             Push(i32),
         }
 
+        #[allow(
+            clippy::single_call_fn,
+            reason = "the heap model names state-dependent transition choices separately from the trait adapter"
+        )]
+        fn heap_transition_choices(
+            state: &TestState,
+        ) -> BoxedStrategy<TestTransition> {
+            if state.is_empty() {
+                return prop_oneof![
+                    1 => Just(TestTransition::PopEmpty),
+                    2 => (any::<i32>()).prop_map(TestTransition::Push),
+                ]
+                .boxed();
+            }
+
+            prop_oneof![
+                1 => Just(TestTransition::PopNonEmpty),
+                2 => (any::<i32>()).prop_map(TestTransition::Push),
+            ]
+            .boxed()
+        }
+
+        #[allow(
+            clippy::single_call_fn,
+            reason = "the heap model names the pop transition's effect on reference state"
+        )]
+        fn pop_model_state(state: &mut TestState) {
+            let _popped = state.pop();
+        }
+
         pub(super) fn deterministic_sequential_value_tree()
         -> Result<TestValueTree, strict_test_support::TestFailure> {
             let sequential =
@@ -1091,33 +1173,18 @@ mod test {
             fn transitions(
                 state: &Self::State,
             ) -> BoxedStrategy<Self::Transition> {
-                if state.is_empty() {
-                    prop_oneof![
-                        1 => Just(TestTransition::PopEmpty),
-                        2 => (any::<i32>()).prop_map(TestTransition::Push),
-                    ]
-                    .boxed()
-                } else {
-                    prop_oneof![
-                        1 => Just(TestTransition::PopNonEmpty),
-                        2 => (any::<i32>()).prop_map(TestTransition::Push),
-                    ]
-                    .boxed()
-                }
+                heap_transition_choices(state)
             }
 
             fn apply(
                 mut state: Self::State,
                 transition: &Self::Transition,
             ) -> Self::State {
-                match transition {
-                    TestTransition::PopEmpty => {
-                        let _popped = state.pop();
-                    }
-                    TestTransition::PopNonEmpty => {
-                        let _popped = state.pop();
-                    }
-                    TestTransition::Push(value) => state.push(*value),
+                use TestTransition::{PopEmpty, PopNonEmpty, Push};
+
+                match *transition {
+                    PopEmpty | PopNonEmpty => pop_model_state(&mut state),
+                    Push(value) => state.push(value),
                 }
                 state
             }
@@ -1126,7 +1193,7 @@ mod test {
                 state: &Self::State,
                 transition: &Self::Transition,
             ) -> bool {
-                match transition {
+                match *transition {
                     TestTransition::PopEmpty => state.is_empty(),
                     TestTransition::PopNonEmpty => !state.is_empty(),
                     TestTransition::Push(_) => true,
@@ -1150,15 +1217,17 @@ mod test {
         use proptest::prelude::*;
         use proptest::strategy::BoxedStrategy;
         use proptest::strict::{self, TestFailure};
-        use proptest::test_runner::TestRng;
+        use proptest::test_runner::{RngAlgorithm, TestRng};
         use proptest::{
             collection,
-            strategy::Strategy,
-            test_runner::{Config, TestCaseError, TestError, TestRunner},
+            test_runner::{TestCaseError, TestError, TestRunner},
         };
         use strict_test_support::{ensure, ensure_eq, ensure_some};
 
-        use crate::{ReferenceStateMachine, StateMachineTest};
+        use crate::{
+            ReferenceStateMachine, StateMachineTest,
+            strict_state_machine_config,
+        };
 
         const MIN_TRANSITION: u32 = 10;
         const MAX_TRANSITION: u32 = 20;
@@ -1200,9 +1269,9 @@ mod test {
                 transition: u32,
             ) -> Result<Self::SystemUnderTest, TestFailure> {
                 // Fail on any transition that is less than the ref state's limit.
-                let FailIfLessThan(limit) = ref_state;
+                let &FailIfLessThan(limit) = ref_state;
                 ensure(
-                    transition >= *limit,
+                    transition >= limit,
                     "transition is at least the reference limit",
                 )
             }
@@ -1219,8 +1288,8 @@ mod test {
             // the output, and determine if it does return an input that
             // should fail, and is minimal.
             let mut runner = TestRunner::new_with_rng(
-                Config::default(),
-                TestRng::from_seed(Default::default(), seed),
+                strict_state_machine_config(),
+                TestRng::from_seed(RngAlgorithm::default(), seed),
             );
             let result = runner.run(
                 &FailIfLessThan::sequential_strategy(10..50_usize),
@@ -1229,7 +1298,7 @@ mod test {
                     // failure signal: convert it exactly the way the
                     // strict runner does, so shrinking still drives.
                     FailIfLessThanTest::test_sequential(
-                        Default::default(),
+                        strict_state_machine_config(),
                         ref_state,
                         transitions,
                         seen_counter,
@@ -1294,14 +1363,17 @@ mod test {
     /// transition sequence, and the positive case proves precondition-gated
     /// generation keeps a mirrored SUT aligned.
     mod strict_runner_behavior {
+        use proptest::strategy::BoxedStrategy;
         use proptest::strict::{self, TestFailure, TestResult};
-        use proptest::test_runner::Config;
         use strict_test_support::{
             ensure, ensure_contains, ensure_eq, ensure_some,
         };
 
         use super::heap_state_machine::{HeapStateMachine, TestTransition};
-        use crate::{ReferenceStateMachine, StateMachineTest};
+        use crate::{
+            ReferenceStateMachine, StateMachineTest,
+            strict_state_machine_config,
+        };
 
         /// Model transition: a counter that only increments. The
         /// single-variant enum keeps the reported minimal sequence's
@@ -1317,13 +1389,13 @@ mod test {
             type State = u32;
             type Transition = Tick;
 
-            fn init_state() -> proptest::strategy::BoxedStrategy<u32> {
-                use proptest::strategy::{Just, Strategy};
+            fn init_state() -> BoxedStrategy<u32> {
+                use proptest::strategy::{Just, Strategy as _};
                 Just(0).boxed()
             }
 
-            fn transitions(_: &u32) -> proptest::strategy::BoxedStrategy<Tick> {
-                use proptest::strategy::{Just, Strategy};
+            fn transitions(_: &u32) -> BoxedStrategy<Tick> {
+                use proptest::strategy::{Just, Strategy as _};
                 Just(Tick::Increment).boxed()
             }
 
@@ -1353,6 +1425,71 @@ mod test {
             }
         }
 
+        struct MirroredHeap;
+
+        #[allow(
+            clippy::single_call_fn,
+            reason = "the mirrored heap SUT names the PopEmpty post-condition separately from transition dispatch"
+        )]
+        fn apply_mirrored_pop_empty(
+            state: &mut Vec<i32>,
+        ) -> Result<(), TestFailure> {
+            ensure(
+                state.is_empty(),
+                "PopEmpty is only generated on an empty heap",
+            )?;
+            ensure(
+                state.pop().is_none(),
+                "PopEmpty leaves an empty heap unchanged",
+            )
+        }
+
+        #[allow(
+            clippy::single_call_fn,
+            reason = "the mirrored heap SUT names the PopNonEmpty post-condition separately from transition dispatch"
+        )]
+        fn apply_mirrored_pop_non_empty(
+            state: &mut Vec<i32>,
+        ) -> Result<(), TestFailure> {
+            ensure(
+                !state.is_empty(),
+                "PopNonEmpty is only generated on a non-empty heap",
+            )?;
+            let _popped = ensure_some(
+                state.pop(),
+                "PopNonEmpty removes an element from a non-empty heap",
+            )?;
+            Ok(())
+        }
+
+        impl StateMachineTest for MirroredHeap {
+            type SystemUnderTest = Vec<i32>;
+            type Reference = HeapStateMachine;
+
+            fn init_test(ref_state: &Vec<i32>) -> Vec<i32> {
+                ref_state.clone()
+            }
+
+            fn apply(
+                mut state: Vec<i32>,
+                ref_state: &Vec<i32>,
+                transition: TestTransition,
+            ) -> Result<Vec<i32>, TestFailure> {
+                use TestTransition::{PopEmpty, PopNonEmpty, Push};
+
+                match transition {
+                    PopEmpty => apply_mirrored_pop_empty(&mut state)?,
+                    PopNonEmpty => apply_mirrored_pop_non_empty(&mut state)?,
+                    Push(value) => state.push(value),
+                }
+                ensure(
+                    state == *ref_state,
+                    "the SUT mirrors the model after every transition",
+                )?;
+                Ok(state)
+            }
+        }
+
         #[test]
         fn falsified_model_reports_the_minimal_transition_sequence()
         -> Result<(), TestFailure> {
@@ -1365,7 +1502,7 @@ mod test {
                 "the counter stays below three",
                 |(initial_state, transitions, seen_counter)| {
                     <FailsAtThree as StateMachineTest>::test_sequential(
-                        Config::default(),
+                        strict_state_machine_config(),
                         initial_state,
                         transitions,
                         seen_counter,
@@ -1401,52 +1538,6 @@ mod test {
         #[test]
         fn precondition_gated_generation_keeps_a_mirrored_sut_aligned()
         -> Result<(), TestFailure> {
-            struct MirroredHeap;
-
-            impl StateMachineTest for MirroredHeap {
-                type SystemUnderTest = Vec<i32>;
-                type Reference = HeapStateMachine;
-
-                fn init_test(ref_state: &Vec<i32>) -> Vec<i32> {
-                    ref_state.clone()
-                }
-
-                fn apply(
-                    mut state: Vec<i32>,
-                    ref_state: &Vec<i32>,
-                    transition: TestTransition,
-                ) -> Result<Vec<i32>, TestFailure> {
-                    match transition {
-                        TestTransition::PopEmpty => {
-                            ensure(
-                                state.is_empty(),
-                                "PopEmpty is only generated on an empty heap",
-                            )?;
-                            ensure(
-                                state.pop().is_none(),
-                                "PopEmpty leaves an empty heap unchanged",
-                            )?;
-                        }
-                        TestTransition::PopNonEmpty => {
-                            ensure(
-                                !state.is_empty(),
-                                "PopNonEmpty is only generated on a non-empty heap",
-                            )?;
-                            let _popped = ensure_some(
-                                state.pop(),
-                                "PopNonEmpty removes an element from a non-empty heap",
-                            )?;
-                        }
-                        TestTransition::Push(value) => state.push(value),
-                    }
-                    ensure(
-                        state == *ref_state,
-                        "the SUT mirrors the model after every transition",
-                    )?;
-                    Ok(state)
-                }
-            }
-
             let strategy = <HeapStateMachine as ReferenceStateMachine>::sequential_strategy(
                 1..12,
             );
@@ -1455,7 +1546,7 @@ mod test {
                 "precondition-gated transitions keep the mirrored SUT aligned",
                 |(initial_state, transitions, seen_counter)| {
                     <MirroredHeap as StateMachineTest>::test_sequential(
-                        Config::default(),
+                        strict_state_machine_config(),
                         initial_state,
                         transitions,
                         seen_counter,

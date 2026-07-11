@@ -13,10 +13,10 @@ use crate::std_facade::string;
 use core::fmt;
 use core::result::IntoIter;
 
-use crate::arbitrary::*;
-use crate::result::*;
+use crate::arbitrary::{Arbitrary, SMapped, any_with, functor};
+use crate::result::{MaybeOk, Probability, maybe_ok_weighted};
 use crate::strategy::statics::static_map;
-use crate::strategy::*;
+use crate::strategy::{BoxedStrategy, Just, Strategy};
 
 // These are Result with uninhabited type in some variant:
 arbitrary!([A: Arbitrary] Result<A, string::ParseError>,
@@ -102,11 +102,12 @@ lift1!(['static] IntoIter<A>, Probability; base, args => {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::string::ParseError;
 
     no_panic_test!(
         result    => Result<u8, u16>,
         into_iter => IntoIter<u8>,
-        result_a_parse_error => Result<u8, ::std::string::ParseError>,
-        result_parse_error_a => Result<::std::string::ParseError, u8>
+        result_a_parse_error => Result<u8, ParseError>,
+        result_parse_error_a => Result<ParseError, u8>
     );
 }

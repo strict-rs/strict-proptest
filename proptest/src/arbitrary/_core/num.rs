@@ -9,17 +9,37 @@
 
 //! Arbitrary implementations for `std::num`.
 
-use core::num::*;
+#[cfg(feature = "unstable")]
+use core::num::TryFromIntError;
+use core::num::{
+    FpCategory, ParseFloatError, ParseIntError, Saturating, Wrapping,
+};
 
-use crate::strategy::*;
+use crate::strategy::{Just, TupleUnion, WeightedStrategy};
 
-arbitrary!(ParseFloatError; "".parse::<f32>().unwrap_err());
-arbitrary!(ParseIntError; "".parse::<u32>().unwrap_err());
+arbitrary!(ParseFloatError; {
+    loop {
+        if let Err(error) = "".parse::<f32>() {
+            break error;
+        }
+    }
+});
+arbitrary!(ParseIntError; {
+    loop {
+        if let Err(error) = "".parse::<u32>() {
+            break error;
+        }
+    }
+});
 
 #[cfg(feature = "unstable")]
 arbitrary!(TryFromIntError; {
-    use core::convert::TryFrom;
-    u8::try_from(-1).unwrap_err()
+    use core::convert::TryFrom as _;
+    loop {
+        if let Err(error) = u8::try_from(-1) {
+            break error;
+        }
+    }
 });
 
 wrap_ctor!(Wrapping, Wrapping);
@@ -27,10 +47,12 @@ wrap_ctor!(Wrapping, Wrapping);
 wrap_ctor!(Saturating, Saturating);
 
 arbitrary!(FpCategory,
-    TupleUnion<(WA<Just<Self>>, WA<Just<Self>>, WA<Just<Self>>,
-                WA<Just<Self>>, WA<Just<Self>>)>;
+    TupleUnion<(WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>,
+                WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>)>;
     {
-        use core::num::FpCategory::*;
+        use core::num::FpCategory::{
+            Infinite, Nan, Normal, Subnormal, Zero,
+        };
         prop_oneof![
             Just(Nan),
             Just(Infinite),

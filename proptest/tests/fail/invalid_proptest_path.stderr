@@ -2,4 +2,4 @@ error: argument to `proptest_path` must be a path to the proptest crate, e.g. `p
  --> tests/fail/invalid_proptest_path.rs:3:43
   |
 3 | #[proptest::property_test(proptest_path = actually::a::function())]
-  |                                           ^^^^^^^^
+  |                                           ^^^^^^^^^^^^^^^^^^^^^^^

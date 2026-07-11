@@ -9,17 +9,25 @@
 
 //! Arbitrary implementations for `std::path`.
 
-use std::path::*;
+use std::path::{
+    MAIN_SEPARATOR, Path, PathBuf, StripPrefixError, is_separator,
+};
 
 use crate::{
     arbitrary::{SMapped, StrategyFor},
     path::PathParams,
-    prelude::{Arbitrary, Strategy, any, any_with},
-    std_facade::{Arc, Box, Rc, String, Vec, string::ToString},
+    prelude::{Arbitrary, Strategy as _, any, any_with},
+    std_facade::{Arc, Box, Rc, String, Vec, string::ToString as _},
     strategy::{MapInto, statics::static_map},
 };
 
-arbitrary!(StripPrefixError; Path::new("").strip_prefix("a").unwrap_err());
+arbitrary!(StripPrefixError; {
+    loop {
+        if let Err(error) = Path::new("").strip_prefix("a") {
+            break error;
+        }
+    }
+});
 
 /// A private type (not actually pub) representing the output of [`PathParams`] that can't be
 /// referred to by API users.
@@ -83,7 +91,7 @@ impl Arbitrary for PathBuf {
                  is_absolute,
                  components,
              }| {
-                let mut out = PathBuf::new();
+                let mut out = Self::new();
                 if is_absolute {
                     out.push(MAIN_SEPARATOR.to_string());
                 }
@@ -91,11 +99,11 @@ impl Arbitrary for PathBuf {
                 for component in components {
                     // If a component has an embedded / (or \ on Windows), remove it from the
                     // string.
-                    let component = component
+                    let sanitized_component = component
                         .chars()
                         .filter(|&ch| !is_separator(ch))
                         .collect::<String>();
-                    out.push(&component);
+                    out.push(&sanitized_component);
                 }
 
                 out

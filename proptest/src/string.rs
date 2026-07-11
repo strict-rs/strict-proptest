@@ -10,18 +10,23 @@
 //! Strategies for generating strings and byte strings from regular
 //! expressions.
 
-use crate::std_facade::{Box, Cow, String, ToOwned, Vec, vec};
+use crate::std_facade::{Box, Cow, String, ToOwned as _, Vec, format, vec};
 use core::fmt;
+use core::marker::PhantomData;
+use core::mem::take;
 use core::ops::RangeInclusive;
+use std::error::Error as StdError;
 
-use regex_syntax::hir::{self, Hir, HirKind::*, Repetition};
+use regex_syntax::hir::{self, Hir, HirKind, Repetition};
 use regex_syntax::{Error as ParseError, ParserBuilder};
 
 use crate::bool;
 use crate::char;
 use crate::collection::{SizeRange, size_range, vec};
-use crate::strategy::*;
-use crate::test_runner::*;
+use crate::strategy::{
+    Just, NewTree, SBoxedStrategy, Strategy, Union, UnionBuildError, ValueTree,
+};
+use crate::test_runner::{Reason, TestRunner};
 
 /// Wraps the regex that forms the `Strategy` for `String` so that a sensible
 /// `Default` can be given. The default is a string of non-control characters.
@@ -36,56 +41,57 @@ impl From<StringParam> for &'static str {
 
 impl From<&'static str> for StringParam {
     fn from(x: &'static str) -> Self {
-        StringParam(x)
+        Self(x)
     }
 }
 
 impl Default for StringParam {
     fn default() -> Self {
-        StringParam("\\PC*")
+        Self("\\PC*")
     }
 }
 
-/// Errors which may occur when preparing a regular expression for use with
-/// string generation.
+/// Error returned when preparing a regular expression for string or byte
+/// generation.
 #[derive(Debug)]
-pub enum Error {
+pub enum RegexStrategyError {
     /// The string passed as the regex was not syntactically valid.
-    RegexSyntax(ParseError),
+    RegexSyntax(Box<ParseError>),
     /// The regex was syntactically valid, but contains elements not
     /// supported by proptest.
     UnsupportedRegex(&'static str),
 }
 
-impl fmt::Display for Error {
+impl fmt::Display for RegexStrategyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::RegexSyntax(err) => write!(f, "{}", err),
-            Error::UnsupportedRegex(message) => write!(f, "{}", message),
+        match *self {
+            Self::RegexSyntax(ref err) => write!(f, "{err}"),
+            Self::UnsupportedRegex(message) => write!(f, "{message}"),
         }
     }
 }
 
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Error::RegexSyntax(err) => Some(err),
-            Error::UnsupportedRegex(_) => None,
+impl StdError for RegexStrategyError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match *self {
+            Self::RegexSyntax(ref err) => Some(err.as_ref()),
+            Self::UnsupportedRegex(_) => None,
         }
     }
 }
 
-impl From<ParseError> for Error {
-    fn from(err: ParseError) -> Error {
-        Error::RegexSyntax(err)
+impl From<ParseError> for RegexStrategyError {
+    fn from(err: ParseError) -> Self {
+        Self::RegexSyntax(Box::new(err))
     }
 }
 
-/// Internal counterpart to the public `Error`, used while walking a regex
-/// HIR.
+/// Internal counterpart to the public [`RegexStrategyError`], used while
+/// walking a regex HIR.
 ///
 /// It boxes the large `regex_syntax` parse error so intermediate `Result`s
-/// stay small, then converts into `Error` at the module boundary.
+/// stay small, then converts into [`RegexStrategyError`] at the module
+/// boundary.
 #[derive(Debug)]
 enum InternalError {
     /// The regex was not syntactically valid; wraps the boxed parse error.
@@ -100,10 +106,12 @@ impl From<ParseError> for InternalError {
     }
 }
 
-impl From<InternalError> for Error {
+impl From<InternalError> for RegexStrategyError {
     fn from(err: InternalError) -> Self {
         match err {
-            InternalError::RegexSyntax(err) => Self::RegexSyntax(*err),
+            InternalError::RegexSyntax(regex_error) => {
+                Self::RegexSyntax(regex_error)
+            }
             InternalError::UnsupportedRegex(message) => {
                 Self::UnsupportedRegex(message)
             }
@@ -132,18 +140,58 @@ impl<T: fmt::Debug> fmt::Debug for RegexGeneratorValueTree<T> {
     }
 }
 
+/// A regex strategy placeholder for `StrategyFromRegex` inputs that cannot be
+/// parsed into a concrete generator.
+#[derive(Clone, Debug)]
+struct RegexErrorStrategy<T> {
+    /// The generation error reported whenever the strategy is used.
+    reason: Reason,
+    /// Retain the generated value type without imposing ownership bounds on it.
+    marker: PhantomData<fn() -> T>,
+}
+
+impl<T: fmt::Debug> Strategy for RegexErrorStrategy<T> {
+    type Tree = Box<dyn ValueTree<Value = T>>;
+    type Value = T;
+
+    fn new_tree(&self, _runner: &mut TestRunner) -> NewTree<Self> {
+        Err(self.reason.clone())
+    }
+}
+
+/// Convert a regex parse/build error into the generation failure vocabulary.
+fn regex_parse_reason(regex: &str, error: &RegexStrategyError) -> Reason {
+    format!("invalid regex strategy `{regex}`: {error}").into()
+}
+
+/// Build a `RegexGeneratorStrategy` that reports `error` at generation time.
+fn regex_error_strategy<T: fmt::Debug + 'static>(
+    regex: &str,
+    error: &RegexStrategyError,
+) -> RegexGeneratorStrategy<T> {
+    RegexGeneratorStrategy(
+        RegexErrorStrategy {
+            reason: regex_parse_reason(regex, error),
+            marker: PhantomData,
+        }
+        .sboxed(),
+    )
+}
+
 impl Strategy for str {
     type Tree = RegexGeneratorValueTree<String>;
     type Value = String;
 
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-        string_regex(self).unwrap().new_tree(runner)
+        string_regex(self)
+            .map_err(|error| regex_parse_reason(self, &error))?
+            .new_tree(runner)
     }
 }
 
 /// Result of building a public regex strategy: the strategy, or a public
-/// `Error` explaining why the regex was rejected.
-type ParseResult<T> = Result<RegexGeneratorStrategy<T>, Error>;
+/// `RegexStrategyError` explaining why the regex was rejected.
+type ParseResult<T> = Result<RegexGeneratorStrategy<T>, RegexStrategyError>;
 /// Like `ParseResult`, but carrying the crate-internal `InternalError` used
 /// while the regex HIR is being walked.
 type InternalParseResult<T> = Result<RegexGeneratorStrategy<T>, InternalError>;
@@ -167,7 +215,8 @@ impl StrategyFromRegex for String {
     type Strategy = RegexGeneratorStrategy<Self>;
 
     fn from_regex(regex: &str) -> Self::Strategy {
-        string_regex(regex).unwrap()
+        string_regex(regex)
+            .unwrap_or_else(|error| regex_error_strategy(regex, &error))
     }
 }
 
@@ -175,7 +224,8 @@ impl StrategyFromRegex for Vec<u8> {
     type Strategy = RegexGeneratorStrategy<Self>;
 
     fn from_regex(regex: &str) -> Self::Strategy {
-        bytes_regex(regex).unwrap()
+        bytes_regex(regex)
+            .unwrap_or_else(|error| regex_error_strategy(regex, &error))
     }
 }
 
@@ -187,15 +237,11 @@ impl StrategyFromRegex for Vec<u8> {
 ///
 /// # Errors
 ///
-/// Returns `Error::RegexSyntax` if `regex` is not valid regex syntax, or
-/// `Error::UnsupportedRegex` if it parses but uses a construct proptest
+/// Returns `RegexStrategyError::RegexSyntax` if `regex` is not valid regex syntax, or
+/// `RegexStrategyError::UnsupportedRegex` if it parses but uses a construct proptest
 /// cannot generate (for example an anchor or look-around).
-#[expect(
-    clippy::result_large_err,
-    reason = "preserve the public Error::RegexSyntax(ParseError) API"
-)]
 pub fn string_regex(regex: &str) -> ParseResult<String> {
-    string_regex_inner(regex).map_err(Error::from)
+    string_regex_inner(regex).map_err(RegexStrategyError::from)
 }
 
 /// Parse `regex` into an HIR and build the string strategy from it,
@@ -213,15 +259,11 @@ fn string_regex_inner(regex: &str) -> InternalParseResult<String> {
 ///
 /// # Errors
 ///
-/// Returns `Error::UnsupportedRegex` if `expr` uses a construct proptest
+/// Returns `RegexStrategyError::UnsupportedRegex` if `expr` uses a construct proptest
 /// cannot generate, such as an anchor or look-around. A pre-parsed `expr`
-/// cannot carry a syntax error, so `Error::RegexSyntax` is never returned.
-#[expect(
-    clippy::result_large_err,
-    reason = "preserve the public Error::RegexSyntax(ParseError) API"
-)]
+/// cannot carry a syntax error, so `RegexStrategyError::RegexSyntax` is never returned.
 pub fn string_regex_parsed(expr: &Hir) -> ParseResult<String> {
-    string_regex_parsed_inner(expr).map_err(Error::from)
+    string_regex_parsed_inner(expr).map_err(RegexStrategyError::from)
 }
 
 /// Build a `String` strategy from an already-parsed regex HIR by generating
@@ -230,8 +272,8 @@ fn string_regex_parsed_inner(expr: &Hir) -> InternalParseResult<String> {
     bytes_regex_parsed_inner(expr)
         .map(|bytes_strategy| {
             bytes_strategy
-                .prop_map(|bytes| {
-                    String::from_utf8(bytes).expect("non-utf8 string")
+                .prop_filter_map("regex bytes must decode as UTF-8", |bytes| {
+                    String::from_utf8(bytes).ok()
                 })
                 .sboxed()
         })
@@ -251,19 +293,15 @@ fn string_regex_parsed_inner(expr: &Hir) -> InternalParseResult<String> {
 ///
 /// # Errors
 ///
-/// Returns `Error::RegexSyntax` if `regex` is not valid regex syntax, or
-/// `Error::UnsupportedRegex` if it parses but uses a construct proptest
+/// Returns `RegexStrategyError::RegexSyntax` if `regex` is not valid regex syntax, or
+/// `RegexStrategyError::UnsupportedRegex` if it parses but uses a construct proptest
 /// cannot generate (for example an anchor or look-around).
-#[expect(
-    clippy::result_large_err,
-    reason = "preserve the public Error::RegexSyntax(ParseError) API"
-)]
 #[allow(
     clippy::single_call_fn,
     reason = "public entry point converting a byte-regex source into the crate's typed ParseResult"
 )]
 pub fn bytes_regex(regex: &str) -> ParseResult<Vec<u8>> {
-    bytes_regex_inner(regex).map_err(Error::from)
+    bytes_regex_inner(regex).map_err(RegexStrategyError::from)
 }
 
 /// Parse `regex` into an HIR (with UTF-8 requirements relaxed so byte
@@ -282,50 +320,48 @@ fn bytes_regex_inner(regex: &str) -> InternalParseResult<Vec<u8>> {
 ///
 /// # Errors
 ///
-/// Returns `Error::UnsupportedRegex` if `expr` uses a construct proptest
+/// Returns `RegexStrategyError::UnsupportedRegex` if `expr` uses a construct proptest
 /// cannot generate, such as an anchor or look-around. A pre-parsed `expr`
-/// cannot carry a syntax error, so `Error::RegexSyntax` is never returned.
-#[expect(
-    clippy::result_large_err,
-    reason = "preserve the public Error::RegexSyntax(ParseError) API"
-)]
+/// cannot carry a syntax error, so `RegexStrategyError::RegexSyntax` is never returned.
 pub fn bytes_regex_parsed(expr: &Hir) -> ParseResult<Vec<u8>> {
-    bytes_regex_parsed_inner(expr).map_err(Error::from)
+    bytes_regex_parsed_inner(expr).map_err(RegexStrategyError::from)
 }
 
 /// Recursively translate a regex HIR node into a boxed byte-string
 /// strategy, threading the crate-internal `InternalError` for unsupported
 /// constructs.
 fn bytes_regex_parsed_inner(expr: &Hir) -> InternalParseResult<Vec<u8>> {
-    match expr.kind() {
-        Empty => Ok(Just(vec![]).sboxed()),
+    match *expr.kind() {
+        HirKind::Empty => Ok(Just(vec![]).sboxed()),
 
-        Literal(lit) => Ok(Just(lit.0.to_vec()).sboxed()),
+        HirKind::Literal(ref lit) => Ok(Just(lit.0.to_vec()).sboxed()),
 
-        Class(class) => Ok(match class {
-            hir::Class::Unicode(class) => {
-                unicode_class_strategy(class).prop_map(to_bytes).sboxed()
+        HirKind::Class(ref regex_class) => Ok(match *regex_class {
+            hir::Class::Unicode(ref unicode_class) => {
+                unicode_class_strategy(unicode_class)
+                    .prop_map(to_bytes)
+                    .sboxed()
             }
-            hir::Class::Bytes(class) => {
+            hir::Class::Bytes(ref byte_class) => {
                 let subs =
-                    class.iter().map(|range| range.start()..=range.end());
+                    byte_class.iter().map(|range| range.start()..=range.end());
                 Union::new(subs).prop_map(|byte| vec![byte]).sboxed()
             }
         }),
 
-        Repetition(rep) => {
+        HirKind::Repetition(ref rep) => {
             Ok(vec(bytes_regex_parsed_inner(&rep.sub)?, to_range(rep)?)
                 .prop_map(|parts| parts.concat())
                 .sboxed())
         }
 
-        Capture(capture) => {
+        HirKind::Capture(ref capture) => {
             bytes_regex_parsed_inner(&capture.sub).map(|captured| captured.0)
         }
 
-        Concat(subs) => {
-            let mut subs = ConcatIter {
-                iter: subs.iter(),
+        HirKind::Concat(ref subexpressions) => {
+            let mut concat_iter = ConcatIter {
+                iter: subexpressions.iter(),
                 buf: vec![],
                 next: None,
             };
@@ -333,25 +369,41 @@ fn bytes_regex_parsed_inner(expr: &Hir) -> InternalParseResult<Vec<u8>> {
                 lhs.extend(rhs);
                 lhs
             };
-            Ok(subs
+            Ok(concat_iter
                 .try_fold(None, |accum, rhs| -> Result<_, InternalError> {
-                    let rhs = rhs?;
+                    let rhs_strategy = rhs?;
                     Ok(match accum {
-                        None => Some(rhs.sboxed()),
-                        Some(accum) => {
-                            Some((accum, rhs).prop_map(ext).sboxed())
-                        }
+                        None => Some(rhs_strategy.sboxed()),
+                        Some(accum_strategy) => Some(
+                            (accum_strategy, rhs_strategy)
+                                .prop_map(ext)
+                                .sboxed(),
+                        ),
                     })
                 })?
                 .unwrap_or_else(|| Just(vec![]).sboxed()))
         }
 
-        Alternation(subs) => {
-            Ok(Union::try_new(subs.iter().map(bytes_regex_parsed_inner))?
-                .sboxed())
+        HirKind::Alternation(ref subs) => {
+            let options = subs
+                .iter()
+                .map(bytes_regex_parsed_inner)
+                .collect::<Result<Vec<_>, _>>()?;
+            Union::try_new_uniform(options)
+                .map(Strategy::sboxed)
+                .map_err(|error| match error {
+                    UnionBuildError::Empty => {
+                        InternalError::UnsupportedRegex("empty alternation")
+                    }
+                    UnionBuildError::InvalidProbability
+                    | UnionBuildError::ZeroWeight
+                    | UnionBuildError::WeightSumOverflow => {
+                        InternalError::UnsupportedRegex("invalid alternation")
+                    }
+                })
         }
 
-        Look(_) => unsupported(
+        HirKind::Look(_) => unsupported(
             "anchors/boundaries not supported for string generation",
         ),
     }
@@ -389,8 +441,10 @@ fn unicode_class_strategy(
             && y.end() == '\u{10FFFF}'
     };
 
-    char::ranges(match class.ranges() {
-        [x, y] if dotnnl(x, y) || dotnnl(y, x) => Cow::Borrowed(NONL_RANGES),
+    char::ranges(match *class.ranges() {
+        [ref x, ref y] if dotnnl(x, y) || dotnnl(y, x) => {
+            Cow::Borrowed(NONL_RANGES)
+        }
         _ => Cow::Owned(
             class
                 .iter()
@@ -420,10 +474,8 @@ struct ConcatIter<'a, I> {
 /// byte-string strategy, emptying the buffer.
 fn flush_lit_buf<I>(
     it: &mut ConcatIter<'_, I>,
-) -> Option<InternalParseResult<Vec<u8>>> {
-    Some(Ok(RegexGeneratorStrategy(
-        Just(core::mem::take(&mut it.buf)).sboxed(),
-    )))
+) -> RegexGeneratorStrategy<Vec<u8>> {
+    RegexGeneratorStrategy(Just(take(&mut it.buf)).sboxed())
 }
 
 impl<'a, I: Iterator<Item = &'a Hir>> Iterator for ConcatIter<'a, I> {
@@ -438,7 +490,7 @@ impl<'a, I: Iterator<Item = &'a Hir>> Iterator for ConcatIter<'a, I> {
         // Accumulate a literal sequence as long as we can:
         while let Some(next) = self.iter.next() {
             // A literal. Accumulate:
-            if let Literal(literal) = next.kind() {
+            if let HirKind::Literal(ref literal) = *next.kind() {
                 self.buf.extend_from_slice(&literal.0);
                 continue;
             }
@@ -450,14 +502,14 @@ impl<'a, I: Iterator<Item = &'a Hir>> Iterator for ConcatIter<'a, I> {
             // We've accumulated a literal from before, flush it out.
             // Store this node so we deal with it the next call.
             self.next = Some(next);
-            return flush_lit_buf(self);
+            return Some(Ok(flush_lit_buf(self)));
         }
 
         // Flush out any accumulated literal from before.
-        if !self.buf.is_empty() {
-            flush_lit_buf(self)
-        } else {
+        if self.buf.is_empty() {
             self.next.take().map(bytes_regex_parsed_inner)
+        } else {
+            Some(Ok(flush_lit_buf(self)))
         }
     }
 }
@@ -484,23 +536,30 @@ fn to_range(rep: &Repetition) -> Result<SizeRange, InternalError> {
             return unsupported("Cannot have repetition of exactly u32::MAX");
         }
         // Exact count
-        (min, Some(max)) if min == max => size_range(min as usize),
+        (min, Some(max)) if min == max => size_range(repetition_bound(min)),
         // At least min
         (min, None) => {
-            let max = if min < u32::MAX / 2 {
-                min as usize * 2
+            let max = if min < u32::MAX.div_euclid(2) {
+                repetition_bound(min).saturating_mul(2)
             } else {
-                u32::MAX as usize
+                repetition_bound(u32::MAX)
             };
-            size_range((min as usize)..max)
+            size_range(repetition_bound(min)..max)
         }
         // Bounded range with max of u32::MAX
         (_, Some(u32::MAX)) => {
             return unsupported("Cannot have repetition max of u32::MAX");
         }
         // Bounded range
-        (min, Some(max)) => size_range((min as usize)..(max as usize + 1)),
+        (min, Some(max)) => size_range(
+            repetition_bound(min)..repetition_bound(max).saturating_add(1),
+        ),
     })
+}
+
+/// Convert a regex repetition bound to the platform size domain.
+fn repetition_bound(bound: u32) -> usize {
+    usize::try_from(bound).unwrap_or(usize::MAX)
 }
 
 /// Encode a single `char` into its UTF-8 byte sequence.
@@ -509,12 +568,12 @@ fn to_range(rep: &Repetition) -> Result<SizeRange, InternalError> {
     reason = "encode one generated char into its UTF-8 byte sequence for the byte-regex strategy"
 )]
 fn to_bytes(khar: char) -> Vec<u8> {
-    let mut buf = [0u8; 4];
+    let mut buf = [0_u8; 4];
     khar.encode_utf8(&mut buf).as_bytes().to_owned()
 }
 
 /// Build an `Err` reporting a regex construct proptest cannot generate.
-fn unsupported<T>(error: &'static str) -> Result<T, InternalError> {
+const fn unsupported<T>(error: &'static str) -> Result<T, InternalError> {
     Err(InternalError::UnsupportedRegex(error))
 }
 
@@ -531,6 +590,7 @@ mod test {
     };
 
     use super::*;
+    use crate::test_runner::test_runner_without_persistence;
 
     #[test]
     fn regex_generator_value_tree_is_debug() -> Result<(), TestFailure> {
@@ -601,23 +661,38 @@ mod test {
                 "string strategy generates a value tree",
             )?;
 
-            loop {
-                let produced = value.current();
-                let ok = if let Some(matsch) = rx.find(&produced) {
-                    0 == matsch.start() && produced.len() == matsch.end()
-                } else {
-                    false
-                };
-                ensure(ok, "every generated string matches the pattern")?;
-
-                let _was_new = generated.insert(produced);
-
-                if !value.simplify() {
-                    break;
-                }
+            ensure_string_value_matches_and_record(
+                &value,
+                &rx,
+                &mut generated,
+            )?;
+            while value.simplify() {
+                ensure_string_value_matches_and_record(
+                    &value,
+                    &rx,
+                    &mut generated,
+                )?;
             }
         }
         Ok(generated)
+    }
+
+    fn ensure_string_value_matches_and_record<V>(
+        value: &V,
+        rx: &Regex,
+        generated: &mut HashSet<String>,
+    ) -> Result<(), TestFailure>
+    where
+        V: ValueTree<Value = String>,
+    {
+        let produced = value.current();
+        let ok = rx.find(&produced).is_some_and(|matsch| {
+            0 == matsch.start() && produced.len() == matsch.end()
+        });
+        ensure(ok, "every generated string matches the pattern")?;
+
+        let _was_new = generated.insert(produced);
+        Ok(())
     }
 
     #[allow(
@@ -643,23 +718,34 @@ mod test {
                 "byte-string strategy generates a value tree",
             )?;
 
-            loop {
-                let produced = value.current();
-                let ok = if let Some(matsch) = rx.find(&produced) {
-                    0 == matsch.start() && produced.len() == matsch.end()
-                } else {
-                    false
-                };
-                ensure(ok, "every generated byte string matches the pattern")?;
-
-                let _was_new = generated.insert(produced);
-
-                if !value.simplify() {
-                    break;
-                }
+            ensure_byte_value_matches_and_record(&value, &rx, &mut generated)?;
+            while value.simplify() {
+                ensure_byte_value_matches_and_record(
+                    &value,
+                    &rx,
+                    &mut generated,
+                )?;
             }
         }
         Ok(generated)
+    }
+
+    fn ensure_byte_value_matches_and_record<V>(
+        value: &V,
+        rx: &BytesRegex,
+        generated: &mut HashSet<Vec<u8>>,
+    ) -> Result<(), TestFailure>
+    where
+        V: ValueTree<Value = Vec<u8>>,
+    {
+        let produced = value.current();
+        let ok = rx.find(&produced).is_some_and(|matsch| {
+            0 == matsch.start() && produced.len() == matsch.end()
+        });
+        ensure(ok, "every generated byte string matches the pattern")?;
+
+        let _was_new = generated.insert(produced);
+        Ok(())
     }
 
     #[test]
@@ -757,10 +843,10 @@ mod test {
         do_test_bytes(r"(?-u)[\xC0-\xFF]\x20", 64, 64, 512)?;
         do_test_bytes(r"(?-u)\x20[\x80-\xBF]", 64, 64, 512)?;
         do_test_bytes(
-            r#"(?x-u)
+            r"(?x-u)
   \xed (( ( \xa0\x80 | \xad\xbf | \xae\x80 | \xaf\xbf )
           ( \xed ( \xb0\x80 | \xbf\xbf ) )? )
-        | \xb0\x80 | \xbe\x80 | \xbf\xbf )"#,
+        | \xb0\x80 | \xbe\x80 | \xbf\xbf )",
             15,
             15,
             120,
@@ -796,41 +882,52 @@ mod test {
     ) -> Result<(), TestFailure> {
         use std::time;
 
-        let mut runner = TestRunner::default();
+        let mut runner = test_runner_without_persistence();
         let start = time::Instant::now();
 
         // If we don't support this regex, just move on quietly
-        if let Ok(strategy) = string_regex(pattern) {
-            let rx = ensure_ok(
-                Regex::new(pattern),
-                "a supported pattern is valid regex",
+        let Ok(strategy) = string_regex(pattern) else {
+            return Ok(());
+        };
+        let rx = ensure_ok(
+            Regex::new(pattern),
+            "a supported pattern is valid regex",
+        )?;
+
+        for _ in 0..1000 {
+            let mut val = ensure_some(
+                strategy.new_tree(&mut runner).ok(),
+                "string strategy generates a value tree",
             )?;
+            ensure_current_string_matches(&val, &rx)?;
 
-            for _ in 0..1000 {
-                let mut val = ensure_some(
-                    strategy.new_tree(&mut runner).ok(),
-                    "string strategy generates a value tree",
-                )?;
-                // No more than 1000 simplify steps to keep test time down
-                for _ in 0..1000 {
-                    let produced = val.current();
-                    ensure(
-                        rx.is_match(&produced),
-                        "every produced string matches the source pattern",
-                    )?;
+            // No more than 1000 simplify steps to keep test time down
+            let mut simplify_steps = 0_u16;
+            while simplify_steps < 1000 && val.simplify() {
+                simplify_steps = simplify_steps.saturating_add(1);
+                ensure_current_string_matches(&val, &rx)?;
+            }
 
-                    if !val.simplify() {
-                        break;
-                    }
-                }
-
-                // Quietly stop testing if we've run for >10 s
-                if start.elapsed().as_secs() > 10 {
-                    break;
-                }
+            // Quietly stop testing if we've run for >10 s
+            if start.elapsed().as_secs() > 10 {
+                break;
             }
         }
         Ok(())
+    }
+
+    fn ensure_current_string_matches<V>(
+        val: &V,
+        rx: &Regex,
+    ) -> Result<(), TestFailure>
+    where
+        V: ValueTree<Value = String>,
+    {
+        let produced = val.current();
+        ensure(
+            rx.is_match(&produced),
+            "every produced string matches the source pattern",
+        )
     }
 
     include!("regex-contrib/crates_regex.rs");

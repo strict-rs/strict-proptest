@@ -8,12 +8,15 @@
 // except according to those terms.
 
 use crate::std_facade::{Cell, Vec, VecDeque};
+use core::mem::swap;
 
-use rand::RngExt;
+use rand::RngExt as _;
 
 use crate::num;
-use crate::strategy::traits::*;
-use crate::test_runner::*;
+#[cfg(test)]
+use crate::strategy::check_strategy_sanity;
+use crate::strategy::traits::{NewTree, Strategy, ValueTree};
+use crate::test_runner::{TestRng, TestRunner};
 
 /// `Strategy` shuffle adaptor.
 ///
@@ -51,12 +54,11 @@ fn swap_if_in_bounds<T>(
     } else {
         (second_index, first_index)
     };
-    if let Some((head, tail)) = slice.split_at_mut_checked(hi) {
-        if let (Some(first), Some(second)) =
+    if let Some((head, tail)) = slice.split_at_mut_checked(hi)
+        && let (Some(first), Some(second)) =
             (head.get_mut(lo), tail.first_mut())
-        {
-            core::mem::swap(first, second);
-        }
+    {
+        swap(first, second);
     }
 }
 
@@ -204,7 +206,9 @@ where
         // the permuted collection if it has reduced size during shrinking;
         // that's OK, since we only use this to filter swaps.
         self.ensure_dist_initialized(len);
-        let max_swap = self.dist.get().unwrap().current();
+        let Some(max_swap) = self.dist.get().map(|dist| dist.current()) else {
+            return permuted;
+        };
 
         // If empty collection or all swaps will be filtered out, there's
         // nothing to shuffle.
@@ -214,12 +218,12 @@ where
 
         let mut rng = self.rng.clone();
 
-        for start_index in 0..len - 1 {
+        for start_index in 0..len.saturating_sub(1) {
             // Determine the other index to be swapped, then skip the swap if
             // it is too far. This ordering is critical, as it ensures that we
             // generate the same sequence of random numbers every time.
             let end_index = rng.random_range(start_index..len);
-            if end_index - start_index <= max_swap {
+            if end_index.saturating_sub(start_index) <= max_swap {
                 permuted.shuffle_swap(start_index, end_index);
             }
         }
@@ -235,7 +239,11 @@ where
             // consistent non-panicking behaviour even if called in an
             // unexpected sequence.
             self.force_init_dist();
-            if self.dist.get_mut().as_mut().unwrap().simplify() {
+            let Some(dist) = self.dist.get_mut().as_mut() else {
+                self.simplifying_inner = true;
+                return self.inner.simplify();
+            };
+            if dist.simplify() {
                 true
             } else {
                 self.simplifying_inner = true;
@@ -249,16 +257,21 @@ where
             self.inner.complicate()
         } else {
             self.force_init_dist();
-            self.dist.get_mut().as_mut().unwrap().complicate()
+            self.dist
+                .get_mut()
+                .as_mut()
+                .is_some_and(ValueTree::complicate)
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::borrow::ToOwned;
+    use std::borrow::ToOwned as _;
     use std::collections::HashSet;
     use std::{format, vec};
+
+    use crate::test_runner::{Reason, test_runner_without_persistence};
 
     use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
 
@@ -272,7 +285,7 @@ mod test {
 
     #[test]
     fn generates_different_permutations() -> Result<(), TestFailure> {
-        let mut runner = TestRunner::default();
+        let mut runner = test_runner_without_persistence();
         let mut seen = HashSet::<Vec<i32>>::new();
 
         let input = Just(VALUES.to_owned()).prop_shuffle();
@@ -289,7 +302,7 @@ mod test {
                 "no permutation is generated twice",
             )?;
 
-            value.sort();
+            value.sort_unstable();
             ensure(
                 VALUES == &value[..],
                 "every permutation keeps the original elements",
@@ -298,9 +311,35 @@ mod test {
         Ok(())
     }
 
+    fn ensure_shuffle_distance_not_increased<V>(
+        value: &V,
+        prev_dist: u32,
+    ) -> Result<u32, TestFailure>
+    where
+        V: ValueTree<Value = Vec<i32>>,
+    {
+        let shuffled = value.current();
+        // Compute the "shuffle distance" by summing the absolute distance of
+        // each element's displacement.
+        let dist = shuffled
+            .iter()
+            .enumerate()
+            .map(|(ix, &nominal)| {
+                let nominal_ix = i32::try_from(ix).unwrap_or(i32::MAX);
+                nominal.abs_diff(nominal_ix)
+            })
+            .sum::<u32>();
+
+        ensure(
+            dist <= prev_dist,
+            "each simplify step reduces the shuffle distance",
+        )?;
+        Ok(dist)
+    }
+
     #[test]
     fn simplify_reduces_shuffle_amount() -> Result<(), TestFailure> {
-        let mut runner = TestRunner::default();
+        let mut runner = test_runner_without_persistence();
 
         let input = Just(VALUES.to_owned()).prop_shuffle();
         for _ in 0..1024 {
@@ -309,25 +348,12 @@ mod test {
                 "shuffle strategy generates a value tree",
             )?;
 
-            let mut prev_dist = i32::MAX;
-            loop {
-                let shuffled = value.current();
-                // Compute the "shuffle distance" by summing the absolute
-                // distance of each element's displacement.
-                let mut dist = 0;
-                for (ix, &nominal) in shuffled.iter().enumerate() {
-                    dist += (nominal - ix as i32).abs();
-                }
-
-                ensure(
-                    dist <= prev_dist,
-                    "each simplify step reduces the shuffle distance",
-                )?;
-
-                prev_dist = dist;
-                if !value.simplify() {
-                    break;
-                }
+            let mut prev_dist = u32::MAX;
+            prev_dist =
+                ensure_shuffle_distance_not_increased(&value, prev_dist)?;
+            while value.simplify() {
+                prev_dist =
+                    ensure_shuffle_distance_not_increased(&value, prev_dist)?;
             }
 
             // When fully simplified, the result is in the original order.
@@ -341,11 +367,11 @@ mod test {
     }
 
     #[test]
-    fn simplify_complicate_contract_upheld() {
+    fn simplify_complicate_contract_upheld() -> Result<(), Reason> {
         check_strategy_sanity(
-            collection::vec(0i32..1000, 5..10).prop_shuffle(),
+            collection::vec(0_i32..1000, 5..10).prop_shuffle(),
             None,
-        );
+        )
     }
 
     #[test]

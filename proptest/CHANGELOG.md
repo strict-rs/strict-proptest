@@ -5,7 +5,11 @@
 - The minimum supported Rust version has been increased to 1.96.0.
 - Removed the `Arbitrary` implementations for `std::sync::Mutex`, `std::sync::RwLock`, `std::sync::Condvar`, and `std::sync::WaitTimeoutResult` (and the `ArbitraryF1` lifts for the two locks). The poisoning-prone std locks conflict with the strict lint policy, and `WaitTimeoutResult` cannot be produced without them; compile-fail coverage pins the removals.
 - `#[property_test]` (re-exported under the `attr-macro` feature) now generates strict tests: the wrapper returns `proptest::strict::TestResult`, runs through `proptest::strict::ensure_property`, and rejects `()` property bodies at compile time. See the `proptest-macro` changelog for the full codegen contract.
-- Renamed the public weighted-union type alias `W<T>` to `Weighted<T>` (re-exported as `proptest::strategy::Weighted`). The `WA<T>` alias is unchanged.
+- Renamed the additive `no_std` Cargo feature to `libm`. A no-`std` build is still selected with `default-features = false`; `libm` only enables `num-traits`'s `libm` math support without `std`.
+- Renamed the public weighted-union type alias `W<T>` to `Weighted<T>` (re-exported as `proptest::strategy::Weighted`) and replaced the tuple-union sharing alias `WA<T>` with `WeightedStrategy<T> = (u32, Rc<T>)`. Direct `TupleUnion` users must update explicit tuple-entry types from `WA`/`Arc` to `WeightedStrategy`/`Rc`.
+- Removed the deprecated `FailurePersistence::load_persisted_failures` and `FailurePersistence::save_persisted_failure` compatibility bridge for legacy 16-byte XorShift seeds. Backends now implement the current `PersistedSeed` methods directly.
+- Removed the deprecated `RngCore` re-export from `proptest::prelude`; users should import rand 0.10's `Rng` trait instead.
+- Removed bracketed function modifiers from `prop_compose!`; C-ABI mapper functions now belong behind `prop_compose_ffi!`.
 
 ### Bug Fixes
 
@@ -23,6 +27,7 @@
 - Added typed fallible constructors alongside the panicking legacy forms: `Union::try_new_uniform` / `Union::try_new_weighted` / `try_float_to_weight` (with `UnionBuildError`), the `collection::try_vec` family (with `EmptySizeRange` via `SizeRange::ensure_nonempty`), `sample::try_subsequence` / `sample::try_select` / `Index::try_index`, `SampledBitSetStrategy::try_new` (with `SampledBitsError`), `try_range_subset` (with `RangeSubsetError`), and the crate-internal `Seed::try_from_bytes` (with `SeedLengthError`).
 - The typed strategy-construction error types now implement `Copy`: `collection::EmptySizeRange`, `strategy::UnionBuildError`, `sample::EmptySelection`, `sample::SubsequenceError`, `bits::SampledBitsError`, and (feature `std`) `range_subset::RangeSubsetError`.
 - `string::RegexGeneratorValueTree` now implements `Debug`, rendering opaquely as `RegexGeneratorValueTree { .. }` (the wrapped value tree carries no `Debug` of its own).
+- Added `prop_compose_ffi!` for Rust strategy-builder functions that map generated scalar values through a user-named local `extern "C"` mapper without exporting C symbols or raw strategy handles.
 
 ### Other Notes
 

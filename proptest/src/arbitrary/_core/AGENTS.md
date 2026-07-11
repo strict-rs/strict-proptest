@@ -2,7 +2,7 @@
 
 This file provides guidance to coding agents when working with code in this repository.
 
-Scope: `proptest/src/arbitrary/_core/` — the `Arbitrary` impls for `libcore` types. This is the base tier: `mod _core;` in `arbitrary/mod.rs` has no `#[cfg]` gate (the sibling `_alloc`/`_std` tiers do), so it underpins every build and must stay `no_std`-clean — never name `std::` outside `#[cfg(test)]` code, and pull shared types from `crate::std_facade`. For the `Arbitrary` trait, the `SMapped`/`Mapped`/`SFnPtrMap` aliases, and the impl-writing macros, see the parent `arbitrary/AGENTS.md`; for workspace-wide conventions, the root `AGENTS.md`.
+Scope: `proptest/src/arbitrary/_core/` — the `Arbitrary` impls for `libcore` types. This is the base tier: `mod _core;` in `arbitrary.rs` has no `#[cfg]` gate (the sibling `_alloc`/`_std` tiers do), so it underpins every build and must stay no-`std`-clean — never name `std::` outside `#[cfg(test)]` code, and pull shared types from `crate::std_facade`. For the `Arbitrary` trait, the `SMapped`/`Mapped`/`SFnPtrMap` aliases, and the impl-writing macros, see the parent `arbitrary/AGENTS.md`; for workspace-wide conventions, the root `AGENTS.md`.
 
 ## How the impls are written
 
@@ -18,10 +18,10 @@ Every module ends with `#[cfg(test)] mod test` calling `no_panic_test!(name => T
 
 ## Per-module map
 
-- `mod.rs` — declares the twelve submodules below; no logic.
+- `_core.rs` — declares the twelve submodules below; no logic.
 - `ascii.rs` — `EscapeDefault`, via `static_map(any::<u8>(), escape_default)` (`SMapped<u8, Self>`).
 - `cell.rs` — `Cell` (inner `A: Copy`), `RefCell`, `UnsafeCell` via `wrap_from!`; plus the opaque `BorrowError`/`BorrowMutError`, each built with `lazy_just!` by deliberately provoking a real double-borrow on a throwaway `RefCell` and capturing the `Err`.
-- `cmp.rs` — `Reverse` via `wrap_ctor!(Reverse, Reverse)` (the tuple-struct ctor, since there is no `Reverse::new`); `Ordering` as a `prop_oneof!` of the three variants, each a `Just` (`Strategy = TupleUnion<(WA<Just<Ordering>>, …)>`).
+- `cmp.rs` — `Reverse` via `wrap_ctor!(Reverse, Reverse)` (the tuple-struct ctor, since there is no `Reverse::new`); `Ordering` as a `prop_oneof!` of the three variants, each a `Just` (`Strategy = TupleUnion<(WeightedStrategy<Just<Ordering>>, …)>`).
 - `convert.rs` — intentionally empty: `Infallible` is uninhabited, so no `Arbitrary` exists; the doc comment notes derive must simply exclude such void-like types.
 - `fmt.rs` — `core::fmt::Error` via `arbitrary!(Error; Error)` (a `Just`).
 - `iter.rs` — the bulk of the directory: `Arbitrary` for iterator adapters. `wrap_ctor!` covers `Once`, `Repeat`, `Cycle`, `Enumerate`, `Fuse`, `Peekable`, `Rev`; `Empty`, `Cloned`, `Zip`, `Chain`, and (via the local `usize_mod!` macro) `Skip`/`Take` get explicit `arbitrary!` + `lift1!`. `Cloned` additionally hand-rolls `ArbitraryF1` (its `Iterator<Item = &'a T>` lifetime can't go through `lift1!`); `Zip` and `Chain` hand-roll `ArbitraryF2`. `StepBy` is `#[cfg(feature = "unstable")]`. A `TODO` notes closure-carrying adapters (`Map`, `Filter`, `FlatMap`, `Scan`, …) are unsupported pending `CoArbitrary`.

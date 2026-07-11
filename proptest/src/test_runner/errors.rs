@@ -10,9 +10,21 @@
 use crate::std_facade::{fmt, format};
 
 #[cfg(feature = "std")]
-use std::string::ToString;
+use std::error::Error as StdError;
+#[cfg(feature = "std")]
+use std::string::ToString as _;
 
 use crate::test_runner::Reason;
+
+/// Display adapter for values whose public failure message is their `Debug`
+/// representation.
+struct DebugDisplay<'a, T: fmt::Debug + ?Sized>(&'a T);
+
+impl<T: fmt::Debug + ?Sized> fmt::Display for DebugDisplay<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.0, f)
+    }
+}
 
 /// Errors which can be returned from test cases to indicate non-successful
 /// completion.
@@ -41,8 +53,8 @@ pub enum TestCaseError {
 /// TODO-v2: Ideally `TestCaseResult = Result<TestCaseOk, TestCaseError>`
 /// however this breaks source compatibility in version 1.x.x because
 /// `TestCaseResult` is public.
-#[derive(Debug, Clone)]
-pub(crate) enum TestCaseOk {
+#[derive(Debug, Clone, Copy)]
+pub(super) enum TestCaseOk {
     /// A freshly generated input passed the test.
     NewCaseSuccess,
     /// A replayed persisted-failure seed passed the test.
@@ -63,7 +75,7 @@ pub type TestCaseResult = Result<(), TestCaseError>;
 /// TODO-v2: Ideally `TestCaseResult = Result<TestCaseOk, TestCaseError>`
 /// however this breaks source compatibility in version 1.x.x because
 /// `TestCaseResult` is public.
-pub(crate) type TestCaseResultV2 = Result<TestCaseOk, TestCaseError>;
+pub(super) type TestCaseResultV2 = Result<TestCaseOk, TestCaseError>;
 
 impl TestCaseError {
     /// Rejects the generated test input as invalid for this test case. This
@@ -73,7 +85,7 @@ impl TestCaseError {
     /// The string gives the location and context of the rejection, and
     /// should be suitable for formatting like `Foo did X at {whence}`.
     pub fn reject(reason: impl Into<Reason>) -> Self {
-        TestCaseError::Reject(reason.into())
+        Self::Reject(reason.into())
     }
 
     /// The code under test failed the test.
@@ -81,25 +93,25 @@ impl TestCaseError {
     /// The string should indicate the location of the failure, but may
     /// generally be any string.
     pub fn fail(reason: impl Into<Reason>) -> Self {
-        TestCaseError::Fail(reason.into())
+        Self::Fail(reason.into())
     }
 }
 
 impl fmt::Display for TestCaseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            TestCaseError::Reject(ref whence) => {
-                write!(f, "Input rejected at {}", whence)
+            Self::Reject(ref whence) => {
+                write!(f, "Input rejected at {whence}")
             }
-            TestCaseError::Fail(ref why) => write!(f, "Case failed: {}", why),
+            Self::Fail(ref why) => write!(f, "Case failed: {why}"),
         }
     }
 }
 
 #[cfg(feature = "std")]
-impl<E: ::std::error::Error> From<E> for TestCaseError {
+impl<E: StdError> From<E> for TestCaseError {
     fn from(cause: E) -> Self {
-        TestCaseError::fail(cause.to_string())
+        Self::fail(cause.to_string())
     }
 }
 
@@ -118,25 +130,17 @@ pub enum TestError<T> {
 impl<T: fmt::Debug> fmt::Display for TestError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            TestError::Abort(ref why) => write!(f, "Test aborted: {}", why),
-            TestError::Fail(ref why, ref what) => {
-                writeln!(f, "Test failed: {}.", why)?;
-                write!(f, "minimal failing input: {:#?}", what)
+            Self::Abort(ref why) => write!(f, "Test aborted: {why}"),
+            Self::Fail(ref why, ref what) => {
+                writeln!(f, "Test failed: {why}.")?;
+                write!(f, "minimal failing input: {:#}", DebugDisplay(what))
             }
         }
     }
 }
 
 #[cfg(feature = "std")]
-#[allow(deprecated)] // description()
-impl<T: fmt::Debug> ::std::error::Error for TestError<T> {
-    fn description(&self) -> &str {
-        match *self {
-            TestError::Abort(..) => "Abort",
-            TestError::Fail(..) => "Fail",
-        }
-    }
-}
+impl<T: fmt::Debug> StdError for TestError<T> {}
 
 /// Sealed-trait guard for `ProptestResultExt`.
 mod private {

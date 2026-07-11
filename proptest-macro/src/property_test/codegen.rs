@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
-use quote::{ToTokens, quote};
-use syn::{Attribute, Ident, ItemFn, Pat, parse_quote, spanned::Spanned};
+use quote::{ToTokens as _, quote};
+use syn::{Attribute, Ident, ItemFn, Pat, parse_quote, spanned::Spanned as _};
 
 use super::{
     options::Options,
@@ -26,12 +26,15 @@ mod test_body;
     clippy::single_call_fn,
     reason = "drive the struct, Arbitrary impl, and body generation into the final test fn"
 )]
-pub(super) fn generate(item_fn: ItemFn, options: Options) -> TokenStream {
-    let (mut argless_fn, args) = strip_args(item_fn);
+pub(super) fn generate(item_fn: ItemFn, options: &Options) -> TokenStream {
+    let (mut argless_fn, args) = match strip_args(item_fn) {
+        Ok(stripped) => stripped,
+        Err(error) => return error,
+    };
 
     let struct_tokens = generate_struct(&argless_fn.sig.ident, &args);
     let arb_tokens =
-        arbitrary::gen_arbitrary_impl(&argless_fn.sig.ident, &args, &options);
+        arbitrary::gen_arbitrary_impl(&argless_fn.sig.ident, &args, options);
 
     let struct_and_arb = quote! {
         #struct_tokens
@@ -39,11 +42,11 @@ pub(super) fn generate(item_fn: ItemFn, options: Options) -> TokenStream {
     };
 
     let new_body = test_body::body(
-        *argless_fn.block,
+        &argless_fn.block,
         &args,
-        struct_and_arb,
+        &struct_and_arb,
         &argless_fn.sig.ident,
-        &options,
+        options,
     );
 
     *argless_fn.block = new_body;
@@ -77,7 +80,7 @@ fn generate_struct(fn_name: &Ident, args: &[Argument]) -> TokenStream {
     let struct_name = struct_name(fn_name);
 
     let fields = args.iter().enumerate().map(|(index, arg)| {
-        let field_name = nth_field_name(args, index);
+        let field_name = field_name_for_arg(arg, index);
         let ty = &arg.pat_ty.ty;
 
         quote! { #field_name: #ty, }
@@ -95,12 +98,12 @@ fn generate_struct(fn_name: &Ident, args: &[Argument]) -> TokenStream {
 ///
 /// E.g. `some_function` -> `SomeFunctionArgs`
 fn struct_name(fn_name: &Ident) -> Ident {
-    use convert_case::{Case, Casing};
+    use convert_case::{Case, Casing as _};
 
-    let name = fn_name.to_string();
-    let name = name.to_case(Case::Pascal);
-    let name = format!("{name}Args");
-    Ident::new(&name, fn_name.span())
+    let function_name = fn_name.to_string();
+    let pascal_name = function_name.to_case(Case::Pascal);
+    let struct_name = format!("{pascal_name}Args");
+    Ident::new(&struct_name, fn_name.span())
 }
 
 /// The rule for field names is:
@@ -118,12 +121,11 @@ fn struct_name(fn_name: &Ident) -> Ident {
 /// }
 /// ```
 ///
-/// Panics if `index` is out of bounds for `args`
-fn nth_field_name(args: &[Argument], index: usize) -> Ident {
-    let arg = &args[index];
-    match arg.pat_ty.pat.as_ref() {
-        Pat::Ident(pat_ident) => pat_ident.ident.clone(),
-        other => Ident::new(&format!("arg{index}"), other.span()),
+fn field_name_for_arg(arg: &Argument, index: usize) -> Ident {
+    if let Pat::Ident(ref pat_ident) = *arg.pat_ty.pat {
+        pat_ident.ident.clone()
+    } else {
+        Ident::new(&format!("arg{index}"), arg.pat_ty.pat.span())
     }
 }
 
@@ -144,6 +146,15 @@ mod tests {
     };
     use syn::{ItemStruct, parse_quote, parse_str, parse2};
 
+    fn ensure_stripped_args(
+        fixture_fn: ItemFn,
+    ) -> Result<(ItemFn, Vec<Argument>), TestFailure> {
+        strip_args(fixture_fn).map_err(|error| TestFailure::WasErr {
+            context: "fixture args strip",
+            cause: error.to_string(),
+        })
+    }
+
     /// Parse a function and check the generated struct's name and fields,
     /// comparing a rendered `name: ty` listing so failures cite both sides.
     fn check_struct(
@@ -151,9 +162,10 @@ mod tests {
         expected_name: &'static str,
         expected_fields: impl IntoIterator<Item = (&'static str, &'static str)>,
     ) -> Result<(), TestFailure> {
-        let f: ItemFn = ensure_ok(parse_str(fn_def), "fixture fn parses")?;
-        let (f, args) = strip_args(f);
-        let tokens = generate_struct(&f.sig.ident, &args);
+        let fixture_fn: ItemFn =
+            ensure_ok(parse_str(fn_def), "fixture fn parses")?;
+        let (stripped_fn, args) = ensure_stripped_args(fixture_fn)?;
+        let tokens = generate_struct(&stripped_fn.sig.ident, &args);
         let parsed_struct: ItemStruct =
             ensure_ok(parse2(tokens), "generated struct parses")?;
 
@@ -180,10 +192,10 @@ mod tests {
 
     #[test]
     fn derives_debug() -> Result<(), TestFailure> {
-        let f: ItemFn =
+        let fixture_fn: ItemFn =
             ensure_ok(parse_str("fn foo(x: i32) {}"), "fixture fn parses")?;
-        let (f, args) = strip_args(f);
-        let string = generate_struct(&f.sig.ident, &args).to_string();
+        let (stripped_fn, args) = ensure_stripped_args(fixture_fn)?;
+        let string = generate_struct(&stripped_fn.sig.ident, &args).to_string();
 
         ensure_contains(&string, "derive", "generated struct has a derive")?;
         ensure_contains(&string, "Debug", "generated struct derives Debug")
@@ -201,16 +213,17 @@ mod tests {
     }
 
     #[test]
-    fn generates_arbitrary_impl() {
-        let f: ItemFn = parse_quote! { fn foo(x: i32, y: u8) {} };
-        let (f, args) = strip_args(f);
+    fn generates_arbitrary_impl() -> Result<(), TestFailure> {
+        let fixture_fn: ItemFn = parse_quote! { fn foo(x: i32, y: u8) {} };
+        let (stripped_fn, args) = ensure_stripped_args(fixture_fn)?;
         let arb = arbitrary::gen_arbitrary_impl(
-            &f.sig.ident,
+            &stripped_fn.sig.ident,
             &args,
             &Options::default(),
         );
 
         insta::assert_snapshot!(arb.to_string());
+        Ok(())
     }
 }
 
@@ -231,14 +244,15 @@ mod snapshot_tests {
             #[test]
             fn $name() -> Result<(), TestFailure> {
                 const TEXT: &str = include_str!(concat!(
-                    "test_data/",
+                    "codegen/test_data/",
                     stringify!($name),
                     ".rs"
                 ));
 
                 let parsed =
                     ensure_ok(parse_str(TEXT), "fixture source parses")?;
-                let tokens = generate(parsed, $options);
+                let options = $options;
+                let tokens = generate(parsed, &options);
                 let file = ensure_ok(
                     syn::parse_file(&tokens.to_string()),
                     "generated code parses as a file",

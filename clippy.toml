@@ -90,11 +90,11 @@ disallowed-macros = [
     { path = "core::debug_assert_ne", reason = "panics in debug, silently dropped in release; use strict_test_support::ensure_ne" },
     # Legacy property harness front doors. The native strict property runner
     # is `proptest::strict::ensure_property`.
-    { path = "proptest::proptest",       reason = "panicking property harness; use proptest::strict::ensure_property" },
-    { path = "proptest::prop_assert",    reason = "bypasses the TestFailure vocabulary; use strict_test_support::ensure inside a proptest::strict::ensure_property closure" },
-    { path = "proptest::prop_assert_eq", reason = "bypasses the TestFailure vocabulary; use strict_test_support::ensure_eq inside a proptest::strict::ensure_property closure" },
-    { path = "proptest::prop_assert_ne", reason = "bypasses the TestFailure vocabulary; use strict_test_support::ensure_ne inside a proptest::strict::ensure_property closure" },
-    { path = "proptest::prop_assume",    reason = "rejection belongs in the strategy; use Strategy::prop_filter" },
+    { path = "proptest::prelude::proptest",       reason = "panicking property harness; use proptest::strict::ensure_property" },
+    { path = "proptest::prelude::prop_assert",    reason = "bypasses the TestFailure vocabulary; use strict_test_support::ensure inside a proptest::strict::ensure_property closure" },
+    { path = "proptest::prelude::prop_assert_eq", reason = "bypasses the TestFailure vocabulary; use strict_test_support::ensure_eq inside a proptest::strict::ensure_property closure" },
+    { path = "proptest::prelude::prop_assert_ne", reason = "bypasses the TestFailure vocabulary; use strict_test_support::ensure_ne inside a proptest::strict::ensure_property closure" },
+    { path = "proptest::prelude::prop_assume",    reason = "rejection belongs in the strategy; use Strategy::prop_filter" },
 ]
 
 # ── Disallowed methods (ad-hoc error construction + panicking std items) ────

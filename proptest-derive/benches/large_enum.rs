@@ -9,11 +9,12 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
+use proptest::{prelude::*, strategy::ValueTree as _, test_runner::TestRunner};
 use proptest_derive::Arbitrary;
 
 #[derive(Arbitrary, Debug)]
 #[proptest(no_params)]
+/// Flat benchmark enum with sixteen generated `String` payload variants.
 enum LargeEnum1 {
     /// Variant 1 carrying a generated `String` payload.
     V1(String),
@@ -53,28 +54,29 @@ impl LargeEnum1 {
     /// Return the length of the active variant's `String` payload.
     const fn payload_len(&self) -> usize {
         match self {
-            Self::V1(payload)
-            | Self::V2(payload)
-            | Self::V3(payload)
-            | Self::V4(payload)
-            | Self::V5(payload)
-            | Self::V6(payload)
-            | Self::V7(payload)
-            | Self::V8(payload)
-            | Self::V9(payload)
-            | Self::V10(payload)
-            | Self::V11(payload)
-            | Self::V12(payload)
-            | Self::V13(payload)
-            | Self::V14(payload)
-            | Self::V15(payload)
-            | Self::V16(payload) => payload.len(),
+            &Self::V1(ref payload)
+            | &Self::V2(ref payload)
+            | &Self::V3(ref payload)
+            | &Self::V4(ref payload)
+            | &Self::V5(ref payload)
+            | &Self::V6(ref payload)
+            | &Self::V7(ref payload)
+            | &Self::V8(ref payload)
+            | &Self::V9(ref payload)
+            | &Self::V10(ref payload)
+            | &Self::V11(ref payload)
+            | &Self::V12(ref payload)
+            | &Self::V13(ref payload)
+            | &Self::V14(ref payload)
+            | &Self::V15(ref payload)
+            | &Self::V16(ref payload) => payload.len(),
         }
     }
 }
 
 #[derive(Arbitrary, Debug)]
 #[proptest(no_params)]
+/// Nested benchmark enum with sixteen generated `LargeEnum1` payload variants.
 enum LargeEnum2 {
     /// Variant 1 carrying a nested `LargeEnum1` payload.
     V1(LargeEnum1),
@@ -114,22 +116,22 @@ impl LargeEnum2 {
     /// Return the length of the nested payload selected by the active variant.
     const fn payload_len(&self) -> usize {
         match self {
-            Self::V1(payload)
-            | Self::V2(payload)
-            | Self::V3(payload)
-            | Self::V4(payload)
-            | Self::V5(payload)
-            | Self::V6(payload)
-            | Self::V7(payload)
-            | Self::V8(payload)
-            | Self::V9(payload)
-            | Self::V10(payload)
-            | Self::V11(payload)
-            | Self::V12(payload)
-            | Self::V13(payload)
-            | Self::V14(payload)
-            | Self::V15(payload)
-            | Self::V16(payload) => payload.payload_len(),
+            &Self::V1(ref payload)
+            | &Self::V2(ref payload)
+            | &Self::V3(ref payload)
+            | &Self::V4(ref payload)
+            | &Self::V5(ref payload)
+            | &Self::V6(ref payload)
+            | &Self::V7(ref payload)
+            | &Self::V8(ref payload)
+            | &Self::V9(ref payload)
+            | &Self::V10(ref payload)
+            | &Self::V11(ref payload)
+            | &Self::V12(ref payload)
+            | &Self::V13(ref payload)
+            | &Self::V14(ref payload)
+            | &Self::V15(ref payload)
+            | &Self::V16(ref payload) => payload.payload_len(),
         }
     }
 }
@@ -143,7 +145,7 @@ fn enum1_bench(runner: &mut TestRunner) -> Option<usize> {
     let strategy = any::<LargeEnum1>();
     let tree = black_box(strategy.new_tree(runner));
     tree.ok()
-        .map(|tree| black_box(tree.current().payload_len()))
+        .map(|generated_tree| black_box(generated_tree.current().payload_len()))
 }
 
 /// Sample one `LargeEnum2` value through its derived strategy.
@@ -155,7 +157,7 @@ fn enum2_bench(runner: &mut TestRunner) -> Option<usize> {
     let strategy = any::<LargeEnum2>();
     let tree = black_box(strategy.new_tree(runner));
     tree.ok()
-        .map(|tree| black_box(tree.current().payload_len()))
+        .map(|generated_tree| black_box(generated_tree.current().payload_len()))
 }
 
 /// Register the large-enum derive benchmarks with the `Criterion` harness.

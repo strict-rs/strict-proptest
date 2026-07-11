@@ -11,11 +11,16 @@
 
 use core::fmt;
 use core::iter::Fuse;
-use core::iter::*;
+#[cfg(feature = "unstable")]
+use core::iter::StepBy;
+use core::iter::{
+    Chain, Cloned, Cycle, DoubleEndedIterator, Empty, Enumerate, Iterator,
+    Once, Peekable, Repeat, Rev, Skip, Take, Zip, empty, once, repeat,
+};
 
-use crate::arbitrary::*;
+use crate::arbitrary::{Arbitrary, SMapped, any, any_with, functor};
 use crate::strategy::statics::static_map;
-use crate::strategy::*;
+use crate::strategy::{BoxedStrategy, Strategy};
 
 // TODO: Filter, FilterMap, FlatMap, Map, Inspect, Scan, SkipWhile
 // Might be possible with CoArbitrary
@@ -152,7 +157,9 @@ usize_mod!(StepBy, step_by);
 mod test {
     use super::*;
 
+    use crate::arbitrary::SFnPtrMap;
     use std::ops::Range;
+    use std::vec::IntoIter;
     const DUMMY: &[u8] = &[0, 1, 2, 3, 4];
     #[derive(Debug)]
     struct Dummy(u8);
@@ -160,13 +167,9 @@ mod test {
     impl Iterator for Dummy {
         type Item = &'static u8;
         fn next(&mut self) -> Option<Self::Item> {
-            if self.0 < 5 {
-                let byte = &DUMMY[self.0 as usize];
-                self.0 += 1;
-                Some(byte)
-            } else {
-                None
-            }
+            let byte = DUMMY.get(usize::from(self.0))?;
+            self.0 = self.0.saturating_add(1);
+            Some(byte)
         }
     }
 
@@ -179,7 +182,7 @@ mod test {
         enumerate => Enumerate<Repeat<u8>>,
         fuse      => Fuse<Once<u8>>,
         peekable  => Peekable<Repeat<u8>>,
-        rev       => Rev<::std::vec::IntoIter<u8>>,
+        rev       => Rev<IntoIter<u8>>,
         zip       => Zip<Repeat<u8>, Repeat<u16>>,
         chain     => Chain<Once<u8>, Once<u8>>,
         skip      => Skip<Repeat<u8>>,

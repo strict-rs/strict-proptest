@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Prints the debug form of the runner's default `Config`.
+//! Prints selected fields from the runner's default `Config`.
 //!
 //! Under the default `std` feature that default is environment-resolved, so
 //! `PROPTEST_*` overrides show through — for example `PROPTEST_CASES=42`
@@ -15,7 +15,16 @@
 //! runner's effective configuration.
 
 use proptest::test_runner::Config;
+use std::io::{self, Write as _};
 
-fn main() {
-    println!("Default config: {:?}", Config::default());
+fn main() -> io::Result<()> {
+    let config = Config::default();
+    writeln!(
+        io::stdout().lock(),
+        "Default config: cases={}, max_shrink_iters={}, fork={}, timeout={}",
+        config.cases,
+        config.max_shrink_iters(),
+        config.fork(),
+        config.timeout()
+    )
 }

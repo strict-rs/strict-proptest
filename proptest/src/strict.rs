@@ -40,7 +40,7 @@
 //! [`Config`] verbatim.
 
 use std::env;
-use std::string::ToString;
+use std::string::ToString as _;
 
 use crate::strategy::Strategy;
 use crate::test_runner::{
@@ -89,6 +89,7 @@ fn resolve_seed(raw: Option<&str>) -> RngSeed {
     clippy::single_call_fn,
     reason = "the persistence-off, STRICT_TEST_SEED-seeded Config that backs ensure_property"
 )]
+#[must_use]
 pub fn strict_default_config() -> Config {
     Config {
         failure_persistence: None,
@@ -205,7 +206,7 @@ where
 mod tests {
     use core::cell::Cell;
     use std::path::Path;
-    use std::string::ToString;
+    use std::string::ToString as _;
 
     use strict_test_support::{
         ensure, ensure_all, ensure_contains, ensure_eq, ensure_some,

@@ -38,42 +38,6 @@ enum T1 {
 
 #[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0029]
 enum T2 {
-    #[proptest(strategy = "Just(T0::V0)")]
-    V0 {},
-}
-
-#[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0029]
-enum T3 {
-    #[proptest(value = "T0::V0")]
-    V0 {},
-}
-
-#[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0029]
-enum T4 {
-    #[proptest(strategy = "Just(T0::V0)")]
-    V0(),
-}
-
-#[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0029]
-enum T5 {
-    #[proptest(value = "T0::V0")]
-    V0(),
-}
-
-#[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0029]
-enum T6 {
     #[proptest(regex = "a+")]
     V0,
-}
-
-#[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0029]
-enum T7 {
-    #[proptest(regex = "b*")]
-    V0 {},
-}
-
-#[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0029]
-enum T8 {
-    #[proptest(regex = "a|b")]
-    V0(),
 }

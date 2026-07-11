@@ -14,7 +14,8 @@ macro_rules! snapshot_test {
         #[test]
         fn $name() -> Result<(), TestFailure> {
             let input = parse_quote! { $($t)* };
-            let tokens = codegen::generate(input, Options::default());
+            let options = Options::default();
+            let tokens = codegen::generate(input, &options);
             let file = ensure_ok(
                 syn::parse_file(&tokens.to_string()),
                 "generated code parses as a file",

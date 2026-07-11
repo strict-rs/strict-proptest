@@ -1,0 +1,11 @@
+error: prop_compose! no longer supports bracketed function modifiers; use prop_compose_ffi! for C-ABI mapper functions
+ --> tests/sugar/fail/prop_compose_rejects_bracketed_modifier.rs:3:1
+  |
+3 | / prop_compose! {
+4 | |     [extern "C"] fn old_modifier()(sample in 0_i32..1) -> i32 {
+5 | |         sample
+6 | |     }
+7 | | }
+  | |_^
+  |
+  = note: this error originates in the macro `prop_compose` (in Nightly builds, run with -Z macro-backtrace for more info)

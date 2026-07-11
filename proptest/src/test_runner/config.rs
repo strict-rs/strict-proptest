@@ -8,161 +8,198 @@
 // except according to those terms.
 
 use crate::std_facade::Box;
+use core::num::ParseIntError;
+use core::ptr::fn_addr_eq;
 use core::{fmt, str};
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+use std::ffi::OsString;
+#[cfg(feature = "std")]
+use std::sync::LazyLock;
 
 use crate::test_runner::FailurePersistence;
+#[cfg(feature = "std")]
+use crate::test_runner::FileFailurePersistence;
 use crate::test_runner::result_cache::{ResultCache, noop_result_cache};
 use crate::test_runner::rng::RngAlgorithm;
+
+/// Environment override for the number of successful cases to run.
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+const CASES: &str = "PROPTEST_CASES";
+/// Environment override for the local rejection budget.
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+const MAX_LOCAL_REJECTS: &str = "PROPTEST_MAX_LOCAL_REJECTS";
+/// Environment override for the global rejection budget.
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+const MAX_GLOBAL_REJECTS: &str = "PROPTEST_MAX_GLOBAL_REJECTS";
+/// Environment override for flat-map regeneration budget.
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+const MAX_FLAT_MAP_REGENS: &str = "PROPTEST_MAX_FLAT_MAP_REGENS";
+/// Environment override for shrink-time budget.
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+const MAX_SHRINK_TIME: &str = "PROPTEST_MAX_SHRINK_TIME";
+/// Environment override for shrink-iteration budget.
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+const MAX_SHRINK_ITERS: &str = "PROPTEST_MAX_SHRINK_ITERS";
+/// Environment override for the default collection size range.
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+const MAX_DEFAULT_SIZE_RANGE: &str = "PROPTEST_MAX_DEFAULT_SIZE_RANGE";
+/// Environment override for fork isolation.
+#[cfg(all(feature = "std", not(target_arch = "wasm32"), feature = "fork"))]
+const FORK: &str = "PROPTEST_FORK";
+/// Environment override for per-case timeout.
+#[cfg(all(feature = "std", not(target_arch = "wasm32"), feature = "timeout"))]
+const TIMEOUT: &str = "PROPTEST_TIMEOUT";
+/// Environment override for runner verbosity.
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+const VERBOSE: &str = "PROPTEST_VERBOSE";
+/// Environment override for the RNG algorithm.
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+const RNG_ALGORITHM: &str = "PROPTEST_RNG_ALGORITHM";
+/// Environment override for the RNG seed.
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+const RNG_SEED: &str = "PROPTEST_RNG_SEED";
+/// Environment override disabling failure persistence.
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+const DISABLE_FAILURE_PERSISTENCE: &str =
+    "PROPTEST_DISABLE_FAILURE_PERSISTENCE";
 
 /// Override the config fields from environment variables, if any are set.
 /// Without the `std` feature this function returns config unchanged.
 #[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+#[must_use = "the environment overlay returns the updated Config"]
 #[allow(
     clippy::single_call_fn,
-    reason = "overlay every PROPTEST_* environment variable onto the compiled-in Config"
+    reason = "publicly apply the process PROPTEST_* overlay to a Config before runner construction"
 )]
 pub fn contextualize_config(mut result: Config) -> Config {
     use std::env;
-    use std::ffi::OsString;
-    use std::fmt;
-    use std::str::FromStr;
-    use std::string::ToString;
 
-    const CASES: &str = "PROPTEST_CASES";
-
-    const MAX_LOCAL_REJECTS: &str = "PROPTEST_MAX_LOCAL_REJECTS";
-    const MAX_GLOBAL_REJECTS: &str = "PROPTEST_MAX_GLOBAL_REJECTS";
-    const MAX_FLAT_MAP_REGENS: &str = "PROPTEST_MAX_FLAT_MAP_REGENS";
-    const MAX_SHRINK_TIME: &str = "PROPTEST_MAX_SHRINK_TIME";
-    const MAX_SHRINK_ITERS: &str = "PROPTEST_MAX_SHRINK_ITERS";
-    const MAX_DEFAULT_SIZE_RANGE: &str = "PROPTEST_MAX_DEFAULT_SIZE_RANGE";
-    #[cfg(feature = "fork")]
-    const FORK: &str = "PROPTEST_FORK";
-    #[cfg(feature = "timeout")]
-    const TIMEOUT: &str = "PROPTEST_TIMEOUT";
-    const VERBOSE: &str = "PROPTEST_VERBOSE";
-    const RNG_ALGORITHM: &str = "PROPTEST_RNG_ALGORITHM";
-    const RNG_SEED: &str = "PROPTEST_RNG_SEED";
-    const DISABLE_FAILURE_PERSISTENCE: &str =
-        "PROPTEST_DISABLE_FAILURE_PERSISTENCE";
-
-    fn parse_or_warn<T: FromStr + fmt::Display>(
-        src: &OsString,
-        dst: &mut T,
-        typ: &'static str,
-        var: &'static str,
-    ) {
-        use crate::test_runner::diagnostics::{self, RunnerDiagnostic};
-        use std::borrow::ToOwned;
-        use std::string::ToString;
-
-        if let Some(src) = src.to_str() {
-            if let Ok(parsed) = src.parse() {
-                *dst = parsed;
-            } else {
-                diagnostics::emit(RunnerDiagnostic::EnvVarUnparsable {
-                    var,
-                    value: src.to_owned(),
-                    typ,
-                    default: dst.to_string(),
-                });
-            }
-        } else {
-            diagnostics::emit(RunnerDiagnostic::EnvVarNotUnicode {
-                var,
-                default: dst.to_string(),
-            });
-        }
-    }
-
-    for (var, raw_value) in env::vars_os().filter_map(|(name, os_value)| {
-        name.into_string().ok().map(|name| (name, os_value))
-    }) {
-        let var = var.as_str();
-
-        #[cfg(feature = "fork")]
-        if var == FORK {
-            parse_or_warn(&raw_value, &mut result.fork, "bool", FORK);
-            continue;
-        }
-
-        #[cfg(feature = "timeout")]
-        if var == TIMEOUT {
-            parse_or_warn(&raw_value, &mut result.timeout, "timeout", TIMEOUT);
-            continue;
-        }
-
-        if var == CASES {
-            parse_or_warn(&raw_value, &mut result.cases, "u32", CASES);
-        } else if var == MAX_LOCAL_REJECTS {
-            parse_or_warn(
-                &raw_value,
-                &mut result.max_local_rejects,
-                "u32",
-                MAX_LOCAL_REJECTS,
-            );
-        } else if var == MAX_GLOBAL_REJECTS {
-            parse_or_warn(
-                &raw_value,
-                &mut result.max_global_rejects,
-                "u32",
-                MAX_GLOBAL_REJECTS,
-            );
-        } else if var == MAX_FLAT_MAP_REGENS {
-            parse_or_warn(
-                &raw_value,
-                &mut result.max_flat_map_regens,
-                "u32",
-                MAX_FLAT_MAP_REGENS,
-            );
-        } else if var == MAX_SHRINK_TIME {
-            parse_or_warn(
-                &raw_value,
-                &mut result.max_shrink_time,
-                "u32",
-                MAX_SHRINK_TIME,
-            );
-        } else if var == MAX_SHRINK_ITERS {
-            parse_or_warn(
-                &raw_value,
-                &mut result.max_shrink_iters,
-                "u32",
-                MAX_SHRINK_ITERS,
-            );
-        } else if var == MAX_DEFAULT_SIZE_RANGE {
-            parse_or_warn(
-                &raw_value,
-                &mut result.max_default_size_range,
-                "usize",
-                MAX_DEFAULT_SIZE_RANGE,
-            );
-        } else if var == VERBOSE {
-            parse_or_warn(&raw_value, &mut result.verbose, "u32", VERBOSE);
-        } else if var == RNG_ALGORITHM {
-            parse_or_warn(
-                &raw_value,
-                &mut result.rng_algorithm,
-                "RngAlgorithm",
-                RNG_ALGORITHM,
-            );
-        } else if var == RNG_SEED {
-            parse_or_warn(&raw_value, &mut result.rng_seed, "u64", RNG_SEED);
-        } else if var == DISABLE_FAILURE_PERSISTENCE {
-            result.failure_persistence = None;
-        } else if var.starts_with("PROPTEST_") {
-            crate::test_runner::diagnostics::emit(
-                crate::test_runner::diagnostics::RunnerDiagnostic::EnvVarUnknown {
-                    var: var.to_string(),
-                },
-            );
-        }
+    for (env_var_name, raw_value) in
+        env::vars_os().filter_map(|(name, os_value)| {
+            name.into_string().ok().map(|env_name| (env_name, os_value))
+        })
+    {
+        apply_env_var(env_var_name.as_str(), &raw_value, &mut result);
     }
 
     result
 }
 
+/// Parse a typed config value from an environment variable, reporting a
+/// structured runner diagnostic when parsing fails.
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+fn parse_or_warn<T: str::FromStr + fmt::Display>(
+    raw_value: &OsString,
+    dst: &mut T,
+    typ: &'static str,
+    var: &'static str,
+) {
+    use crate::test_runner::diagnostics::{self, RunnerDiagnostic};
+    use std::borrow::ToOwned as _;
+    use std::string::ToString as _;
+
+    if let Some(source_text) = raw_value.to_str() {
+        if let Ok(parsed) = source_text.parse() {
+            *dst = parsed;
+        } else {
+            diagnostics::emit(&RunnerDiagnostic::EnvVarUnparsable {
+                var,
+                value: source_text.to_owned(),
+                typ,
+                default: dst.to_string(),
+            });
+        }
+    } else {
+        diagnostics::emit(&RunnerDiagnostic::EnvVarNotUnicode {
+            var,
+            default: dst.to_string(),
+        });
+    }
+}
+
+/// Apply one known `PROPTEST_*` environment variable to `result`.
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "centralize the recognized PROPTEST_* env-var decision table and its feature-owned branches"
+)]
+fn apply_env_var(env_var: &str, raw_value: &OsString, result: &mut Config) {
+    match env_var {
+        #[cfg(feature = "fork")]
+        FORK => parse_or_warn(raw_value, &mut result.fork, "bool", FORK),
+        #[cfg(feature = "timeout")]
+        TIMEOUT => {
+            parse_or_warn(raw_value, &mut result.timeout, "timeout", TIMEOUT);
+        }
+        CASES => parse_or_warn(raw_value, &mut result.cases, "u32", CASES),
+        MAX_LOCAL_REJECTS => parse_or_warn(
+            raw_value,
+            &mut result.max_local_rejects,
+            "u32",
+            MAX_LOCAL_REJECTS,
+        ),
+        MAX_GLOBAL_REJECTS => parse_or_warn(
+            raw_value,
+            &mut result.max_global_rejects,
+            "u32",
+            MAX_GLOBAL_REJECTS,
+        ),
+        MAX_FLAT_MAP_REGENS => parse_or_warn(
+            raw_value,
+            &mut result.max_flat_map_regens,
+            "u32",
+            MAX_FLAT_MAP_REGENS,
+        ),
+        MAX_SHRINK_TIME => parse_or_warn(
+            raw_value,
+            &mut result.max_shrink_time,
+            "u32",
+            MAX_SHRINK_TIME,
+        ),
+        MAX_SHRINK_ITERS => parse_or_warn(
+            raw_value,
+            &mut result.max_shrink_iters,
+            "u32",
+            MAX_SHRINK_ITERS,
+        ),
+        MAX_DEFAULT_SIZE_RANGE => parse_or_warn(
+            raw_value,
+            &mut result.max_default_size_range,
+            "usize",
+            MAX_DEFAULT_SIZE_RANGE,
+        ),
+        VERBOSE => {
+            parse_or_warn(raw_value, &mut result.verbose, "u32", VERBOSE);
+        }
+        RNG_ALGORITHM => parse_or_warn(
+            raw_value,
+            &mut result.rng_algorithm,
+            "RngAlgorithm",
+            RNG_ALGORITHM,
+        ),
+        RNG_SEED => {
+            parse_or_warn(raw_value, &mut result.rng_seed, "u64", RNG_SEED);
+        }
+        DISABLE_FAILURE_PERSISTENCE => result.failure_persistence = None,
+        unknown if unknown.starts_with("PROPTEST_") => {
+            use crate::test_runner::diagnostics::{self, RunnerDiagnostic};
+            use std::borrow::ToOwned as _;
+
+            diagnostics::emit(&RunnerDiagnostic::EnvVarUnknown {
+                var: unknown.to_owned(),
+            });
+        }
+        _ => {}
+    }
+}
+
 /// Without the `std` feature this function returns config unchanged.
 #[cfg(not(all(feature = "std", not(target_arch = "wasm32"))))]
+#[must_use = "the environment overlay returns the updated Config"]
+#[allow(
+    clippy::single_call_fn,
+    reason = "preserve the public Config environment-overlay API as a no-op without std env access"
+)]
 pub fn contextualize_config(result: Config) -> Config {
     result
 }
@@ -210,17 +247,15 @@ fn default_default_config() -> Config {
 /// `PROPTEST_*` env overlay exactly once; `Config::default` (under `std`)
 /// hands out clones of this.
 #[cfg(feature = "std")]
-static DEFAULT_CONFIG: std::sync::LazyLock<Config> =
-    std::sync::LazyLock::new(|| {
-        let mut default_config = default_default_config();
-        default_config.failure_persistence = Some(Box::new(
-            crate::test_runner::FileFailurePersistence::default(),
-        ));
-        contextualize_config(default_config)
-    });
+static DEFAULT_CONFIG: LazyLock<Config> = LazyLock::new(|| {
+    let mut default_config = default_default_config();
+    default_config.failure_persistence =
+        Some(Box::new(FileFailurePersistence::default()));
+    contextualize_config(default_config)
+});
 
 /// The seed for the RNG, can either be random or specified as a u64.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RngSeed {
     /// Default case, use a random value
     Random,
@@ -229,17 +264,17 @@ pub enum RngSeed {
 }
 
 impl str::FromStr for RngSeed {
-    type Err = ();
+    type Err = ParseIntError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse::<u64>().map(RngSeed::Fixed).map_err(|_| ())
+        s.parse::<u64>().map(RngSeed::Fixed)
     }
 }
 
 impl fmt::Display for RngSeed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RngSeed::Random => write!(f, "random"),
-            RngSeed::Fixed(n) => write!(f, "{}", n),
+        match *self {
+            Self::Random => write!(f, "random"),
+            Self::Fixed(n) => write!(f, "{n}"),
         }
     }
 }
@@ -278,7 +313,7 @@ pub struct Config {
     /// regenerate values. This puts a limit on the worst-case exponential
     /// explosion that can happen with nested `Flatten`s.
     ///
-    /// The default is 1_000_000, which can be overridden by setting the
+    /// The default is `1_000_000`, which can be overridden by setting the
     /// `PROPTEST_MAX_FLAT_MAP_REGENS` environment variable. (The variable is
     /// only considered when the `std` feature is enabled, which it is by
     /// default.)
@@ -455,7 +490,7 @@ pub struct Config {
     /// which it is by default.)
     pub rng_algorithm: RngAlgorithm,
 
-    /// Seed used for the RNG. Set by using the PROPTEST_RNG_SEED environment variable
+    /// Seed used for the RNG. Set by using the `PROPTEST_RNG_SEED` environment variable
     /// If the environment variable is undefined, a random seed is generated (this is the default option).
     pub rng_seed: RngSeed,
 
@@ -477,31 +512,40 @@ fn result_cache_eq(
     left: fn() -> Box<dyn ResultCache>,
     right: fn() -> Box<dyn ResultCache>,
 ) -> bool {
-    core::ptr::fn_addr_eq(left, right)
+    fn_addr_eq(left, right)
 }
 
 impl PartialEq for Config {
     fn eq(&self, other: &Self) -> bool {
+        #[cfg(feature = "fork")]
+        let fork_fields_eq = self.fork == other.fork;
+        #[cfg(not(feature = "fork"))]
+        let fork_fields_eq = true;
+
+        #[cfg(feature = "timeout")]
+        let timeout_fields_eq = self.timeout == other.timeout;
+        #[cfg(not(feature = "timeout"))]
+        let timeout_fields_eq = true;
+
+        #[cfg(feature = "std")]
+        let std_fields_eq = self.max_shrink_time == other.max_shrink_time
+            && self.verbose == other.verbose;
+        #[cfg(not(feature = "std"))]
+        let std_fields_eq = true;
+
         let fields_eq = self.cases == other.cases
             && self.max_local_rejects == other.max_local_rejects
             && self.max_global_rejects == other.max_global_rejects
             && self.max_flat_map_regens == other.max_flat_map_regens
             && self.failure_persistence == other.failure_persistence
             && self.source_file == other.source_file
-            && self.test_name == other.test_name;
-        #[cfg(feature = "fork")]
-        let fields_eq = fields_eq && self.fork == other.fork;
-        #[cfg(feature = "timeout")]
-        let fields_eq = fields_eq && self.timeout == other.timeout;
-        #[cfg(feature = "std")]
-        let fields_eq =
-            fields_eq && self.max_shrink_time == other.max_shrink_time;
-        let fields_eq = fields_eq
+            && self.test_name == other.test_name
+            && fork_fields_eq
+            && timeout_fields_eq
+            && std_fields_eq
             && self.max_shrink_iters == other.max_shrink_iters
             && self.max_default_size_range == other.max_default_size_range
             && result_cache_eq(self.result_cache, other.result_cache);
-        #[cfg(feature = "std")]
-        let fields_eq = fields_eq && self.verbose == other.verbose;
 
         fields_eq
             && self.rng_algorithm == other.rng_algorithm
@@ -527,15 +571,16 @@ impl Config {
         clippy::single_call_fn,
         reason = "a Config that differs from the default only in its configured case count"
     )]
+    #[must_use]
     pub fn with_cases(cases: u32) -> Self {
         Self {
             cases,
-            ..Config::default()
+            ..Self::default()
         }
     }
 
     /// Constructs a `Config` only differing from the `default()` in the
-    /// source_file of the present test.
+    /// `source_file` of the present test.
     ///
     /// This is simply a more concise alternative to using field-record update
     /// syntax:
@@ -547,15 +592,16 @@ impl Config {
     ///     Config { source_file: Some("computer/question"), .. Config::default() }
     /// );
     /// ```
+    #[must_use]
     pub fn with_source_file(source_file: &'static str) -> Self {
         Self {
             source_file: Some(source_file),
-            ..Config::default()
+            ..Self::default()
         }
     }
 
-    /// Constructs a `Config` only differing from the provided Config instance, `self`,
-    /// in the source_file of the present test.
+    /// Constructs a `Config` only differing from the provided `Config`
+    /// instance, `self`, in the `source_file` of the present test.
     ///
     /// This is simply a more concise alternative to using field-record update
     /// syntax:
@@ -573,6 +619,7 @@ impl Config {
     ///     Config { source_file: Some("answer/42"), .. Config::default() }
     /// );
     /// ```
+    #[must_use]
     pub fn clone_with_source_file(&self, source_file: &'static str) -> Self {
         let mut result = self.clone();
         result.source_file = Some(source_file);
@@ -580,7 +627,7 @@ impl Config {
     }
 
     /// Constructs a `Config` only differing from the `default()` in the
-    /// failure_persistence member.
+    /// `failure_persistence` member.
     ///
     /// This is simply a more concise alternative to using field-record update
     /// syntax:
@@ -609,21 +656,22 @@ impl Config {
     ///
     /// This method exists even if the "fork" feature is disabled, in which
     /// case it simply returns false.
-    pub fn fork(&self) -> bool {
-        self._fork() || self.timeout() > 0
+    #[must_use]
+    pub const fn fork(&self) -> bool {
+        self.raw_fork() || self.timeout() > 0
     }
 
     /// Backing accessor for `fork()`: the raw `fork` field, present only
     /// when the `fork` feature is enabled.
     #[cfg(feature = "fork")]
-    fn _fork(&self) -> bool {
+    const fn raw_fork(&self) -> bool {
         self.fork
     }
 
     /// Backing accessor for `fork()`: always `false` when the `fork`
     /// feature is disabled and there is no `fork` field.
     #[cfg(not(feature = "fork"))]
-    fn _fork(&self) -> bool {
+    const fn raw_fork(&self) -> bool {
         false
     }
 
@@ -632,7 +680,8 @@ impl Config {
     /// This method exists even if the "timeout" feature is disabled, in which
     /// case it simply returns 0.
     #[cfg(feature = "timeout")]
-    pub fn timeout(&self) -> u32 {
+    #[must_use]
+    pub const fn timeout(&self) -> u32 {
         self.timeout
     }
 
@@ -641,14 +690,16 @@ impl Config {
     /// This method exists even if the "timeout" feature is disabled, in which
     /// case it simply returns 0.
     #[cfg(not(feature = "timeout"))]
-    pub fn timeout(&self) -> u32 {
+    #[must_use]
+    pub const fn timeout(&self) -> u32 {
         0
     }
 
     /// Returns the configured limit on shrinking iterations.
     ///
     /// This takes into account the special "automatic" behaviour.
-    pub fn max_shrink_iters(&self) -> u32 {
+    #[must_use]
+    pub const fn max_shrink_iters(&self) -> u32 {
         if u32::MAX == self.max_shrink_iters {
             self.cases.saturating_mul(4)
         } else {
@@ -656,10 +707,10 @@ impl Config {
         }
     }
 
-    // Used by macros to force the config to be owned without depending on
-    // certain traits being `use`d.
-    #[allow(missing_docs)]
+    /// Hidden macro helper that clones a config expression without relying on
+    /// `Clone` being imported at the call site.
     #[doc(hidden)]
+    #[must_use]
     pub fn __sugar_to_owned(&self) -> Self {
         self.clone()
     }

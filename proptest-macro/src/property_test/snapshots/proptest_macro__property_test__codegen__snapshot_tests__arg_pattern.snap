@@ -1,22 +1,23 @@
 ---
-source: proptest-macro/src/property_test/codegen/mod.rs
+source: proptest-macro/src/property_test/codegen.rs
+assertion_line: 255
 expression: formatted
 ---
 #[test]
 fn foo() -> ::proptest::strict::TestResult {
     #[derive(Debug)]
     struct FooArgs {
-        x: i32,
+        arg0: (i32, i32),
     }
     impl ::proptest::prelude::Arbitrary for FooArgs {
         type Parameters = ();
         type Strategy = ::proptest::strategy::Map<
-            ::proptest::arbitrary::StrategyFor<(i32,)>,
-            fn((i32,)) -> Self,
+            ::proptest::arbitrary::StrategyFor<((i32, i32),)>,
+            fn(((i32, i32),)) -> Self,
         >;
         fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
             use ::proptest::strategy::Strategy;
-            ::proptest::prelude::any::<(i32,)>().prop_map(|(x,)| Self { x })
+            ::proptest::prelude::any::<((i32, i32),)>().prop_map(|(arg0,)| Self { arg0 })
         }
     }
     let strategy = ::proptest::strategy::Strategy::prop_map(
@@ -26,8 +27,8 @@ fn foo() -> ::proptest::strict::TestResult {
     ::proptest::strict::ensure_property(
         &strategy,
         concat!(module_path!(), "::", stringify!(foo)),
-        |::proptest::sugar::NamedArguments(_, FooArgs { x })| {
-            let _ = x;
+        |::proptest::sugar::NamedArguments(_, FooArgs { arg0: (x, y) })| {
+            let _product = x * y;
             Ok(())
         },
     )

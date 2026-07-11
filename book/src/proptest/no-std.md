@@ -14,14 +14,17 @@ default-features = false
 
 # alloc: Use the `alloc` crate directly. Proptest has a hard requirement on
 # memory allocation, so either this or `std` is needed.
+# libm: Use `num-traits`' libm-backed float math without enabling `std`.
 # unstable: Enable use of nightly-only compiler features.
-features = ["no_std", "alloc", "unstable"]
+features = ["libm", "alloc", "unstable"]
 ```
 
-Some APIs are not available in the `no_std` build. This includes functionality
+Some APIs are not available in the no-`std` build. This includes functionality
 which necessarily needs `std` such as failure persistence and forking, as well
-as features depending on other crates which do not support `no_std` usage, such
-as regex support.
+as features depending on other crates which do not support no-`std` usage, such
+as regex support. Use `default-features = false` for a no-`std` build, add
+`alloc` when allocation-backed APIs are needed, and add `libm` when float math
+from `num-traits` is needed without `std`.
 
 The `no_std` build may not have access to an entropy source (one exception are
 x86-64 machines that support rdrand, in this case the library can be compiled

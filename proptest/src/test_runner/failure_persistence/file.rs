@@ -9,18 +9,18 @@
 
 use core::any::Any;
 use core::fmt::Debug;
-use std::borrow::{Cow, ToOwned};
+use std::borrow::{Cow, ToOwned as _};
 use std::boxed::Box;
 use std::env;
 use std::format;
 use std::fs;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead as _, Write as _};
 use std::path::{Path, PathBuf};
-use std::string::{String, ToString};
+use std::string::{String, ToString as _};
 use std::vec;
 use std::vec::Vec;
 
-use self::FileFailurePersistence::*;
+use self::FileFailurePersistence::{Direct, Off, SourceParallel, WithSource};
 use crate::test_runner::diagnostics::{self, RunnerDiagnostic};
 use crate::test_runner::failure_persistence::{
     FailurePersistence, PersistedSeed,
@@ -90,30 +90,34 @@ impl FailurePersistence for FileFailurePersistence {
         });
         let resolved = self.resolve(source.as_deref());
 
-        let path: Option<&PathBuf> = resolved.as_ref();
-        let result: io::Result<Vec<PersistedSeed>> = path.map_or_else(
-            || Ok(vec![]),
-            |path| {
-                // Reads run unserialized against concurrent appends: every
-                // record is appended as one whole line, and a torn or
-                // in-flight trailing line is skipped by `parse_seed_line`
-                // (with a warning), so the worst case is missing a seed that
-                // was persisted mid-load.
-                io::BufReader::new(fs::File::open(path)?)
-                    .lines()
-                    .enumerate()
-                    .filter_map(|(lineno, line)| match line {
-                        Err(err) => Some(Err(err)),
-                        Ok(line) => parse_seed_line(line, path, lineno).map(Ok),
-                    })
-                    .collect()
-            },
-        );
+        let persistence_path: Option<&PathBuf> = resolved.as_ref();
+        let result: io::Result<Vec<PersistedSeed>> = persistence_path
+            .map_or_else(
+                || Ok(vec![]),
+                |path| {
+                    // Reads run unserialized against concurrent appends: every
+                    // record is appended as one whole line, and a torn or
+                    // in-flight trailing line is skipped by `parse_seed_line`
+                    // (with a warning), so the worst case is missing a seed that
+                    // was persisted mid-load.
+                    io::BufReader::new(fs::File::open(path)?)
+                        .lines()
+                        .enumerate()
+                        .filter_map(|(lineno, line_result)| match line_result {
+                            Err(err) => Some(Err(err)),
+                            Ok(seed_line_text) => {
+                                parse_seed_line(&seed_line_text, path, lineno)
+                                    .map(Ok)
+                            }
+                        })
+                        .collect()
+                },
+            );
 
         unwrap_or!(result, err => {
             if io::ErrorKind::NotFound != err.kind() {
-                diagnostics::emit(RunnerDiagnostic::PersistenceOpenFailed {
-                    path: path.cloned(),
+                diagnostics::emit(&RunnerDiagnostic::PersistenceOpenFailed {
+                    path: persistence_path.cloned(),
                     error: err,
                 });
             }
@@ -127,21 +131,21 @@ impl FailurePersistence for FileFailurePersistence {
         seed: PersistedSeed,
         shrunken_value: &dyn Debug,
     ) {
-        let path = self.resolve(source_file.map(Path::new));
-        if let Some(path) = path {
+        let resolved_path = self.resolve(source_file.map(Path::new));
+        if let Some(path) = resolved_path {
             let line = seed_line(&seed, shrunken_value);
 
             match write_seed_data_to_file(&path, line.as_bytes()) {
                 Err(error) => {
                     diagnostics::emit(
-                        RunnerDiagnostic::PersistenceAppendFailed {
+                        &RunnerDiagnostic::PersistenceAppendFailed {
                             path,
                             error,
                         },
                     );
                 }
                 Ok(is_new) => {
-                    diagnostics::emit(RunnerDiagnostic::PersistenceSaved {
+                    diagnostics::emit(&RunnerDiagnostic::PersistenceSaved {
                         path,
                         created: is_new,
                         seed: seed.to_string(),
@@ -182,7 +186,7 @@ impl FailurePersistence for FileFailurePersistence {
 /// This is normally called automatically by the `proptest!` macro, which
 /// passes `file!()`.
 ///
-fn absolutize_source_file<'a>(source: &'a Path) -> Option<Cow<'a, Path>> {
+fn absolutize_source_file(source: &Path) -> Option<Cow<'_, Path>> {
     absolutize_source_file_with_cwd(env::current_dir, source)
 }
 
@@ -197,10 +201,10 @@ fn absolutize_source_file<'a>(source: &'a Path) -> Option<Cow<'a, Path>> {
     clippy::single_call_fn,
     reason = "absolutize a relative source path by walking cwd upward with an injectable getcwd for tests"
 )]
-fn absolutize_source_file_with_cwd<'a>(
+fn absolutize_source_file_with_cwd(
     getcwd: impl FnOnce() -> io::Result<PathBuf>,
-    source: &'a Path,
-) -> Option<Cow<'a, Path>> {
+    source: &Path,
+) -> Option<Cow<'_, Path>> {
     if source.is_absolute() {
         // On Unix, `file!()` is absolute. In these cases, we can use
         // that path directly.
@@ -225,7 +229,7 @@ fn absolutize_source_file_with_cwd<'a>(
 
                 if !cwd.pop() {
                     diagnostics::emit(
-                        RunnerDiagnostic::SourceNotAbsolutizable {
+                        &RunnerDiagnostic::SourceNotAbsolutizable {
                             source: source.to_path_buf(),
                         },
                     );
@@ -234,7 +238,7 @@ fn absolutize_source_file_with_cwd<'a>(
             },
 
             Err(error) => {
-                diagnostics::emit(RunnerDiagnostic::CwdUnresolvable {
+                diagnostics::emit(&RunnerDiagnostic::CwdUnresolvable {
                     source: source.to_path_buf(),
                     error,
                 });
@@ -255,21 +259,21 @@ fn absolutize_source_file_with_cwd<'a>(
     reason = "parse one persistence-file line into a PersistedSeed, warning on unparsable lines"
 )]
 fn parse_seed_line(
-    line: String,
+    line: &str,
     path: &Path,
     lineno: usize,
 ) -> Option<PersistedSeed> {
     // Everything from the first '#' on is a comment:
     let seed_text = line
         .split_once('#')
-        .map_or(line.as_str(), |(seed_text, _comment)| seed_text);
+        .map_or(line, |(seed_text, _comment)| seed_text);
 
     if !seed_text.is_empty() {
         let ret = seed_text.parse::<PersistedSeed>().ok();
         if ret.is_none() {
-            diagnostics::emit(RunnerDiagnostic::UnparsableSeedLine {
+            diagnostics::emit(&RunnerDiagnostic::UnparsableSeedLine {
                 path: path.to_path_buf(),
-                line: lineno + 1,
+                line: lineno.saturating_add(1),
             });
         }
         return ret;
@@ -286,9 +290,9 @@ fn parse_seed_line(
     reason = "render one persistence record as the seed plus a single-line shrunk-value comment"
 )]
 fn seed_line(seed: &PersistedSeed, shrunken_value: &dyn Debug) -> String {
-    let comment = format!(" # shrinks to {:?}", shrunken_value)
-        .replace(['\n', '\r'], " ");
-    format!("{}{}\n", seed, comment)
+    let comment =
+        format!(" # shrinks to {shrunken_value:?}").replace(['\n', '\r'], " ");
+    format!("{seed}{comment}\n")
 }
 
 /// The explanatory comment block written once at the top of a new
@@ -329,8 +333,9 @@ fn write_seed_data_to_file(dst: &Path, seed_data: &[u8]) -> io::Result<bool> {
         .open(dst)
     {
         Ok(mut out) => {
-            let mut record =
-                Vec::with_capacity(FILE_HEADER.len() + seed_data.len());
+            let mut record = Vec::with_capacity(
+                FILE_HEADER.len().saturating_add(seed_data.len()),
+            );
             record.extend_from_slice(FILE_HEADER.as_bytes());
             record.extend_from_slice(seed_data);
             out.write_all(&record)?;
@@ -346,20 +351,31 @@ fn write_seed_data_to_file(dst: &Path, seed_data: &[u8]) -> io::Result<bool> {
 }
 
 /// Walk upward from a source file to the directory that contains the crate
-/// root (`lib.rs` or `main.rs`) — the anchor `SourceParallel` mirrors its
-/// sibling tree against. `None` when no crate root exists above the file.
+/// root (`lib.rs` or `main.rs`) and build the source path relative to that
+/// root — the anchor `SourceParallel` mirrors its sibling tree against.
+/// `None` when no crate root exists above the file.
 #[allow(
     clippy::single_call_fn,
-    reason = "walk upward from a source file to the crate root the SourceParallel layout mirrors"
+    reason = "walk upward from a source file while building the relative path SourceParallel mirrors"
 )]
-fn crate_root_dir_above(source_path: &Path) -> Option<PathBuf> {
-    let mut dir = source_path.to_path_buf();
-    while dir.pop() {
+fn crate_root_and_relative_source(
+    source_path: &Path,
+) -> Option<(PathBuf, PathBuf)> {
+    let mut dir = source_path.parent()?.to_path_buf();
+    let mut relative = PathBuf::from(source_path.file_name()?);
+
+    loop {
         if dir.join("lib.rs").is_file() || dir.join("main.rs").is_file() {
-            return Some(dir);
+            return Some((dir, relative));
+        }
+        let parent_name = dir.file_name()?.to_owned();
+        let mut next_relative = PathBuf::from(parent_name);
+        next_relative.push(relative);
+        relative = next_relative;
+        if !dir.pop() {
+            return None;
         }
     }
-    None
 }
 
 /// Resolve the `SourceParallel` path strategy: mirror the source file's
@@ -372,20 +388,17 @@ fn crate_root_dir_above(source_path: &Path) -> Option<PathBuf> {
 )]
 fn resolve_source_parallel(
     sibling: &'static str,
-    source_path: &Cow<'_, Path>,
+    source_path: &Path,
 ) -> Option<PathBuf> {
-    let Some(dir) = crate_root_dir_above(source_path) else {
-        diagnostics::emit(RunnerDiagnostic::SourceParallelRootless);
-        return WithSource(sibling).resolve(Some(source_path.as_ref()));
+    let Some((dir, suffix)) = crate_root_and_relative_source(source_path)
+    else {
+        diagnostics::emit(&RunnerDiagnostic::SourceParallelRootless);
+        return WithSource(sibling).resolve(Some(source_path));
     };
-    let suffix = source_path
-        .strip_prefix(&dir)
-        .expect("parent of source is not a prefix of it?")
-        .to_owned();
     let mut result = dir;
     // If we've somehow reached the root, or someone gave us a relative path
     // that we've exhausted, just accept creating a subdirectory instead.
-    let _ = result.pop();
+    let _removed_parent = result.pop();
     result.push(sibling);
     result.push(&suffix);
     Some(set_extension_best_effort(result, "txt"))
@@ -402,34 +415,33 @@ impl FileFailurePersistence {
     /// Given the nominal source path, determine the location of the failure
     /// persistence file, if any.
     pub(super) fn resolve(&self, source: Option<&Path>) -> Option<PathBuf> {
-        let source = source.and_then(absolutize_source_file);
+        let absolute_source = source.and_then(absolutize_source_file);
 
         match *self {
             Off => None,
 
-            SourceParallel(sibling) => match source {
-                Some(source_path) => {
-                    resolve_source_parallel(sibling, &source_path)
-                }
-                None => {
+            SourceParallel(sibling) => absolute_source.map_or_else(
+                || {
                     diagnostics::emit(
-                        RunnerDiagnostic::SourceParallelSourceless,
+                        &RunnerDiagnostic::SourceParallelSourceless,
                     );
                     None
-                }
-            },
+                },
+                |source_path| resolve_source_parallel(sibling, &source_path),
+            ),
 
-            WithSource(extension) => match source {
-                Some(source_path) => Some(set_extension_best_effort(
-                    Cow::into_owned(source_path),
-                    extension,
-                )),
-
-                None => {
-                    diagnostics::emit(RunnerDiagnostic::WithSourceSourceless);
+            WithSource(extension) => absolute_source.map_or_else(
+                || {
+                    diagnostics::emit(&RunnerDiagnostic::WithSourceSourceless);
                     None
-                }
-            },
+                },
+                |source_path| {
+                    Some(set_extension_best_effort(
+                        Cow::into_owned(source_path),
+                        extension,
+                    ))
+                },
+            ),
 
             Direct(path) => Some(Path::new(path).to_owned()),
         }
@@ -439,8 +451,11 @@ impl FileFailurePersistence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::iter::once;
+    use std::sync::LazyLock;
     use strict_test_support::{
-        TempDir, TestFailure, ensure, ensure_ok, ensure_some,
+        TempDir, TestFailure, capture_ignored_test, ensure, ensure_contains,
+        ensure_ok, ensure_some,
     };
 
     struct TestPaths {
@@ -450,25 +465,57 @@ mod tests {
         misplaced_file: PathBuf,
     }
 
-    static TEST_PATHS: std::sync::LazyLock<TestPaths> =
-        std::sync::LazyLock::new(|| {
-            let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-            let lib_root = crate_root.join("src");
-            let src_subdir = lib_root.join("strategy");
-            let src_file = lib_root.join("foo.rs");
-            let subdir_file = src_subdir.join("foo.rs");
-            let misplaced_file = crate_root.join("foo.rs");
-            TestPaths {
-                crate_root,
-                src_file,
-                subdir_file,
-                misplaced_file,
-            }
-        });
+    static TEST_PATHS: LazyLock<TestPaths> = LazyLock::new(|| {
+        let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let lib_root = crate_root.join("src");
+        let src_subdir = lib_root.join("strategy");
+        let src_file = lib_root.join("foo.rs");
+        let subdir_file = src_subdir.join("foo.rs");
+        let misplaced_file = crate_root.join("foo.rs");
+        TestPaths {
+            crate_root,
+            src_file,
+            subdir_file,
+            misplaced_file,
+        }
+    });
+
+    const PERSISTENCE_LOCATION_CHILD: &str = "test_runner::failure_persistence::file::tests::\
+         persistence_file_location_resolved_correctly_child";
+    const TORN_LINES_CHILD: &str = "test_runner::failure_persistence::file::tests::\
+         torn_or_garbage_lines_are_skipped_on_read_child";
 
     #[test]
     fn persistence_file_location_resolved_correctly() -> Result<(), TestFailure>
     {
+        let captured = capture_ignored_test(PERSISTENCE_LOCATION_CHILD)?;
+        ensure(
+            captured.status.success(),
+            "the captured persistence-location child passes",
+        )?;
+        ensure_contains(
+            &captured.stderr,
+            "FileFailurePersistence::WithSource set, but no source file known",
+            "WithSource sourceless diagnostic is captured",
+        )?;
+        ensure_contains(
+            &captured.stderr,
+            "FileFailurePersistence::SourceParallel set, but failed to find \
+             lib.rs or main.rs",
+            "SourceParallel rootless diagnostic is captured",
+        )?;
+        ensure_contains(
+            &captured.stderr,
+            "FileFailurePersistence::SourceParallel set, but no source file \
+             known",
+            "SourceParallel sourceless diagnostic is captured",
+        )
+    }
+
+    #[test]
+    #[ignore = "captured by persistence_file_location_resolved_correctly"]
+    fn persistence_file_location_resolved_correctly_child()
+    -> Result<(), TestFailure> {
         // If off, there is never a file
         ensure(Off.resolve(None).is_none(), "Off resolves no path")?;
         ensure(
@@ -494,18 +541,11 @@ mod tests {
         // Accounting for the way absolute paths work on Windows would be more
         // complex, so for now don't test that case.
         #[cfg(unix)]
-        fn absolute_path_case() -> Result<(), TestFailure> {
-            ensure(
-                WithSource("ext").resolve(Some(Path::new("/foo/bar.rs")))
-                    == Some(Path::new("/foo/bar.ext").to_owned()),
-                "WithSource swaps only the extension",
-            )
-        }
-        #[cfg(not(unix))]
-        fn absolute_path_case() -> Result<(), TestFailure> {
-            Ok(())
-        }
-        absolute_path_case()?;
+        ensure(
+            WithSource("ext").resolve(Some(Path::new("/foo/bar.rs")))
+                == Some(Path::new("/foo/bar.ext").to_owned()),
+            "WithSource swaps only the extension",
+        )?;
         #[cfg(unix)]
         ensure(
             WithSource("ext").resolve(Some(Path::new("/")))
@@ -551,12 +591,12 @@ mod tests {
 
     #[test]
     fn relative_source_files_absolutified() -> Result<(), TestFailure> {
-        const TEST_RUNNER_PATH: &[&str] = &["src", "test_runner", "mod.rs"];
-        static TEST_RUNNER_RELATIVE: std::sync::LazyLock<PathBuf> =
-            std::sync::LazyLock::new(|| TEST_RUNNER_PATH.iter().collect());
+        const TEST_RUNNER_PATH: &[&str] = &["src", "test_runner.rs"];
+        static TEST_RUNNER_RELATIVE: LazyLock<PathBuf> =
+            LazyLock::new(|| TEST_RUNNER_PATH.iter().collect());
         const CARGO_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
-        let expected = ::std::iter::once(CARGO_DIR)
+        let expected = once(CARGO_DIR)
             .chain(TEST_RUNNER_PATH.iter().copied())
             .collect::<PathBuf>();
 
@@ -599,9 +639,7 @@ mod tests {
         Ok(contents
             .lines()
             .enumerate()
-            .filter_map(|(lineno, line)| {
-                parse_seed_line(line.to_owned(), path, lineno)
-            })
+            .filter_map(|(lineno, line)| parse_seed_line(line, path, lineno))
             .collect())
     }
 
@@ -688,6 +726,22 @@ mod tests {
 
     #[test]
     fn torn_or_garbage_lines_are_skipped_on_read() -> Result<(), TestFailure> {
+        let captured = capture_ignored_test(TORN_LINES_CHILD)?;
+        ensure(
+            captured.status.success(),
+            "the captured torn-line child passes",
+        )?;
+        ensure_contains(
+            &captured.stderr,
+            "unparsable line, ignoring",
+            "the unparsable-line diagnostic is captured",
+        )
+    }
+
+    #[test]
+    #[ignore = "captured by torn_or_garbage_lines_are_skipped_on_read"]
+    fn torn_or_garbage_lines_are_skipped_on_read_child()
+    -> Result<(), TestFailure> {
         let dir = TempDir::new("persistence-torn")?;
         let path = dir.child("regressions.txt");
 

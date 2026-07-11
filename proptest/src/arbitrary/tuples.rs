@@ -18,37 +18,36 @@ use crate::arbitrary::{Arbitrary, any_with};
 /// strategies is itself a `Strategy`); `arbitrary_with` unpacks the
 /// per-element params and delegates each slot to `any_with`.
 macro_rules! impl_tuple {
-    ($($typ: ident),*) => {
+    ($($typ: ident $value: ident),*) => {
         impl<$($typ : Arbitrary),*> Arbitrary for ($($typ,)*) {
             type Parameters = product_type![$($typ::Parameters),*];
             type Strategy = ($($typ::Strategy,)*);
             fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-                #[allow(non_snake_case)]
-                let product_unpack![$($typ),*] = args;
-                ($(any_with::<$typ>($typ)),*,)
+                let product_unpack![$($value),*] = args;
+                ($(any_with::<$typ>($value)),*,)
             }
         }
     };
 }
 
 arbitrary!((); ());
-impl_tuple!(T0);
-impl_tuple!(T0, T1);
-impl_tuple!(T0, T1, T2);
-impl_tuple!(T0, T1, T2, T3);
-impl_tuple!(T0, T1, T2, T3, T4);
-impl_tuple!(T0, T1, T2, T3, T4, T5);
-impl_tuple!(T0, T1, T2, T3, T4, T5, T6);
-impl_tuple!(T0, T1, T2, T3, T4, T5, T6, T7);
-impl_tuple!(T0, T1, T2, T3, T4, T5, T6, T7, T8);
-impl_tuple!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9);
+impl_tuple!(T0 p0);
+impl_tuple!(T0 p0, T1 p1);
+impl_tuple!(T0 p0, T1 p1, T2 p2);
+impl_tuple!(T0 p0, T1 p1, T2 p2, T3 p3);
+impl_tuple!(T0 p0, T1 p1, T2 p2, T3 p3, T4 p4);
+impl_tuple!(T0 p0, T1 p1, T2 p2, T3 p3, T4 p4, T5 p5);
+impl_tuple!(T0 p0, T1 p1, T2 p2, T3 p3, T4 p4, T5 p5, T6 p6);
+impl_tuple!(T0 p0, T1 p1, T2 p2, T3 p3, T4 p4, T5 p5, T6 p6, T7 p7);
+impl_tuple!(T0 p0, T1 p1, T2 p2, T3 p3, T4 p4, T5 p5, T6 p6, T7 p7, T8 p8);
+impl_tuple!(T0 p0, T1 p1, T2 p2, T3 p3, T4 p4, T5 p5, T6 p6, T7 p7, T8 p8, T9 p9);
 
 #[cfg(test)]
 mod test {
     use strict_test_support::{TestFailure, ensure, ensure_some};
 
     use super::*;
-    use crate::strategy::{Just, Strategy, ValueTree};
+    use crate::strategy::{Just, Strategy as _, ValueTree as _};
     use crate::test_runner::TestRunner;
 
     no_panic_test!(
@@ -63,7 +62,7 @@ mod test {
         type Strategy = Just<Self>;
 
         fn arbitrary_with(param: Self::Parameters) -> Self::Strategy {
-            Just(ParamEcho(param))
+            Just(Self(param))
         }
     }
 

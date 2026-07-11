@@ -26,8 +26,8 @@
 
 use crate::std_facade::fmt;
 
-use crate::strategy::traits::*;
-use crate::test_runner::*;
+use crate::strategy::traits::{NewTree, Strategy, ValueTree};
+use crate::test_runner::{Reason, TestRunner};
 
 //==============================================================================
 // Filter
@@ -55,10 +55,10 @@ pub struct Filter<S, F> {
 impl<S, F> Filter<S, F> {
     /// Adapt strategy `source` to reject values which do not pass `filter`,
     /// using `whence` as the reported reason/location.
-    pub fn new(source: S, whence: Reason, filter: F) -> Self {
+    pub const fn new(source: S, whence: Reason, filter: F) -> Self {
         // NOTE: We don't use universal quantification R: Into<Reason>
         // since the module is not conveniently exposed.
-        Filter {
+        Self {
             source,
             whence,
             fun: filter,
@@ -83,36 +83,34 @@ impl<S: Strategy, F: FilterFn<S::Value> + Clone> Strategy for Filter<S, F> {
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
         loop {
             let source_tree = self.source.new_tree(runner)?;
-            if !self.fun.apply(&source_tree.current()) {
-                runner.reject_local(self.whence.clone())?;
-            } else {
+            if self.fun.apply(&source_tree.current()) {
                 return Ok(Filter {
                     source: source_tree,
                     whence: "unused".into(),
                     fun: self.fun.clone(),
                 });
             }
+            runner.reject_local(self.whence.clone())?;
         }
     }
 }
 
 impl<S: ValueTree, F: FilterFn<S::Value>> Filter<S, F> {
+    /// Return whether the current source value passes this filter.
+    fn accepts_current(&self) -> bool {
+        self.fun.apply(&self.source.current())
+    }
+
     /// After the source shrinks, `complicate()` it back until the predicate
-    /// accepts the current value again.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the source cannot be complicated back into an accepted
-    /// value, which would indicate a broken source `ValueTree`.
-    fn ensure_acceptable(&mut self) {
-        while !self.fun.apply(&self.source.current()) {
+    /// accepts the current value again. If recovery fails, report that this
+    /// shrink step produced no usable change.
+    fn ensure_acceptable(&mut self) -> bool {
+        while !self.accepts_current() {
             if !self.source.complicate() {
-                panic!(
-                    "Unable to complicate filtered strategy \
-                     back into acceptable value"
-                );
+                return false;
             }
         }
+        true
     }
 }
 
@@ -124,21 +122,11 @@ impl<S: ValueTree, F: FilterFn<S::Value>> ValueTree for Filter<S, F> {
     }
 
     fn simplify(&mut self) -> bool {
-        if self.source.simplify() {
-            self.ensure_acceptable();
-            true
-        } else {
-            false
-        }
+        self.source.simplify() && self.ensure_acceptable()
     }
 
     fn complicate(&mut self) -> bool {
-        if self.source.complicate() {
-            self.ensure_acceptable();
-            true
-        } else {
-            false
-        }
+        self.source.complicate() && self.ensure_acceptable()
     }
 }
 
@@ -148,7 +136,7 @@ impl<S: ValueTree, F: FilterFn<S::Value>> ValueTree for Filter<S, F> {
 
 /// Essentially `Fn (T) -> Output`.
 pub trait MapFn<T> {
-    #[allow(missing_docs)]
+    /// The mapped value produced by [`MapFn::apply`].
     type Output: fmt::Debug;
 
     /// Map `T` to `Output`.
@@ -168,8 +156,8 @@ pub struct Map<S, F> {
 
 impl<S, F> Map<S, F> {
     /// Adapt strategy `source` by applying `fun` to values it produces.
-    pub fn new(source: S, fun: F) -> Self {
-        Map { source, fun }
+    pub const fn new(source: S, fun: F) -> Self {
+        Self { source, fun }
     }
 }
 
@@ -217,12 +205,15 @@ impl<I, O: fmt::Debug> MapFn<I> for fn(I) -> O {
     }
 }
 
+/// Function-pointer mapper stored by [`static_map`].
+type StaticMapFn<S, O> = fn(<S as Strategy>::Value) -> O;
+
 /// Wrap `strat` in a `statics::Map` that applies the function pointer `fun`,
 /// letting callers name the resulting type without dynamic dispatch.
 pub(crate) fn static_map<S: Strategy, O: fmt::Debug>(
     strat: S,
-    fun: fn(S::Value) -> O,
-) -> Map<S, fn(S::Value) -> O> {
+    fun: StaticMapFn<S, O>,
+) -> Map<S, StaticMapFn<S, O>> {
     Map::new(strat, fun)
 }
 
@@ -235,6 +226,8 @@ mod test {
     use strict_test_support::{TestFailure, ensure, ensure_some};
 
     use super::*;
+    use crate::strict::ensure_property;
+    use crate::test_runner::test_runner_without_persistence;
 
     #[test]
     fn test_static_filter() -> Result<(), TestFailure> {
@@ -242,32 +235,32 @@ mod test {
         struct MyFilter;
         impl FilterFn<i32> for MyFilter {
             fn apply(&self, &candidate: &i32) -> bool {
-                0 == candidate % 3
+                0 == candidate.rem_euclid(3)
             }
         }
 
-        let input = Filter::new(0..256, "%3".into(), MyFilter);
+        let input = Filter::new(0..256_i32, "%3".into(), MyFilter);
 
         for _ in 0..256 {
-            let mut runner = TestRunner::default();
+            let mut runner = test_runner_without_persistence();
             let mut case = ensure_some(
                 input.new_tree(&mut runner).ok(),
                 "static filter generates a value tree",
             )?;
 
             ensure(
-                0 == case.current() % 3,
+                0 == case.current().rem_euclid(3),
                 "the generated value satisfies the filter",
             )?;
 
             while case.simplify() {
                 ensure(
-                    0 == case.current() % 3,
+                    0 == case.current().rem_euclid(3),
                     "every simplified value satisfies the filter",
                 )?;
             }
             ensure(
-                0 == case.current() % 3,
+                0 == case.current().rem_euclid(3),
                 "the fully simplified value satisfies the filter",
             )?;
         }
@@ -285,12 +278,14 @@ mod test {
             }
         }
 
-        let input = Map::new(0..10, MyMap);
+        let input = Map::new(0..10_i32, MyMap);
 
-        crate::strict::ensure_property(
+        ensure_property(
             &input,
             "the static map applies its function to every value",
-            |mapped| ensure(0 == mapped % 2, "the mapped value is even"),
+            |mapped| {
+                ensure(0 == mapped.rem_euclid(2), "the mapped value is even")
+            },
         )
     }
 }

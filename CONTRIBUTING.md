@@ -25,7 +25,7 @@ The following will usually be accepted as new features:
   module is an example of such an accepted feature.
 
 - Features which enable Proptest to be used in a context where it formerly was
-  not. `no_std` is an example.
+  not. no-`std` support is an example.
 
 - Quality of life improvements, such as adding new forms for the macros or
   adding convenience functions.
@@ -105,7 +105,7 @@ worry about it too much unless that fails.
 
 You need to use the latest nightly for the following:
 
-- Working on nightly-only proptest features, including `no_std` support.
+- Working on nightly-only proptest features, including no-`std` support.
 
 - Testing `proptest-derive`.
 
@@ -121,8 +121,9 @@ To test the `proptest` crate, simply run `cargo test -p proptest`. If you are
 working on something not in the default proptest feature set, refer to
 `.travis.yml` for examples of how to test those features.
 
-The test code for `proptest` has not been updated to work on `no_std`. Since
-`no_std` does not add novel code, we currently only test that it compiles.
+The test code for `proptest` has not been updated to work without `std`. Since
+the no-`std` build mode does not add novel code, we currently only test that it
+compiles.
 
 Testing the `proptest-derive` crate currently requires nightly. Assuming you
 are using `rustup`, you can run its tests with

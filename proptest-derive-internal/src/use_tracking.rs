@@ -12,8 +12,10 @@
 
 use std::borrow::Borrow;
 use std::collections::HashSet;
+use std::iter::once;
 
 use syn::Token;
+use syn::visit::{Visit, visit_path, visit_type, visit_type_path};
 
 use crate::attr;
 use crate::error::{Ctx, DeriveResult};
@@ -82,12 +84,11 @@ impl UseTracker {
     /// If the tracker does not know about the name, it is not
     /// a type variable and this call has no effect.
     fn use_tyvar(&mut self, tyvar: impl Borrow<syn::Ident>) {
-        let tyvar = tyvar.borrow();
+        let tyvar_ident = tyvar.borrow();
         if self.track
-            && let Some(used) = self
-                .used_map
-                .iter_mut()
-                .find_map(|(ty, used)| (ty == tyvar).then_some(used))
+            && let Some(used) = self.used_map.iter_mut().find_map(|entry| {
+                (entry.0 == *tyvar_ident).then_some(&mut entry.1)
+            })
         {
             *used = true;
         }
@@ -95,7 +96,8 @@ impl UseTracker {
 
     /// Returns true iff the type variable given exists.
     fn has_tyvar(&self, ty_var: impl Borrow<syn::Ident>) -> bool {
-        self.used_map.iter().any(|(ty, _)| ty == ty_var.borrow())
+        let ty_var_ident = ty_var.borrow();
+        self.used_map.iter().any(|entry| entry.0 == *ty_var_ident)
     }
 
     /// Mark the type as used.
@@ -111,8 +113,8 @@ impl UseTracker {
         for_used: &syn::TypeParamBound,
         for_not: Option<syn::TypeParamBound>,
     ) -> DeriveResult<()> {
-        if let Some(for_not) = for_not {
-            self.bound_all_params(ctx, for_used, &for_not)?;
+        if let Some(unused_bound) = for_not {
+            self.bound_all_params(ctx, for_used, &unused_bound)?;
         } else {
             self.bound_used_params_only(for_used);
         }
@@ -123,7 +125,7 @@ impl UseTracker {
                     lifetimes: None,
                     bounded_ty: ty,
                     colon_token: <Token![:]>::default(),
-                    bounds: ::std::iter::once(for_used.clone()).collect(),
+                    bounds: once(for_used.clone()).collect(),
                 })
             }),
         );
@@ -141,7 +143,7 @@ impl UseTracker {
     ) -> DeriveResult<()> {
         self.used_map
             .iter()
-            .map(|(_, used)| used)
+            .map(|entry| &entry.1)
             .zip(self.generics.type_params_mut())
             .try_for_each(|(&used, tv)| {
                 // Steal the attributes:
@@ -157,7 +159,7 @@ impl UseTracker {
     fn bound_used_params_only(&mut self, for_used: &syn::TypeParamBound) {
         self.used_map
             .iter()
-            .map(|(_, used)| used)
+            .map(|entry| &entry.1)
             .zip(self.generics.type_params_mut())
             .for_each(|(&used, tv)| {
                 if used {
@@ -179,7 +181,7 @@ impl UseTracker {
 
 impl UseMarkable for syn::Type {
     fn mark_uses(&self, ut: &mut UseTracker) {
-        syn::visit::visit_type(&mut PathVisitor(ut), self);
+        visit_type(&mut PathVisitor(ut), self);
     }
 }
 
@@ -189,7 +191,7 @@ impl UseMarkable for syn::Type {
 /// `PhantomData<T>` innards.
 struct PathVisitor<'ut>(&'ut mut UseTracker);
 
-impl syn::visit::Visit<'_> for PathVisitor<'_> {
+impl Visit<'_> for PathVisitor<'_> {
     fn visit_macro(&mut self, _: &syn::Macro) {}
 
     fn visit_type_path(&mut self, tpath: &syn::TypePath) {
@@ -197,7 +199,7 @@ impl syn::visit::Visit<'_> for PathVisitor<'_> {
             self.0.use_type(adjust_simple_prj(tpath).into());
             return;
         }
-        syn::visit::visit_type_path(self, tpath);
+        visit_type_path(self, tpath);
     }
 
     fn visit_path(&mut self, path: &syn::Path) {
@@ -210,7 +212,7 @@ impl syn::visit::Visit<'_> for PathVisitor<'_> {
             self.0.use_tyvar(ident);
         }
 
-        syn::visit::visit_path(self, path);
+        visit_path(self, path);
     }
 }
 
@@ -221,7 +223,7 @@ fn matches_prj_tyvar(ut: &mut UseTracker, tpath: &syn::TypePath) -> bool {
     let path = &tpath.path;
     let segs = &path.segments;
 
-    if let Some(qself) = &tpath.qself {
+    if let Some(qself) = tpath.qself.as_ref() {
         // < $qself > :: $path
         if let Some(sub_tp) = extract_path(&qself.ty) {
             return sub_tp.qself.is_none()
@@ -250,7 +252,7 @@ fn matches_prj_tyvar(ut: &mut UseTracker, tpath: &syn::TypePath) -> bool {
     reason = "normalizes a bare-qself associated-type projection into a qself-free path"
 )]
 fn adjust_simple_prj(tpath: &syn::TypePath) -> syn::TypePath {
-    let segments = tpath
+    let source_segments = tpath
         .qself
         .as_ref()
         .filter(|qp| qp.as_token.is_none())
@@ -258,26 +260,27 @@ fn adjust_simple_prj(tpath: &syn::TypePath) -> syn::TypePath {
         .filter(|tp| tp.qself.is_none())
         .map(|tp| &tp.path.segments);
 
-    if let Some(segments) = segments {
-        let tpath = tpath.clone();
-        let mut segments = segments.clone();
-        segments.push_punct(<Token![::]>::default());
-        segments.extend(tpath.path.segments.into_pairs());
-        syn::TypePath {
-            qself: None,
-            path: syn::Path {
-                leading_colon: None,
-                segments,
-            },
-        }
-    } else {
-        tpath.clone()
-    }
+    source_segments.map_or_else(
+        || tpath.clone(),
+        |base_segments| {
+            let base_path = tpath.clone();
+            let mut combined_segments = base_segments.clone();
+            combined_segments.push_punct(<Token![::]>::default());
+            combined_segments.extend(base_path.path.segments.into_pairs());
+            syn::TypePath {
+                qself: None,
+                path: syn::Path {
+                    leading_colon: None,
+                    segments: combined_segments,
+                },
+            }
+        },
+    )
 }
 
 /// Returns the underlying `TypePath` if `ty` is a path type, else `None`.
 const fn extract_path(ty: &syn::Type) -> Option<&syn::TypePath> {
-    if let syn::Type::Path(tpath) = ty {
+    if let syn::Type::Path(ref tpath) = *ty {
         Some(tpath)
     } else {
         None

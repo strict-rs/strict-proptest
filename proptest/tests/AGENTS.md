@@ -4,7 +4,7 @@ This file provides guidance to coding agents when working with code in this repo
 
 Scope: `proptest/tests/` — the core crate's integration tests. (The bulk of the test suite is inline `#[cfg(test)]` modules inside `src/`; only the items below live out here.) For shared conventions see the workspace-root `AGENTS.md`.
 
-Everything in this directory tests the `#[property_test]` attribute macro from the *consumer* side — the macro is re-exported as `proptest::property_test` only under the `attr-macro` feature, so all of it is feature-gated. The macro's own token expansion is snapshot-tested separately over in `proptest-macro/`; here we check that real annotated functions compile and behave.
+This directory holds consumer-side integration and compile fixtures. The `attr_macro.rs`, `pass/`, and `fail/` paths test the `#[property_test]` attribute macro, which is re-exported as `proptest::property_test` only under the `attr-macro` feature. The `sugar/` paths test exported declarative macros that are available from the core crate without `attr-macro`. The attribute macro's own token expansion is snapshot-tested separately over in `proptest-macro/`; here we check that real consumer code compiles and behaves.
 
 ## Targets
 
@@ -47,6 +47,41 @@ Compile-fail fixtures (`fail/`), each pinning a diagnostic in its `.stderr`:
 - `unit_body.rs` — a `()` property body → the strict return-type rejection ("strict property tests must return `Result<(), TestFailure>` …").
 - `explicit_unit_return.rs` — a literal `-> ()` → the same rejection, spanned on the return type.
 - `invalid_proptest_path.rs` — `proptest_path = actually::a::function()` → the options diagnostic ("argument to `proptest_path` must be a path to the proptest crate, …").
+
+### `sugar/` — always-on trybuild fixtures
+
+The `sugar/pass/` and `sugar/fail/` fixtures are compiled by the always-on `sugar_macro_compile_tests()` unit test in `src/lib.rs`. Run them through the ordinary core lib tests:
+
+```sh
+cargo test -p proptest sugar_macro_compile_tests
+```
+
+The pass fixtures build and execute strategies from an external-crate perspective:
+
+- `prop_compose_ffi_one_layer.rs` — a one-layer `prop_compose_ffi!` builder with a scalar C-ABI mapper; `main()` draws a deterministic sample and checks the mapper received both the generated value and the builder argument.
+- `prop_compose_ffi_two_layer.rs` — a two-layer `prop_compose_ffi!` builder where the second layer depends on the first; `main()` draws a deterministic sample and checks the mapper received the dependent scalar values.
+- `prop_compose_ffi_typed_arguments.rs` — a two-layer `prop_compose_ffi!` builder using typed strategy arguments; `main()` draws a deterministic sample and checks the mapper received generated values plus the builder argument.
+
+The fail fixtures pin the negative macro contract:
+
+- `prop_compose_rejects_bracketed_modifier.rs` — `prop_compose! { [extern "C"] fn ... }` fails with the targeted diagnostic directing users to `prop_compose_ffi!`.
+- `prop_compose_ffi_rejects_rust_abi.rs` — a `prop_compose_ffi!` mapper with a Rust-only `Vec<i32>` parameter under `#![deny(improper_ctypes_definitions)]` fails because the mapper is a real `extern "C"` item.
+
+### `prelude/` — always-on trybuild fixtures
+
+The `prelude/pass/` and `prelude/fail/` fixtures are compiled by the always-on `prelude_compile_tests()` unit test in `src/lib.rs`. Run them through the ordinary core lib tests:
+
+```sh
+cargo test -p proptest prelude_compile_tests
+```
+
+The pass fixture pins the current rand prelude surface:
+
+- `rng_traits.rs` — `prelude::*` brings both `Rng` and `RngExt` into scope, so a consumer can name the `Rng` trait and call `RngExt` methods on the runner RNG.
+
+The fail fixture pins the removed compatibility surface:
+
+- `rng_core_removed.rs` — `prelude::*` no longer provides the deprecated `RngCore` re-export.
 
 ## Note
 

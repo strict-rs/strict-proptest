@@ -9,8 +9,10 @@
 
 use crate::std_facade::{Arc, fmt};
 
-use crate::strategy::traits::*;
-use crate::test_runner::*;
+use crate::strategy::traits::{NewTree, Strategy, ValueTree};
+#[cfg(test)]
+use crate::strategy::{CheckStrategySanityOptions, check_strategy_sanity};
+use crate::test_runner::{Reason, TestRunner};
 
 /// `Strategy` and `ValueTree` filter adaptor.
 ///
@@ -54,7 +56,7 @@ impl<S: fmt::Debug, F> fmt::Debug for Filter<S, F> {
 
 impl<S: Clone, F> Clone for Filter<S, F> {
     fn clone(&self) -> Self {
-        Filter {
+        Self {
             source: self.source.clone(),
             whence: "unused".into(),
             fun: Arc::clone(&self.fun),
@@ -69,36 +71,34 @@ impl<S: Strategy, F: Fn(&S::Value) -> bool> Strategy for Filter<S, F> {
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
         loop {
             let source_tree = self.source.new_tree(runner)?;
-            if !(self.fun)(&source_tree.current()) {
-                runner.reject_local(self.whence.clone())?;
-            } else {
+            if (self.fun)(&source_tree.current()) {
                 return Ok(Filter {
                     source: source_tree,
                     whence: self.whence.clone(),
                     fun: Arc::clone(&self.fun),
                 });
             }
+            runner.reject_local(self.whence.clone())?;
         }
     }
 }
 
 impl<S: ValueTree, F: Fn(&S::Value) -> bool> Filter<S, F> {
+    /// Return whether the current source value passes this filter.
+    fn accepts_current(&self) -> bool {
+        (self.fun)(&self.source.current())
+    }
+
     /// After the source shrinks, `complicate()` it back until the predicate
-    /// accepts the current value again.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the source cannot be complicated back into an accepted
-    /// value, which would indicate a broken source `ValueTree`.
-    fn ensure_acceptable(&mut self) {
-        while !(self.fun)(&self.source.current()) {
+    /// accepts the current value again. If no accepted value can be recovered,
+    /// report that this shrink step produced no usable change.
+    fn ensure_acceptable(&mut self) -> bool {
+        while !self.accepts_current() {
             if !self.source.complicate() {
-                panic!(
-                    "Unable to complicate filtered strategy \
-                     back into acceptable value"
-                );
+                return false;
             }
         }
+        true
     }
 }
 
@@ -110,21 +110,11 @@ impl<S: ValueTree, F: Fn(&S::Value) -> bool> ValueTree for Filter<S, F> {
     }
 
     fn simplify(&mut self) -> bool {
-        if self.source.simplify() {
-            self.ensure_acceptable();
-            true
-        } else {
-            false
-        }
+        self.source.simplify() && self.ensure_acceptable()
     }
 
     fn complicate(&mut self) -> bool {
-        if self.source.complicate() {
-            self.ensure_acceptable();
-            true
-        } else {
-            false
-        }
+        self.source.complicate() && self.ensure_acceptable()
     }
 }
 
@@ -133,31 +123,33 @@ mod test {
     use strict_test_support::{TestFailure, ensure, ensure_some};
 
     use super::*;
+    use crate::test_runner::test_runner_without_persistence;
 
     #[test]
     fn test_filter() -> Result<(), TestFailure> {
-        let input = (0..256).prop_filter("%3", |&candidate| 0 == candidate % 3);
+        let input = (0..256_i32)
+            .prop_filter("%3", |&candidate| 0 == candidate.rem_euclid(3));
 
         for _ in 0..256 {
-            let mut runner = TestRunner::default();
+            let mut runner = test_runner_without_persistence();
             let mut case = ensure_some(
                 input.new_tree(&mut runner).ok(),
                 "filter strategy generates a value tree",
             )?;
 
             ensure(
-                0 == case.current() % 3,
+                0 == case.current().rem_euclid(3),
                 "the generated value satisfies the filter",
             )?;
 
             while case.simplify() {
                 ensure(
-                    0 == case.current() % 3,
+                    0 == case.current().rem_euclid(3),
                     "every simplified value satisfies the filter",
                 )?;
             }
             ensure(
-                0 == case.current() % 3,
+                0 == case.current().rem_euclid(3),
                 "the fully simplified value satisfies the filter",
             )?;
         }
@@ -165,15 +157,16 @@ mod test {
     }
 
     #[test]
-    fn test_filter_sanity() {
+    fn test_filter_sanity() -> Result<(), Reason> {
         check_strategy_sanity(
-            (0..256).prop_filter("!%5", |&candidate| 0 != candidate % 5),
+            (0..256_i32)
+                .prop_filter("!%5", |&candidate| 0 != candidate.rem_euclid(5)),
             Some(CheckStrategySanityOptions {
                 // Due to internal rejection sampling, `simplify()` can
                 // converge back to what `complicate()` would do.
                 strict_complicate_after_simplify: false,
                 ..CheckStrategySanityOptions::default()
             }),
-        );
+        )
     }
 }

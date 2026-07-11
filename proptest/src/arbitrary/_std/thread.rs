@@ -10,17 +10,18 @@
 //! Arbitrary implementations for `std::thread`.
 
 use crate::std_facade::String;
-use std::thread::*;
+use std::thread::Builder;
 
-use crate::arbitrary::*;
+use crate::arbitrary::{SMapped, arbitrary_with};
 use crate::option::prob;
 use crate::strategy::statics::static_map;
+use crate::string::StringParam;
 
 arbitrary!(Builder, SMapped<(Option<usize>, Option<String>), Self>; {
     let prob = prob(0.7);
     let args = product_pack![
         product_pack![prob, Default::default()],
-        product_pack![prob, Default::default()]
+        product_pack![prob, StringParam::default()]
     ];
     static_map(arbitrary_with(args), |(os, on)| {
         let mut builder = Builder::new();

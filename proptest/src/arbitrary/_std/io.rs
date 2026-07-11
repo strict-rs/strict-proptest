@@ -10,12 +10,23 @@
 //! Arbitrary implementations for `std::io`.
 
 use crate::std_facade::String;
-use std::io::ErrorKind::*;
-use std::io::*;
+use std::io::{
+    BufRead, BufReader, BufWriter, Chain, Cursor, Empty, Error, ErrorKind,
+    ErrorKind::{
+        AddrInUse, AddrNotAvailable, AlreadyExists, BrokenPipe,
+        ConnectionAborted, ConnectionRefused, ConnectionReset, Interrupted,
+        InvalidData, InvalidInput, NotConnected, NotFound, Other,
+        PermissionDenied, TimedOut, UnexpectedEof, WouldBlock, WriteZero,
+    },
+    LineWriter, Lines, Read, Repeat, SeekFrom, Sink, Split, Stderr, Stdin,
+    Stdout, Take, Write, empty, repeat, sink, stderr, stdin, stdout,
+};
 
-use crate::arbitrary::*;
+use crate::arbitrary::{Arbitrary, SMapped, any, arbitrary, arbitrary_with};
 use crate::strategy::statics::static_map;
-use crate::strategy::*;
+use crate::strategy::{
+    Just, Strategy as _, TupleUnion, Union, WeightedStrategy,
+};
 
 // TODO: IntoInnerError
 // Consider: std::io::Initializer
@@ -35,7 +46,7 @@ macro_rules! buffer {
                 arbitrary_with(product_pack![args, Default::default()]),
                 |(inner, cap)| {
                     if let Some(cap) = cap {
-                        $type::with_capacity(cap as usize, inner)
+                        $type::with_capacity(usize::from(cap), inner)
                     } else {
                         $type::new(inner)
                     }
@@ -46,7 +57,7 @@ macro_rules! buffer {
         lift1!([$bound] $type<A>; base =>
             (base, any::<Option<u16>>()).prop_map(|(inner, cap)| {
                 if let Some(cap) = cap {
-                    $type::with_capacity(cap as usize, inner)
+                    $type::with_capacity(usize::from(cap), inner)
                 } else {
                     $type::new(inner)
                 }
@@ -120,15 +131,15 @@ arbitrary!(ErrorKind, Union<Just<Self>>;
     , Other
     , UnexpectedEof
     // TODO: watch this type for variant-additions.
-    ].iter().cloned().map(Just))
+    ].iter().copied().map(Just))
 );
 
 arbitrary!(
     SeekFrom,
     TupleUnion<(
-        WA<SMapped<u64, SeekFrom>>,
-        WA<SMapped<i64, SeekFrom>>,
-        WA<SMapped<i64, SeekFrom>>,
+        WeightedStrategy<SMapped<u64, SeekFrom>>,
+        WeightedStrategy<SMapped<i64, SeekFrom>>,
+        WeightedStrategy<SMapped<i64, SeekFrom>>,
     )>;
     prop_oneof![
         static_map(any::<u64>(), SeekFrom::Start),
@@ -139,7 +150,7 @@ arbitrary!(
 
 arbitrary!(Error, SMapped<(ErrorKind, Option<String>), Self>;
     static_map(arbitrary(), |(kind, os)|
-        if let Some(message) = os { Error::new(kind, message) } else { kind.into() }
+        os.map_or_else(|| kind.into(), |message| Error::new(kind, message))
     )
 );
 

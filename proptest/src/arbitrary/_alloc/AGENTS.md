@@ -2,7 +2,7 @@
 
 This file provides guidance to coding agents when working with code in this repository.
 
-Scope: `proptest/src/arbitrary/_alloc/` — `Arbitrary` implementations for `liballoc` types. This whole module is gated behind `#[cfg(any(feature = "std", feature = "alloc"))]` in `arbitrary/mod.rs`. For the tier split, the `Arbitrary` trait, and the impl/test macros these files lean on, see `../AGENTS.md`; for workspace-wide conventions see the root `AGENTS.md`. The sibling `_core/` (always-on) and `_std/` (`std`-only) tiers hold the other impls.
+Scope: `proptest/src/arbitrary/_alloc/` — `Arbitrary` implementations for `liballoc` types. This whole module is gated behind `#[cfg(any(feature = "std", feature = "alloc"))]` in `arbitrary.rs`. For the tier split, the `Arbitrary` trait, and the impl/test macros these files lean on, see `../AGENTS.md`; for workspace-wide conventions see the root `AGENTS.md`. The sibling `_core/` (always-on) and `_std/` (`std`-only) tiers hold the other impls.
 
 ## The idiom — every file is macro-driven
 
@@ -17,7 +17,7 @@ There is almost no hand-written `impl Arbitrary` here; the files call helper mac
 
 Container `Parameters` follow a convention: `RangedParams1<A> = product_type![SizeRange, A]` and `RangedParams2<A, B> = product_type![SizeRange, A, B]` (a size bound plus the element types' own params), unpacked with `product_unpack!`; the `lift*` impls instead take a bare `SizeRange`.
 
-Note that several targets wired up here are actually `libcore` types (the `ops` ranges, `Bound`, the `char` iterators, `Utf8Error`, `Ordering`, …). They live in the alloc tier rather than `_core/` because their strategies or `lift1!`/`ArbitraryF1` impls allocate — e.g. `ops.rs` shares an `Arc` across a range's endpoint pair and `collections.rs` shares an `Rc` across `Bound`'s arms.
+Note that several targets wired up here are actually `libcore` types (the `ops` ranges, `Bound`, the `char` iterators, `Utf8Error`, `Ordering`, …). They live in the alloc tier rather than `_core/` because their strategies or `lift1!`/`ArbitraryF1` impls allocate — e.g. `ops.rs` shares an `Rc` across a range's endpoint pair and `collections.rs` shares an `Rc` across `Bound`'s arms.
 
 ## std_facade discipline (gotcha)
 
@@ -25,10 +25,10 @@ The crate is `#![no_std]`, so these files import every allocated type (`Box`, `R
 
 ## Modules
 
-- `mod.rs` — declares the submodules; `alloc` is additionally `#[cfg(feature = "unstable")]`, the rest are unconditional within the parent gate.
+- `_alloc.rs` — declares the submodules; `alloc` is additionally `#[cfg(feature = "unstable")]`, the rest are unconditional within the parent gate.
 - `boxed.rs` / `rc.rs` — `Box<A>` / `Rc<A>` via `wrap_from!`. (`rc.rs` notes `Weak` is skipped: with no owned `Rc` alive, `upgrade()` would always be `None`.)
 - `sync.rs` — `Arc<A>` via `wrap_from!`; a local `atomic!` macro maps `any::<base>()` through `Atomic*::new` for `AtomicBool`/`AtomicIsize`/`AtomicUsize` (always), the 8/16/32-bit atomics (under `unstable`), and `AtomicI64`/`AtomicU64` (under `unstable` + `atomic64bit`); `Ordering` is a `prop_oneof!` of its five variants. `AtomicPtr` is deliberately absent (no `Arbitrary for *mut T`).
-- `collections.rs` — the bulk. Local macros `impl_1!` / `dst_wrapped!` / `into_iter_1!` generate, respectively: the owned containers `Vec`, `VecDeque`, `LinkedList`, `BTreeSet`, `BinaryHeap`, and (under `std`) `HashSet`; the DST-slice wrappers `Box<[A]>` / `Rc<[A]>` / `Arc<[A]>` from `Vec<A>`'s strategy (distinct from the sized `Box<A>`/`Rc<A>`/`Arc<A>` in `boxed.rs`/`rc.rs`/`sync.rs`); and each container's `IntoIter`. `HashMap`/`BTreeMap` (and their `IntoIter`) are written out long-hand with both `lift1!` and manual `ArbitraryF2` impls, `HashMap` again `std`-gated. `Bound<A>` is a weighted `prop_oneof!` (2:2:1) over `Included`/`Excluded` (sharing one `Arc`'d inner strategy) and `Unbounded`. `SizeRange`'s own `Arbitrary` lives here too. The actual generators and `*Strategy` types all come from `crate::collection`; this file only attaches the `Arbitrary` family on top.
+- `collections.rs` — the bulk. Local macros `impl_1!` / `dst_wrapped!` / `into_iter_1!` generate, respectively: the owned containers `Vec`, `VecDeque`, `LinkedList`, `BTreeSet`, `BinaryHeap`, and (under `std`) `HashSet`; the DST-slice wrappers `Box<[A]>` / `Rc<[A]>` / `Arc<[A]>` from `Vec<A>`'s strategy (distinct from the sized `Box<A>`/`Rc<A>`/`Arc<A>` in `boxed.rs`/`rc.rs`/`sync.rs`); and each container's `IntoIter`. `HashMap`/`BTreeMap` (and their `IntoIter`) are written out long-hand with both `lift1!` and manual `ArbitraryF2` impls, `HashMap` again `std`-gated. `Bound<A>` is a weighted `prop_oneof!` (2:2:1) over `Included`/`Excluded` (sharing one `Rc`'d inner strategy) and `Unbounded`. `SizeRange`'s own `Arbitrary` lives here too. The actual generators and `*Strategy` types all come from `crate::collection`; this file only attaches the `Arbitrary` family on top.
 - `borrow.rs` — `Cow<'static, B>` for `A: Arbitrary + Borrow<B>`, `B: ToOwned<Owned = A> + ?Sized`, mapping a generated `A` through `Cow::Owned`.
 - `char.rs` — the iterator/error companions of `char`: `EscapeDebug`/`EscapeDefault`/`EscapeUnicode` (and, under `unstable`, `ToLowercase`/`ToUppercase`) via a local `impl_wrap_char!` over `any::<char>()`; `DecodeUtf16` (over a `Vec<u16>` iterator, length capped at `u16::MAX`); `ParseCharError` and `DecodeUtf16Error` constructed by deliberately feeding bad input; `CharTryFromError` under `unstable`. Reuses `crate::collection::vec`.
 - `str.rs` — `ParseBoolError` (the constant `"".parse::<bool>().unwrap_err()`) and `Utf8Error` (builds a `Vec<u8>` of `_` padding plus one of four bad UTF-8 tail sequences chosen by `prop_oneof!`, then takes the `from_utf8` error).

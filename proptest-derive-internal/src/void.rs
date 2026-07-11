@@ -17,7 +17,7 @@
 //! That is, if we state that a type is uninhabited, it is so for sure.
 //! But we can't state that all uninhabited types are uninhabited.
 
-use syn::{self, visit};
+use syn::{self, punctuated::Punctuated, visit};
 
 use crate::interp;
 use crate::util;
@@ -47,7 +47,7 @@ impl IsUninhabited for syn::DataEnum {
     }
 }
 
-impl<P> IsUninhabited for syn::punctuated::Punctuated<syn::Variant, P> {
+impl<P> IsUninhabited for Punctuated<syn::Variant, P> {
     fn is_uninhabited(&self) -> bool {
         self.iter().all(IsUninhabited::is_uninhabited)
     }

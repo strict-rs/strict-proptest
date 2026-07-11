@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Arbitrary implementations for std::borrow.
+//! Arbitrary implementations for `std::borrow`.
 
 use crate::std_facade::fmt;
 use crate::std_facade::{Cow, ToOwned};

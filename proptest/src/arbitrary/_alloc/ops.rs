@@ -9,12 +9,21 @@
 
 //! Arbitrary implementations for `std::ops`.
 
-use crate::std_facade::Arc;
-use core::ops::*;
+use crate::std_facade::Rc;
+#[cfg(feature = "unstable")]
+use core::ops::CoroutineState;
+use core::ops::{
+    Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive,
+};
 
-use crate::arbitrary::*;
+#[cfg(feature = "unstable")]
+use crate::arbitrary::functor;
+use crate::arbitrary::{Arbitrary, SMapped, any_with};
+#[cfg(not(feature = "unstable"))]
+use crate::strategy::Strategy as _;
 use crate::strategy::statics::static_map;
-use crate::strategy::*;
+#[cfg(feature = "unstable")]
+use crate::strategy::{BoxedStrategy, Strategy, TupleUnion, WeightedStrategy};
 
 arbitrary!(RangeFull; ..);
 wrap_ctor!(RangeFrom, |endpoint| endpoint..);
@@ -30,8 +39,8 @@ arbitrary!(
 );
 
 lift1!([PartialOrd] RangeInclusive<A>; base => {
-    let base = Arc::new(base);
-    (base.clone(), base).prop_map(|(first, second)| if second < first { second..=first } else { first..=second })
+    let base = Rc::new(base);
+    (Rc::clone(&base), base).prop_map(|(first, second)| if second < first { second..=first } else { first..=second })
 });
 
 arbitrary!(
@@ -42,14 +51,14 @@ arbitrary!(
 );
 
 lift1!([PartialOrd] Range<A>; base => {
-    let base = Arc::new(base);
-    (base.clone(), base).prop_map(|(first, second)| if second < first { second..first } else { first..second })
+    let base = Rc::new(base);
+    (Rc::clone(&base), base).prop_map(|(first, second)| if second < first { second..first } else { first..second })
 });
 
 #[cfg(feature = "unstable")]
 arbitrary!(
     [Y: Arbitrary, R: Arbitrary] CoroutineState<Y, R>,
-    TupleUnion<(WA<SMapped<Y, Self>>, WA<SMapped<R, Self>>)>,
+    TupleUnion<(WeightedStrategy<SMapped<Y, Self>>, WeightedStrategy<SMapped<R, Self>>)>,
     product_type![Y::Parameters, R::Parameters];
     args => {
         let product_unpack![y, complete_params] = args;

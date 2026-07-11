@@ -12,8 +12,10 @@
 //! There is no explicit "tuple strategy"; simply make a tuple containing the
 //! strategy and that tuple is itself a strategy.
 
-use crate::strategy::*;
-use crate::test_runner::*;
+#[cfg(test)]
+use crate::strategy::check_strategy_sanity;
+use crate::strategy::{NewTree, Strategy, ValueTree};
+use crate::test_runner::TestRunner;
 
 /// Common `ValueTree` implementation for all tuple strategies.
 #[derive(Clone, Copy, Debug)]
@@ -33,8 +35,8 @@ impl<T> TupleValueTree<T> {
     ///
     /// It only makes sense for `inner` to be a tuple of an arity for which the
     /// type implements `ValueTree`.
-    pub fn new(inner: T) -> Self {
-        TupleValueTree {
+    pub const fn new(inner: T) -> Self {
+        Self {
             tree: inner,
             shrinker: 0,
             prev_shrinker: None,
@@ -72,9 +74,9 @@ macro_rules! tuple {
                         if self.tree.$fld.simplify() {
                             self.prev_shrinker = Some(self.shrinker);
                             return true;
-                        } else {
-                            self.shrinker += 1;
                         }
+                        self.shrinker =
+                            self.shrinker.saturating_add(1);
                     }
                 )*
                 false
@@ -86,10 +88,9 @@ macro_rules! tuple {
                         if self.tree.$fld.complicate() {
                             self.shrinker = shrinker;
                             return true;
-                        } else {
-                            self.prev_shrinker = None;
-                            return false;
                         }
+                        self.prev_shrinker = None;
+                        return false;
                     }
                 )*}
                 false
@@ -138,9 +139,33 @@ tuple!(
 
 #[cfg(test)]
 mod test {
+    use crate::test_runner::{Reason, test_runner_without_persistence};
+
     use strict_test_support::{TestFailure, ensure, ensure_some};
 
     use super::*;
+
+    #[allow(
+        clippy::single_call_fn,
+        reason = "the tuple shrink test names the left-to-right minimal failing walk"
+    )]
+    fn shrink_to_minimal_failing_tuple<V, P>(case: &mut V, pass: P)
+    where
+        V: ValueTree<Value = (i32, i32)>,
+        P: Fn((i32, i32)) -> bool,
+    {
+        loop {
+            let advanced = if pass(case.current()) {
+                case.complicate()
+            } else {
+                case.simplify()
+            };
+            if advanced {
+                continue;
+            }
+            break;
+        }
+    }
 
     #[test]
     fn shrinks_fully_ltr() -> Result<(), TestFailure> {
@@ -149,7 +174,7 @@ mod test {
         }
 
         let input = (0..32, 0..32);
-        let mut runner = TestRunner::default();
+        let mut runner = test_runner_without_persistence();
 
         let mut cases_tested = 0;
         for _ in 0..256 {
@@ -162,17 +187,7 @@ mod test {
                 continue;
             }
 
-            loop {
-                if pass(case.current()) {
-                    if !case.complicate() {
-                        break;
-                    }
-                } else {
-                    if !case.simplify() {
-                        break;
-                    }
-                }
-            }
+            shrink_to_minimal_failing_tuple(&mut case, pass);
 
             let last = case.current();
             ensure(!pass(last), "the shrunken case still fails")?;
@@ -194,7 +209,7 @@ mod test {
     }
 
     #[test]
-    fn test_sanity() {
-        check_strategy_sanity((0i32..100, 0i32..1000, 0i32..10000), None);
+    fn test_sanity() -> Result<(), Reason> {
+        check_strategy_sanity((0_i32..100, 0_i32..1000, 0_i32..10000), None)
     }
 }

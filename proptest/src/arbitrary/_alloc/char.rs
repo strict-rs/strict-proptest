@@ -10,9 +10,10 @@
 //! Arbitrary implementations for `std::char`.
 
 use crate::std_facade::Vec;
-use core::char::*;
+#[cfg(feature = "unstable")]
+use core::char::{CharTryFromError, ToLowercase, ToUppercase};
+use core::char::{EscapeDebug, EscapeDefault, EscapeUnicode, ParseCharError};
 use core::iter::once;
-use core::ops::Range;
 
 use crate::collection::vec;
 
@@ -24,11 +25,13 @@ multiplex_alloc! {
 
 /// Upper bound on the length of the `Vec<u16>` fed to `decode_utf16`, capping
 /// generated `DecodeUtf16` inputs at `u16::MAX` code units.
-const VEC_MAX: usize = u16::MAX as usize;
+const VEC_MAX: usize = 65_535;
 
-use crate::arbitrary::*;
+use crate::arbitrary::{SMapped, any};
+#[cfg(feature = "unstable")]
+use crate::strategy::Just;
 use crate::strategy::statics::static_map;
-use crate::strategy::*;
+use crate::strategy::{BoxedStrategy, Strategy as _};
 
 /// Implements `Arbitrary` for a `char`-iterator type produced by a `char`
 /// method.
@@ -56,20 +59,32 @@ arbitrary!(DecodeUtf16<<Vec<u16> as IntoIterator>::IntoIter>,
     static_map(vec(any::<u16>(), ..VEC_MAX), decode_utf16)
 );
 
-arbitrary!(ParseCharError, IndFlatten<Mapped<bool, Just<Self>>>;
-    any::<bool>().prop_ind_flat_map(|is_two|
-        Just((if is_two { "__" } else { "" }).parse::<char>().unwrap_err()))
+arbitrary!(ParseCharError, BoxedStrategy<Self>;
+    static_map(any::<bool>(), |is_two| if is_two { "__" } else { "" })
+        .prop_filter_map(
+            "invalid char source parses to ParseCharError",
+            |source| source.parse::<char>().err(),
+        )
+        .boxed()
 );
 
 #[cfg(feature = "unstable")]
-arbitrary!(CharTryFromError; {
-    use core::convert::TryFrom;
-    char::try_from(0xD800_u32).unwrap_err()
+arbitrary!(CharTryFromError, BoxedStrategy<Self>; {
+    use core::convert::TryFrom as _;
+    Just(0xD800_u32)
+        .prop_filter_map(
+            "surrogate scalar value cannot convert to char",
+            |code| char::try_from(code).err(),
+        )
+        .boxed()
 });
 
-arbitrary!(DecodeUtf16Error, SFnPtrMap<Range<u16>, Self>;
-    static_map(0xD800..0xE000, |x|
-        decode_utf16(once(x)).next().unwrap().unwrap_err())
+arbitrary!(DecodeUtf16Error, BoxedStrategy<Self>;
+    (0xD800_u16..0xE000_u16).prop_filter_map(
+        "surrogate code unit decodes to an error",
+        |code_unit| decode_utf16(once(code_unit)).next()?.err(),
+    )
+    .boxed()
 );
 
 #[cfg(test)]

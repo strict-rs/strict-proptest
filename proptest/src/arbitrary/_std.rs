@@ -9,12 +9,15 @@
 
 //! Arbitrary implementations for libstd.
 
+/// Implements `Arbitrary` for a `std` type with explicit parameters.
 macro_rules! std_arbitrary_with_params {
     ($typ: ty, $strat: ty, $params: ty; $args: ident => $logic: expr) => {
         arbitrary!([] $typ, $strat, $params; $args => $logic);
     };
 }
 
+/// Implements `Arbitrary` for a `std` wrapper built from its default
+/// constructor.
 macro_rules! std_wrap_ctor_default {
     ($wrap: ident) => {
         wrap_ctor!($wrap, $wrap::new);

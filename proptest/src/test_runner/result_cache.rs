@@ -37,8 +37,19 @@ impl<'a> ResultCacheKey<'a> {
     }
 
     /// Return the test input value as an `&dyn Debug`.
+    #[must_use]
     pub fn value_debug(&self) -> &dyn fmt::Debug {
         self.value
+    }
+}
+
+/// Display adapter for hashing a cache key by the wrapped value's `Debug`
+/// representation.
+struct DebugDisplay<'a>(&'a dyn fmt::Debug);
+
+impl fmt::Display for DebugDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.0, f)
     }
 }
 
@@ -71,24 +82,22 @@ struct BasicResultCache {
 #[cfg(feature = "std")]
 impl ResultCache for BasicResultCache {
     fn key(&self, cache_key: &ResultCacheKey<'_>) -> u64 {
+        use crate::std_facade::fmt::Write as _;
         use std::collections::hash_map::DefaultHasher;
-        use std::hash::Hasher;
-        use std::io::{self, Write};
+        use std::hash::Hasher as _;
 
         struct HashWriter(DefaultHasher);
-        impl Write for HashWriter {
-            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-                self.0.write(buf);
-                Ok(buf.len())
-            }
-
-            fn flush(&mut self) -> io::Result<()> {
+        impl fmt::Write for HashWriter {
+            fn write_str(&mut self, fragment: &str) -> fmt::Result {
+                self.0.write(fragment.as_bytes());
                 Ok(())
             }
         }
 
         let mut hash = HashWriter(DefaultHasher::default());
-        write!(hash, "{:?}", cache_key).expect("Debug format returned Err");
+        if write!(hash, "{}", DebugDisplay(cache_key.value_debug())).is_err() {
+            return 0;
+        }
         hash.0.finish()
     }
 
@@ -106,6 +115,7 @@ impl ResultCache for BasicResultCache {
 /// Values are identified by their `Debug` string representation.
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+#[must_use]
 #[allow(
     clippy::single_call_fn,
     reason = "the HashMap-backed ResultCache that Config::result_cache installs"
@@ -115,7 +125,7 @@ pub fn basic_result_cache() -> Box<dyn ResultCache> {
 }
 
 /// The `noop_result_cache` backend: caches nothing.
-pub(crate) struct NoOpResultCache;
+struct NoOpResultCache;
 impl ResultCache for NoOpResultCache {
     fn key(&self, _: &ResultCacheKey<'_>) -> u64 {
         0
@@ -129,6 +139,7 @@ impl ResultCache for NoOpResultCache {
 /// A result cache that does nothing.
 ///
 /// This is the default value of `ProptestConfig.result_cache`.
+#[must_use]
 #[allow(
     clippy::single_call_fn,
     reason = "the do-nothing ResultCache used as Config's out-of-the-box default"
@@ -137,7 +148,8 @@ pub fn noop_result_cache() -> Box<dyn ResultCache> {
     Box::new(NoOpResultCache)
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
+#[cfg(feature = "std")]
 mod tests {
     use strict_test_support::{TestFailure, ensure, ensure_some};
 

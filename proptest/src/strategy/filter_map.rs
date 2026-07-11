@@ -7,12 +7,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{Arc, Cell, fmt};
+use crate::std_facade::{Arc, fmt};
 
-use crate::strategy::traits::*;
-use crate::test_runner::*;
+use crate::strategy::traits::{NewTree, Strategy, ValueTree};
+#[cfg(test)]
+use crate::strategy::{CheckStrategySanityOptions, check_strategy_sanity};
+use crate::test_runner::{Reason, TestRunner};
 
-/// `Strategy` and `ValueTree` filter_map adaptor.
+/// `Strategy` and `ValueTree` `filter_map` adaptor.
 ///
 /// See `Strategy::prop_filter_map()`.
 #[must_use = "strategies do nothing unless used"]
@@ -62,8 +64,9 @@ impl<S: Clone, F> Clone for FilterMap<S, F> {
     }
 }
 
-impl<S: Strategy, F: Fn(S::Value) -> Option<O>, O: fmt::Debug> Strategy
-    for FilterMap<S, F>
+impl<S: Strategy, F: Fn(S::Value) -> Option<O>, O> Strategy for FilterMap<S, F>
+where
+    O: Clone + fmt::Debug,
 {
     type Tree = FilterMapValueTree<S::Tree, F, O>;
     type Value = O;
@@ -72,14 +75,14 @@ impl<S: Strategy, F: Fn(S::Value) -> Option<O>, O: fmt::Debug> Strategy
         loop {
             let source_tree = self.source.new_tree(runner)?;
             if let Some(current) = (self.fun)(source_tree.current()) {
-                return Ok(FilterMapValueTree::new(
-                    source_tree,
-                    &self.fun,
+                return Ok(FilterMapValueTree {
+                    source: source_tree,
                     current,
-                ));
-            } else {
-                runner.reject_local(self.whence.clone())?;
+                    stalled: false,
+                    fun: Arc::clone(&self.fun),
+                });
             }
+            runner.reject_local(self.whence.clone())?;
         }
     }
 }
@@ -88,9 +91,12 @@ impl<S: Strategy, F: Fn(S::Value) -> Option<O>, O: fmt::Debug> Strategy
 pub struct FilterMapValueTree<V, F, O> {
     /// The source value tree being shrunk.
     source: V,
-    /// The mapped output cached after (re)acceptance, so the next `current()`
-    /// need not re-run the closure; emptied once consumed.
-    current: Cell<Option<O>>,
+    /// The mapped output cached after the last accepted source state.
+    current: O,
+    /// Whether an attempted shrink moved the source into an unrecoverable
+    /// rejected state. Once stalled, the tree keeps reporting the cached
+    /// accepted output and stops changing.
+    stalled: bool,
     /// The closure mapping a source value to `Some(output)` or `None`, held
     /// behind an `Arc` so the tree clones cheaply.
     fun: Arc<F>,
@@ -98,9 +104,16 @@ pub struct FilterMapValueTree<V, F, O> {
 
 impl<V: Clone + ValueTree, F: Fn(V::Value) -> Option<O>, O> Clone
     for FilterMapValueTree<V, F, O>
+where
+    O: Clone,
 {
     fn clone(&self) -> Self {
-        Self::new(self.source.clone(), &self.fun, self.fresh_current())
+        Self {
+            source: self.source.clone(),
+            current: self.current.clone(),
+            stalled: self.stalled,
+            fun: Arc::clone(&self.fun),
+        }
     }
 }
 
@@ -109,89 +122,73 @@ impl<V: fmt::Debug, F, O> fmt::Debug for FilterMapValueTree<V, F, O> {
         f.debug_struct("FilterMapValueTree")
             .field("source", &self.source)
             .field("current", &"<current>")
+            .field("stalled", &self.stalled)
             .field("fun", &"<function>")
             .finish()
     }
 }
 
-impl<V: ValueTree, F: Fn(V::Value) -> Option<O>, O>
-    FilterMapValueTree<V, F, O>
+impl<V: ValueTree, F: Fn(V::Value) -> Option<O>, O> FilterMapValueTree<V, F, O>
+where
+    O: Clone,
 {
-    /// Build a value tree over `source`, seeding the cache with the already
-    /// computed `current` output and sharing the mapping closure `fun`.
-    fn new(source: V, fun: &Arc<F>, current: O) -> Self {
-        Self {
-            source,
-            current: Cell::new(Some(current)),
-            fun: Arc::clone(fun),
-        }
+    /// Recompute the mapped output from the source's current value.
+    fn fresh_current(&self) -> Option<O> {
+        (self.fun)(self.source.current())
     }
 
-    /// Recompute the mapped output from the source's current value.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the closure returns `None` for a value it previously
-    /// accepted, which would be an internal logic error.
-    fn fresh_current(&self) -> O {
-        (self.fun)(self.source.current())
-            .expect("internal logic error; this is a bug!")
+    /// Record the mapped output as accepted.
+    fn record_accepted_value(&mut self, current: O) {
+        self.current = current;
     }
 
     /// After the source shrinks, `complicate()` it back until the closure maps
     /// the current value to `Some`, caching that output.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the source cannot be complicated back into an accepted
-    /// value, which would indicate a broken source `ValueTree`.
-    fn ensure_acceptable(&mut self) {
+    /// If no accepted value can be recovered, leave the public value at the
+    /// cached accepted output and report that this shrink step produced no
+    /// usable change.
+    fn ensure_acceptable(&mut self) -> bool {
         loop {
             if let Some(current) = (self.fun)(self.source.current()) {
-                // Found an acceptable element!
-                self.current = Cell::new(Some(current));
-                break;
-            } else if !self.source.complicate() {
-                panic!(
-                    "Unable to complicate filtered strategy \
-                     back into acceptable value"
-                );
+                self.record_accepted_value(current);
+                return true;
+            }
+
+            if !self.source.complicate() {
+                self.stalled = true;
+                return false;
             }
         }
     }
 }
 
-impl<V: ValueTree, F: Fn(V::Value) -> Option<O>, O: fmt::Debug> ValueTree
+impl<V: ValueTree, F: Fn(V::Value) -> Option<O>, O> ValueTree
     for FilterMapValueTree<V, F, O>
+where
+    O: Clone + fmt::Debug,
 {
     type Value = O;
 
     fn current(&self) -> O {
-        // Optimization: we avoid the else branch in most success cases
-        // thereby avoiding to call the closure and the source tree.
-        if let Some(current) = self.current.replace(None) {
-            current
-        } else {
-            self.fresh_current()
+        if self.stalled {
+            return self.current.clone();
         }
+
+        self.fresh_current().unwrap_or_else(|| self.current.clone())
     }
 
     fn simplify(&mut self) -> bool {
-        if self.source.simplify() {
-            self.ensure_acceptable();
-            true
-        } else {
-            false
+        if self.stalled {
+            return false;
         }
+        self.source.simplify() && self.ensure_acceptable()
     }
 
     fn complicate(&mut self) -> bool {
-        if self.source.complicate() {
-            self.ensure_acceptable();
-            true
-        } else {
-            false
+        if self.stalled {
+            return false;
         }
+        self.source.complicate() && self.ensure_acceptable()
     }
 }
 
@@ -200,19 +197,16 @@ mod test {
     use strict_test_support::{TestFailure, ensure_eq, ensure_some};
 
     use super::*;
+    use crate::test_runner::test_runner_without_persistence;
 
     #[test]
     fn test_filter_map() -> Result<(), TestFailure> {
-        let input = (0..256).prop_filter_map("%3 + 1", |candidate| {
-            if 0 == candidate % 3 {
-                Some(candidate + 1)
-            } else {
-                None
-            }
+        let input = (0..256_i32).prop_filter_map("%3 + 1", |candidate| {
+            (candidate.rem_euclid(3) == 0).then_some(candidate + 1)
         });
 
         for _ in 0..256 {
-            let mut runner = TestRunner::default();
+            let mut runner = test_runner_without_persistence();
             let mut case = ensure_some(
                 input.new_tree(&mut runner).ok(),
                 "filter_map strategy generates a value tree",
@@ -220,20 +214,20 @@ mod test {
 
             ensure_eq(
                 &0,
-                &((case.current() - 1) % 3),
+                &(case.current() - 1).rem_euclid(3),
                 "the generated value is a mapped survivor",
             )?;
 
             while case.simplify() {
                 ensure_eq(
                     &0,
-                    &((case.current() - 1) % 3),
+                    &(case.current() - 1).rem_euclid(3),
                     "every simplified value is a mapped survivor",
                 )?;
             }
             ensure_eq(
                 &0,
-                &((case.current() - 1) % 3),
+                &(case.current() - 1).rem_euclid(3),
                 "the fully simplified value is a mapped survivor",
             )?;
         }
@@ -241,14 +235,13 @@ mod test {
     }
 
     #[test]
-    fn test_filter_map_sanity() {
+    fn test_filter_map_sanity() -> Result<(), Reason> {
         check_strategy_sanity(
-            (0..256).prop_filter_map("!%5 * 2", |candidate| {
-                if 0 != candidate % 5 {
-                    Some(candidate * 2)
-                } else {
-                    None
-                }
+            (0..256_i32).prop_filter_map("!%5 * 2", |candidate| {
+                candidate
+                    .rem_euclid(5)
+                    .is_positive()
+                    .then_some(candidate * 2)
             }),
             Some(CheckStrategySanityOptions {
                 // Due to internal rejection sampling, `simplify()` can
@@ -256,6 +249,6 @@ mod test {
                 strict_complicate_after_simplify: false,
                 ..CheckStrategySanityOptions::default()
             }),
-        );
+        )
     }
 }

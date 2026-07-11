@@ -60,7 +60,7 @@ Feature-matrix / no_std builds (compile-only checks — the test suite is **not*
 ```sh
 cargo build -p proptest --no-default-features --features std
 cargo build -p proptest --no-default-features --features fork
-cargo +nightly build -p proptest --no-default-features --features "no_std alloc unstable hardware-rng"
+cargo +nightly build -p proptest --no-default-features --features "alloc unstable libm hardware-rng"
 ./prerelease-checks.sh   # cross-compiles no_std to thumbv7em + wasm32 (needs those targets + nightly)
 ```
 
@@ -70,6 +70,13 @@ Failure-persistence tests are **not** part of `cargo test`; run them directly:
 cd proptest/test-persistence-location && ./run-tests.sh
 ```
 
+## Strict ecosystem refactor reasoning
+
+- Treat diagnostics as symptoms, not architecture. Before fixing a compile warning, Clippy warning, generated-code lint, mutation survivor, coverage gap, or test-fixture lint locally, identify the upstream owner of the shape: generator, macro expansion, parser model, API boundary, feature split, build workflow, or test harness.
+- Do not rationalize new `#[allow]` / `#[expect]`, lint-policy changes, static exclusions, generated-output edits, compatibility shims, or non-idiomatic test fixtures because the current command is narrower, the allowance was pre-existing, or the problematic code is generated. New code written in this repo should already align with the stricter end-state.
+- Do not use “input data” or “compile-fail fixture” as an escape hatch. Negative compiler behavior is a valid behavior to test, but checked-in compile-failing Rust source is suspected architectural debt until proven otherwise; prefer parser/token/IR tests, quoted macro input, expansion snapshots, typed diagnostics over generated temporary crates, or another narrower harness boundary. Keep compile-diagnostic `.rs` fixtures only when full `rustc` integration is the behavior under test, and normalize or delete incidental non-idiomatic syntax inside those fixtures.
+- Preferred loop: identify the upstream owner, refactor there, add positive and negative behavior tests or expansion/workflow snapshots that pin the real contract, then remove the local lint debt.
+
 ## Architecture (the big picture)
 
 **Generation vs. shrinking — `Strategy` + `ValueTree`** (`proptest/src/strategy/traits.rs`). A `Strategy` is the generation layer: `new_tree()` produces a `ValueTree`, and combinators (`prop_map`, `prop_filter`, `prop_flat_map`, `prop_perturb`, unions via `prop_oneof!`, …) build larger strategies from smaller ones. A `ValueTree` is the shrinking layer: it holds the generated value plus the state to walk it — `current()` reads the value, `simplify()` steps toward a *simpler* value, `complicate()` backtracks when a simpler value stopped reproducing the failure. Keeping shrink state inside the `ValueTree` (instead of re-deriving it from the output, as QuickCheck does) is what enables integrated shrinking — and is why proptest carries more state and is slower than QuickCheck.
@@ -78,7 +85,7 @@ cd proptest/test-persistence-location && ./run-tests.sh
 
 **The strict runner surface** (`proptest/src/strict.rs`, behind the default-on `strict-test` feature; requires `std`). `proptest::strict` is a Result-returning property harness over the same `TestRunner`: `ensure_property(strategy, context, property)` / `ensure_property_with_config(...)` run the closure as `Result<(), TestFailure>` (`TestFailure` re-exported from `strict-test-support`, `TestResult` as the alias) and map outcomes onto `TestFailure::PropertyFalsified` / `TestFailure::PropertyAborted` instead of panicking; a closure `Err` converts through `TestCaseError::fail`, so shrinking still runs. `strict_default_config()` starts from `Config::default()` (ordinary `PROPTEST_*` env behavior preserved), disables failure persistence (a strict run never writes `proptest-regressions/` files), and seeds deterministically from `STRICT_TEST_SEED`: unset or unparseable → fixed `0x5EED`, `random` → OS entropy, `<integer>` → that fixed seed.
 
-**`Arbitrary` and the no_std split** (`proptest/src/arbitrary/`). `Arbitrary` (`arbitrary/traits.rs`) gives a type its canonical strategy via `any::<T>()` / `arbitrary_with(params)`. Impls are partitioned by what they require, wired up by `#[cfg]` in `arbitrary/mod.rs`: `_core/` (always available — primitives, `Option`, `Result`), `_alloc/` (needs `alloc` — `Vec`, `String`, maps), `_std/` (needs `std` — `Path`, IO, channels; the poisoning-prone `std::sync` locks — `Mutex`, `RwLock`, `Condvar`, and lock-dependent `WaitTimeoutResult` — deliberately have no `Arbitrary` impls, pinned by compile-fail fixtures).
+**`Arbitrary` and the no_std split** (`proptest/src/arbitrary/`). `Arbitrary` (`arbitrary/traits.rs`) gives a type its canonical strategy via `any::<T>()` / `arbitrary_with(params)`. Impls are partitioned by what they require, wired up by `#[cfg]` in `arbitrary.rs`: `_core/` (always available — primitives, `Option`, `Result`), `_alloc/` (needs `alloc` — `Vec`, `String`, maps), `_std` (needs `std` — `Path`, IO, channels; the poisoning-prone `std::sync` locks — `Mutex`, `RwLock`, `Condvar`, and lock-dependent `WaitTimeoutResult` — deliberately have no `Arbitrary` impls, pinned by compile-fail fixtures).
 
 **`std_facade` — the no_std bridge** (`proptest/src/std_facade.rs`). The crate is `#![no_std]`, so it must **never** name `std::` directly outside test code or `std`-gated code. Import allocated/std types from `crate::std_facade` instead (e.g. `Arc`, `Vec`, `Box`); it re-exports from `std`, `alloc`, or `core` depending on enabled features. New code that reaches for an allocating type must pull it from `std_facade` or it will break the `no_std`/`alloc` builds.
 

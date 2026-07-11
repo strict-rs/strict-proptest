@@ -7,11 +7,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{Arc, Box, fmt};
+use crate::std_facade::{Arc, Box, Rc, fmt};
 use core::mem;
 
-use crate::strategy::traits::*;
-use crate::test_runner::*;
+use crate::strategy::traits::{NewTree, Strategy};
+use crate::test_runner::TestRunner;
 
 /// Represents a value tree that is initialized on the first call to any
 /// methods.
@@ -33,7 +33,7 @@ enum LazyValueTreeState<S: Strategy> {
     /// the retained strategy and runner on first use.
     Uninitialized {
         /// The strategy whose value tree will be generated on demand.
-        strategy: Arc<S>,
+        strategy: LazyValueTreeStrategy<S>,
         /// The runner clone to generate that value tree with.
         runner: Box<TestRunner>,
     },
@@ -41,41 +41,66 @@ enum LazyValueTreeState<S: Strategy> {
     Failed,
 }
 
+/// The retained strategy handle used while `LazyValueTree` is still deferred.
+///
+/// `TupleUnion` uses local `Rc` sharing, while dynamic `Union` keeps `Arc`
+/// sharing so type-erased thread-safe strategies remain `Send + Sync`.
+enum LazyValueTreeStrategy<S: Strategy> {
+    /// Locally-shared strategy handle for static tuple-union branches.
+    Rc(Rc<S>),
+    /// Atomically-shared strategy handle for dynamic union branches.
+    Arc(Arc<S>),
+}
+
+impl<S: Strategy> LazyValueTreeStrategy<S> {
+    /// Generate the deferred value tree through the stored handle.
+    fn new_tree(&self, runner: &mut TestRunner) -> NewTree<S> {
+        match *self {
+            Self::Rc(ref strategy) => strategy.as_ref().new_tree(runner),
+            Self::Arc(ref strategy) => strategy.as_ref().new_tree(runner),
+        }
+    }
+}
+
 impl<S: Strategy> LazyValueTree<S> {
     /// Create a new value tree where initial generation is deferred until
     /// `maybe_init` is called.
-    pub(crate) fn new(strategy: Arc<S>, runner: &mut TestRunner) -> Self {
-        let runner = runner.partial_clone();
+    pub(crate) fn new(strategy: Rc<S>, runner: &mut TestRunner) -> Self {
+        let runner_clone = runner.partial_clone();
         Self {
             state: LazyValueTreeState::Uninitialized {
-                strategy,
-                runner: Box::new(runner),
+                strategy: LazyValueTreeStrategy::Rc(strategy),
+                runner: Box::new(runner_clone),
             },
         }
     }
 
-    /// Create a new value tree that has already been initialized.
-    pub(crate) fn new_initialized(value_tree: S::Tree) -> Self {
+    /// Create a new value tree where initial generation is deferred and the
+    /// deferred strategy is stored behind an atomically-counted handle.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "construct the Arc-backed lazy value tree used by shared union strategy branches"
+    )]
+    pub(crate) fn new_arc(strategy: Arc<S>, runner: &mut TestRunner) -> Self {
+        let runner_clone = runner.partial_clone();
         Self {
-            state: LazyValueTreeState::Initialized(value_tree),
+            state: LazyValueTreeState::Uninitialized {
+                strategy: LazyValueTreeStrategy::Arc(strategy),
+                runner: Box::new(runner_clone),
+            },
         }
     }
 
-    /// Returns a reference to the inner value tree if initialized.
-    pub(crate) fn as_inner(&self) -> Option<&S::Tree> {
-        match &self.state {
+    /// Take the initialized inner value tree, leaving this lazy slot failed.
+    pub(crate) fn take_initialized(&mut self) -> Option<S::Tree> {
+        let state = mem::replace(&mut self.state, LazyValueTreeState::Failed);
+        match state {
             LazyValueTreeState::Initialized(tree) => Some(tree),
             LazyValueTreeState::Uninitialized { .. }
-            | LazyValueTreeState::Failed => None,
-        }
-    }
-
-    /// Returns a mutable reference to the inner value tree if uninitialized.
-    pub(crate) fn as_inner_mut(&mut self) -> Option<&mut S::Tree> {
-        match &mut self.state {
-            LazyValueTreeState::Initialized(tree) => Some(tree),
-            LazyValueTreeState::Uninitialized { .. }
-            | LazyValueTreeState::Failed => None,
+            | LazyValueTreeState::Failed => {
+                self.state = state;
+                None
+            }
         }
     }
 
@@ -86,42 +111,26 @@ impl<S: Strategy> LazyValueTree<S> {
         }
 
         let state = mem::replace(&mut self.state, LazyValueTreeState::Failed);
-        match state {
-            LazyValueTreeState::Uninitialized {
-                strategy,
-                mut runner,
-            } => {
-                match strategy.new_tree(&mut runner) {
-                    Ok(tree) => {
-                        self.state = LazyValueTreeState::Initialized(tree);
-                    }
-                    Err(_) => {
-                        // self.state is set to Failed above. Keep it that way.
-                    }
-                }
+        if let LazyValueTreeState::Uninitialized {
+            strategy,
+            mut runner,
+        } = state
+        {
+            if let Ok(tree) = strategy.new_tree(&mut runner) {
+                self.state = LazyValueTreeState::Initialized(tree);
             }
-            LazyValueTreeState::Initialized(_) | LazyValueTreeState::Failed => {
-                unreachable!("can only reach here if uninitialized")
-            }
+        } else {
+            self.state = state;
         }
     }
 
     /// Whether this value tree still needs to be initialized.
-    pub(crate) fn is_uninitialized(&self) -> bool {
-        match &self.state {
+    pub(crate) const fn is_uninitialized(&self) -> bool {
+        match self.state {
             LazyValueTreeState::Uninitialized { .. } => true,
             LazyValueTreeState::Initialized(_) | LazyValueTreeState::Failed => {
                 false
             }
-        }
-    }
-
-    /// Whether the value tree was successfully initialized.
-    pub(crate) fn is_initialized(&self) -> bool {
-        match &self.state {
-            LazyValueTreeState::Initialized(_) => true,
-            LazyValueTreeState::Uninitialized { .. }
-            | LazyValueTreeState::Failed => false,
         }
     }
 }
@@ -153,15 +162,25 @@ where
     S::Tree: Clone,
 {
     fn clone(&self) -> Self {
-        use LazyValueTreeState::*;
-
-        match self {
-            Initialized(tree) => Initialized(tree.clone()),
-            Uninitialized { strategy, runner } => Uninitialized {
-                strategy: Arc::clone(strategy),
+        match *self {
+            Self::Initialized(ref tree) => Self::Initialized(tree.clone()),
+            Self::Uninitialized {
+                ref strategy,
+                ref runner,
+            } => Self::Uninitialized {
+                strategy: strategy.clone(),
                 runner: runner.clone(),
             },
-            Failed => Failed,
+            Self::Failed => Self::Failed,
+        }
+    }
+}
+
+impl<S: Strategy> Clone for LazyValueTreeStrategy<S> {
+    fn clone(&self) -> Self {
+        match *self {
+            Self::Rc(ref strategy) => Self::Rc(Rc::clone(strategy)),
+            Self::Arc(ref strategy) => Self::Arc(Arc::clone(strategy)),
         }
     }
 }
@@ -171,15 +190,24 @@ where
     S::Tree: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            LazyValueTreeState::Initialized(value_tree) => {
+        match *self {
+            Self::Initialized(ref value_tree) => {
                 f.debug_tuple("Initialized").field(value_tree).finish()
             }
-            LazyValueTreeState::Uninitialized { strategy, .. } => f
+            Self::Uninitialized { ref strategy, .. } => f
                 .debug_struct("Uninitialized")
                 .field("strategy", strategy)
                 .finish(),
-            LazyValueTreeState::Failed => write!(f, "Failed"),
+            Self::Failed => write!(f, "Failed"),
+        }
+    }
+}
+
+impl<S: Strategy> fmt::Debug for LazyValueTreeStrategy<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Self::Rc(ref strategy) => fmt::Debug::fmt(strategy, f),
+            Self::Arc(ref strategy) => fmt::Debug::fmt(strategy, f),
         }
     }
 }

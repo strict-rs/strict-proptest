@@ -16,6 +16,7 @@ use proptest::strict::{TestFailure, TestResult};
 use proptest::test_runner::Config;
 use proptest_state_machine::{
     ReferenceStateMachine, StateMachineTest, prop_state_machine,
+    strict_state_machine_config,
 };
 use strict_test_support::ensure;
 use system_under_test::MyHeap;
@@ -23,13 +24,10 @@ use system_under_test::MyHeap;
 // Setup the state machine test using the `prop_state_machine!` macro
 prop_state_machine! {
     #![proptest_config(Config {
-        // Turn failure persistence off for demonstration. This means that no
-        // regression file will be captured.
-        failure_persistence: None,
         // Enable verbose mode to make the state machine test print the
         // transitions for each case.
         verbose: 1,
-        .. Config::default()
+        .. strict_state_machine_config()
     })]
 
     // NOTE: The `#[test]` attribute is commented out in here so we can run it
@@ -50,10 +48,33 @@ prop_state_machine! {
 }
 
 fn main() -> TestResult {
+    ensure(
+        !PopImplementation::OPTIONS.is_empty(),
+        "the heap example exposes at least one pop implementation",
+    )?;
     // The generated test fn returns the strict verdict; returning it from
     // `main` reports a falsified property through the process exit status
     // instead of a panic.
     run_my_heap_test()
+}
+
+/// Which pop behavior the heap example should use.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PopImplementation {
+    /// Remove the root without restoring heap order.
+    Wrong,
+    /// Remove the root and restore heap order afterward.
+    Correct,
+}
+
+impl PopImplementation {
+    /// The intentionally wrong implementation used by the runnable example.
+    const BUGGY_DEFAULT: Self = Self::Wrong;
+    /// The corrected implementation that makes the state machine pass.
+    const CORRECT: Self = Self::Correct;
+    /// All supported pop implementations, keeping the teaching alternatives
+    /// visible in the example binary.
+    const OPTIONS: [Self; 2] = [Self::BUGGY_DEFAULT, Self::CORRECT];
 }
 
 /// An empty type used for the `ReferenceStateMachine` implementation. The
@@ -95,11 +116,11 @@ impl ReferenceStateMachine for HeapStateMachine {
         mut state: Self::State,
         transition: &Self::Transition,
     ) -> Self::State {
-        match transition {
+        match *transition {
             Transition::Pop => {
                 let _popped = state.pop();
             }
-            Transition::Push(element) => state.push(*element),
+            Transition::Push(element) => state.push(element),
         }
         state
     }
@@ -127,12 +148,11 @@ impl StateMachineTest for MyHeap<i32> {
 
                 // We use the broken implementation of pop, which should be
                 // discovered by the test.
-                let result = state.pop_wrong();
+                let result = state.pop_using(PopImplementation::BUGGY_DEFAULT);
 
                 // NOTE: To fix the issue that gets found by the state machine,
-                // you can comment out the last statement with `pop_wrong` and
-                // uncomment this one to see the test pass:
-                // let result = state.pop();
+                // switch the implementation from `BUGGY_DEFAULT` to
+                // `CORRECT`.
 
                 // Check a post-condition.
                 match result {
@@ -141,15 +161,7 @@ impl StateMachineTest for MyHeap<i32> {
                             !was_empty,
                             "a popped value implies the heap was non-empty",
                         )?;
-                        // The heap must not contain any value which was
-                        // greater than the "maximum" we were just given.
-                        for in_heap in state.iter() {
-                            ensure(
-                                popped >= *in_heap,
-                                "the popped value is greater than or equal \
-                                 to every value still in the heap",
-                            )?;
-                        }
+                        ensure_popped_value_is_heap_max(popped, &state)?;
                     }
                     None => ensure(
                         was_empty,
@@ -179,13 +191,37 @@ impl StateMachineTest for MyHeap<i32> {
     }
 }
 
+#[allow(
+    clippy::single_call_fn,
+    reason = "the heap example names the pop post-condition checked after every generated Pop transition"
+)]
+/// Verify that the popped value is still at least every value left in the heap.
+fn ensure_popped_value_is_heap_max(
+    popped: i32,
+    state: &MyHeap<i32>,
+) -> Result<(), TestFailure> {
+    // The heap must not contain any value which was greater than the
+    // "maximum" we were just given.
+    for in_heap in state.iter() {
+        ensure(
+            popped >= *in_heap,
+            "the popped value is greater than or equal to every value still in the heap",
+        )?;
+    }
+    Ok(())
+}
+
 /// A hand-rolled implementation of a binary heap, like
 /// <https://doc.rust-lang.org/stable/std/collections/struct.BinaryHeap.html>,
 /// except slow and buggy.
-mod system_under_test {
+pub mod system_under_test {
+    use core::mem;
+
+    use super::PopImplementation;
+
     /// Minimal max-heap implementation used as the system under test.
     #[derive(Clone, Debug)]
-    pub(crate) struct MyHeap<T> {
+    pub struct MyHeap<T> {
         /// Backing array storing heap elements in max-heap order.
         data: Vec<T>,
     }
@@ -215,18 +251,95 @@ mod system_under_test {
             self.data.iter()
         }
 
+        /// Swap two backing-storage indices when both are in bounds.
+        fn swap_indices(values: &mut [T], first: usize, second: usize) -> bool {
+            if first == second {
+                return first < values.len();
+            }
+
+            let (low, high) = if first < second {
+                (first, second)
+            } else {
+                (second, first)
+            };
+            let Some((prefix, suffix)) = values.split_at_mut_checked(high)
+            else {
+                return false;
+            };
+            let Some(left) = prefix.get_mut(low) else {
+                return false;
+            };
+            let Some(right) = suffix.get_mut(0) else {
+                return false;
+            };
+            mem::swap(left, right);
+            true
+        }
+
+        /// Remove the root by moving the last element into its slot.
+        fn remove_root_without_reorder(&mut self) -> Option<T> {
+            let last = self.data.pop()?;
+            if self.data.is_empty() {
+                return Some(last);
+            }
+
+            self.data.first_mut().map(|root| mem::replace(root, last))
+        }
+
+        #[allow(
+            clippy::single_call_fn,
+            reason = "heap insertion names one upward restore step separately from the push loop"
+        )]
+        /// Restore heap ordering by swapping the node at `index` upward once.
+        fn bubble_up_once(&mut self, index: usize) -> Option<usize> {
+            if index == 0 {
+                return None;
+            }
+
+            let parent = index.saturating_sub(1).div_euclid(2);
+            let should_swap =
+                self.data.get(parent).zip(self.data.get(index)).is_some_and(
+                    |(parent_value, child_value)| parent_value < child_value,
+                );
+            if !should_swap {
+                return None;
+            }
+
+            Self::swap_indices(&mut self.data, index, parent).then_some(parent)
+        }
+
+        #[allow(
+            clippy::single_call_fn,
+            reason = "heap removal names one downward restore step separately from the pop loop"
+        )]
+        /// Restore heap ordering by swapping the node at `index` downward once.
+        fn bubble_down_once(&mut self, index: usize) -> Option<usize> {
+            let child1 = index.saturating_mul(2).saturating_add(1);
+            let child2 = index.saturating_mul(2).saturating_add(2);
+            let child = match (self.data.get(child1), self.data.get(child2)) {
+                (Some(_), None) => child1,
+                (Some(left), Some(right)) if left > right => child1,
+                (Some(_), Some(_)) => child2,
+                _ => return None,
+            };
+
+            let should_swap =
+                self.data.get(index).zip(self.data.get(child)).is_some_and(
+                    |(parent, selected_child)| parent < selected_child,
+                );
+            if !should_swap {
+                return None;
+            }
+
+            Self::swap_indices(&mut self.data, child, index).then_some(child)
+        }
+
         /// Insert an element and restore the max-heap ordering upward.
         pub(crate) fn push(&mut self, element: T) {
             self.data.push(element);
-            let mut index = self.data.len() - 1;
-            while index > 0 {
-                let parent = (index - 1) / 2;
-                if self.data[parent] < self.data[index] {
-                    self.data.swap(index, parent);
-                    index = parent;
-                } else {
-                    break;
-                }
+            let mut index = self.data.len().saturating_sub(1);
+            while let Some(parent) = self.bubble_up_once(index) {
+                index = parent;
             }
         }
 
@@ -236,46 +349,73 @@ mod system_under_test {
             if self.is_empty() {
                 None
             } else {
-                Some(self.data.swap_remove(0))
+                self.remove_root_without_reorder()
             }
         }
 
         // Fixed implementation of pop()
         /// Remove the maximum element while preserving heap order.
-        #[allow(dead_code)]
         pub(crate) fn pop(&mut self) -> Option<T> {
             if self.is_empty() {
                 return None;
             }
 
-            let ret = self.data.swap_remove(0);
+            let ret = self.remove_root_without_reorder()?;
 
             // Restore the heap property
-            let mut index = 0;
-            loop {
-                let child1 = index * 2 + 1;
-                let child2 = index * 2 + 2;
-                if child1 >= self.data.len() {
-                    break;
-                }
-
-                let child = if child2 == self.data.len()
-                    || self.data[child1] > self.data[child2]
-                {
-                    child1
-                } else {
-                    child2
-                };
-
-                if self.data[index] < self.data[child] {
-                    self.data.swap(child, index);
-                    index = child;
-                } else {
-                    break;
-                }
+            let mut index = 0_usize;
+            while let Some(child) = self.bubble_down_once(index) {
+                index = child;
             }
 
             Some(ret)
         }
+
+        /// Remove an element using the selected implementation.
+        pub(super) fn pop_using(
+            &mut self,
+            implementation: PopImplementation,
+        ) -> Option<T> {
+            match implementation {
+                PopImplementation::Wrong => self.pop_wrong(),
+                PopImplementation::Correct => self.pop(),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::system_under_test::MyHeap;
+    use strict_test_support::{TestFailure, ensure};
+
+    #[test]
+    fn corrected_pop_returns_descending_maxima() -> Result<(), TestFailure> {
+        let mut heap = MyHeap::new();
+        for value in [3, 1, 9, 4, 7, 2] {
+            heap.push(value);
+        }
+
+        ensure(
+            heap.pop() == Some(9),
+            "first corrected pop returns the maximum",
+        )?;
+        ensure(
+            heap.pop() == Some(7),
+            "second corrected pop restores heap order before returning",
+        )?;
+
+        let mut unordered = MyHeap::new();
+        for value in [5, 8, 6, 10, 1, 4] {
+            unordered.push(value);
+        }
+        let mut observed = Vec::new();
+        while let Some(value) = unordered.pop() {
+            observed.push(value);
+        }
+        ensure(
+            observed.as_slice() == [10, 8, 6, 5, 4, 1],
+            "corrected pop drains unordered pushes in descending order",
+        )
     }
 }

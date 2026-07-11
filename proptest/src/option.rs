@@ -9,14 +9,19 @@
 
 //! Strategies for generating `std::Option` values.
 
-#![allow(clippy::expl_impl_clone_on_copy)]
-
+use core::cmp::Ordering;
+use core::error::Error;
 use core::fmt;
 use core::marker::PhantomData;
 
-use crate::std_facade::Arc;
-use crate::strategy::*;
-use crate::test_runner::*;
+use crate::std_facade::Rc;
+#[cfg(test)]
+use crate::strategy::check_strategy_sanity;
+use crate::strategy::{
+    LazyValueTree, NewTree, Strategy, TupleUnion, TupleUnionActive2,
+    TupleUnionValueTree, ValueTree, WeightedStrategy, float_to_weight, statics,
+};
+use crate::test_runner::TestRunner;
 
 //==============================================================================
 // Probability
@@ -24,11 +29,9 @@ use crate::test_runner::*;
 
 /// Creates a `Probability` from some value that is convertible into it.
 ///
-/// # Panics
-///
-/// Panics if the converted to probability would lie
-/// outside interval `[0.0, 1.0]`. Consult the `Into` (or `From`)
-/// implementations for more details.
+/// Floating-point inputs are normalized into the inclusive `0.0..=1.0` range;
+/// use [`Probability::try_new`] when out-of-range input should be reported as
+/// a typed error.
 pub fn prob(from: impl Into<Probability>) -> Probability {
     from.into()
 }
@@ -41,18 +44,57 @@ impl Default for Probability {
 }
 
 impl Probability {
-    /// Creates a `Probability` from a `f64`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the probability is outside interval `[0.0, 1.0]`.
+    /// Normalize a raw floating-point probability into the valid range.
     #[allow(
         clippy::single_call_fn,
-        reason = "validate a raw f64 in the 0.0..=1.0 range into a Probability newtype"
+        reason = "name the legacy Probability clamp rule shared by its constructor documentation"
     )]
-    pub fn new(prob: f64) -> Self {
-        assert!((0.0..=1.0).contains(&prob));
-        Probability(prob)
+    fn normalize(probability: f64) -> f64 {
+        match probability.partial_cmp(&0.0) {
+            None => 0.5,
+            Some(Ordering::Less) => 0.0,
+            Some(Ordering::Equal | Ordering::Greater) => {
+                match probability.partial_cmp(&1.0) {
+                    Some(Ordering::Greater) => 1.0,
+                    Some(Ordering::Less | Ordering::Equal) => probability,
+                    None => 0.5,
+                }
+            }
+        }
+    }
+
+    /// Creates a `Probability` from a `f64`, normalizing out-of-range input
+    /// into the inclusive `0.0..=1.0` range.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "normalize a raw f64 into the 0.0..=1.0 range for the legacy Probability constructor"
+    )]
+    #[must_use]
+    pub fn new(probability: f64) -> Self {
+        Self(Self::normalize(probability))
+    }
+
+    /// Creates a `Probability` from a `f64` without normalization.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`ProbabilityError`] when `probability` is outside the
+    /// inclusive `0.0..=1.0` range or is `NaN`.
+    pub fn try_new(probability: f64) -> Result<Self, ProbabilityError> {
+        let at_least_zero = matches!(
+            probability.partial_cmp(&0.0),
+            Some(Ordering::Equal | Ordering::Greater)
+        );
+        let at_most_one = matches!(
+            probability.partial_cmp(&1.0),
+            Some(Ordering::Less | Ordering::Equal)
+        );
+
+        if at_least_zero && at_most_one {
+            Ok(Self(probability))
+        } else {
+            Err(ProbabilityError { probability })
+        }
     }
 
     // Don't rely on these existing internally:
@@ -61,7 +103,7 @@ impl Probability {
     /// type expected by some implementations of `A: Arbitrary` in
     /// `A::Parameters`. This can be more ergonomic to work with and may
     /// help type inference.
-    pub fn with<X>(self, and: X) -> product_type![Self, X] {
+    pub const fn with<X>(self, and: X) -> product_type![Self, X] {
         product_pack![self, and]
     }
 
@@ -69,19 +111,17 @@ impl Probability {
     /// default value producing a product type expected by some
     /// implementations of `A: Arbitrary` in `A::Parameters`.
     /// This can be more ergonomic to work with and may help type inference.
+    #[must_use]
     pub fn lift<X: Default>(self) -> product_type![Self, X] {
         self.with(Default::default())
     }
 }
 
 impl From<f64> for Probability {
-    /// Creates a `Probability` from a `f64`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the probability is outside interval `[0.0, 1.0]`.
-    fn from(prob: f64) -> Self {
-        Probability::new(prob)
+    /// Creates a `Probability` from a `f64`, normalizing out-of-range input
+    /// into the inclusive `0.0..=1.0` range.
+    fn from(probability: f64) -> Self {
+        Self::new(probability)
     }
 }
 
@@ -94,6 +134,25 @@ impl From<Probability> for f64 {
 /// A probability in the range `[0.0, 1.0]` with a default of `0.5`.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Probability(f64);
+
+/// Invalid floating-point input for [`Probability::try_new`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProbabilityError {
+    /// The raw probability value that failed validation.
+    probability: f64,
+}
+
+impl fmt::Display for ProbabilityError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "probability {} is outside the inclusive 0.0..=1.0 range",
+            self.probability
+        )
+    }
+}
+
+impl Error for ProbabilityError {}
 
 //==============================================================================
 // Strategies for Option
@@ -113,10 +172,9 @@ mapfn! {
 struct NoneStrategy<T>(PhantomData<T>);
 impl<T> Clone for NoneStrategy<T> {
     fn clone(&self) -> Self {
-        *self
+        Self(PhantomData)
     }
 }
-impl<T> Copy for NoneStrategy<T> {}
 impl<T> fmt::Debug for NoneStrategy<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "NoneStrategy")
@@ -127,7 +185,7 @@ impl<T: fmt::Debug> Strategy for NoneStrategy<T> {
     type Value = Option<T>;
 
     fn new_tree(&self, _: &mut TestRunner) -> NewTree<Self> {
-        Ok(*self)
+        Ok(Self(PhantomData))
     }
 }
 impl<T: fmt::Debug> ValueTree for NoneStrategy<T> {
@@ -151,15 +209,18 @@ opaque_strategy_wrapper! {
     /// Constructed by other functions in this module.
     #[derive(Clone)]
     pub struct OptionStrategy[<T>][where T : Strategy]
-        (TupleUnion<(WA<NoneStrategy<T::Value>>,
-                     WA<statics::Map<T, WrapSome>>)>)
+        (TupleUnion<(WeightedStrategy<NoneStrategy<T::Value>>,
+                     WeightedStrategy<statics::Map<T, WrapSome>>)>)
         -> OptionValueTree<T>;
     /// `ValueTree` type corresponding to `OptionStrategy`.
     pub struct OptionValueTree[<T>][where T : Strategy]
         (TupleUnionValueTree<(
-            LazyValueTree<NoneStrategy<T::Value>>,
+            Option<LazyValueTree<NoneStrategy<T::Value>>>,
             Option<LazyValueTree<statics::Map<T, WrapSome>>>,
-        )>)
+        ), TupleUnionActive2<
+            NoneStrategy<T::Value>,
+            <statics::Map<T, WrapSome> as Strategy>::Tree,
+        >>)
         -> Option<T::Value>;
 }
 
@@ -177,7 +238,7 @@ where
     T::Tree: Clone,
 {
     fn clone(&self) -> Self {
-        OptionValueTree(self.0.clone())
+        Self(self.0.clone())
     }
 }
 
@@ -215,29 +276,32 @@ pub fn weighted<T: Strategy>(
     let (weight_some, weight_none) = float_to_weight(prob);
 
     OptionStrategy(TupleUnion::new((
-        (weight_none, Arc::new(NoneStrategy(PhantomData))),
-        (weight_some, Arc::new(statics::Map::new(strategy, WrapSome))),
+        (weight_none, Rc::new(NoneStrategy(PhantomData))),
+        (weight_some, Rc::new(statics::Map::new(strategy, WrapSome))),
     )))
 }
 
 #[cfg(test)]
 mod test {
+    use crate::test_runner::Reason;
+
     use strict_test_support::{TestFailure, ensure, ensure_some};
 
     use super::*;
+    use crate::strategy::Just;
 
     fn count_some_of_1000(
-        strategy: OptionStrategy<Just<i32>>,
+        strategy: &OptionStrategy<Just<i32>>,
     ) -> Result<u32, TestFailure> {
         let mut runner = TestRunner::deterministic();
-        let mut count = 0;
+        let mut count = 0_u32;
         for _ in 0..1000 {
-            count += ensure_some(
+            let generated = ensure_some(
                 strategy.new_tree(&mut runner).ok(),
                 "option strategy generates a value tree",
-            )?
-            .current()
-            .is_some() as u32;
+            )?;
+            count =
+                count.saturating_add(u32::from(generated.current().is_some()));
         }
 
         Ok(count)
@@ -245,7 +309,7 @@ mod test {
 
     #[test]
     fn probability_defaults_to_0p5() -> Result<(), TestFailure> {
-        let count = count_some_of_1000(of(Just(42i32)))?;
+        let count = count_some_of_1000(&of(Just(42_i32)))?;
         ensure(
             count > 450 && count < 550,
             "roughly half of the samples are Some",
@@ -254,18 +318,21 @@ mod test {
 
     #[test]
     fn probability_handled_correctly() -> Result<(), TestFailure> {
-        let count = count_some_of_1000(weighted(0.9, Just(42i32)))?;
+        let mostly_some = count_some_of_1000(&weighted(0.9, Just(42_i32)))?;
         ensure(
-            count > 800 && count < 950,
+            mostly_some > 800 && mostly_some < 950,
             "a 0.9 weight yields mostly Some",
         )?;
 
-        let count = count_some_of_1000(weighted(0.1, Just(42i32)))?;
-        ensure(count > 50 && count < 150, "a 0.1 weight yields mostly None")
+        let mostly_none = count_some_of_1000(&weighted(0.1, Just(42_i32)))?;
+        ensure(
+            mostly_none > 50 && mostly_none < 150,
+            "a 0.1 weight yields mostly None",
+        )
     }
 
     #[test]
-    fn test_sanity() {
-        check_strategy_sanity(of(0i32..1000i32), None);
+    fn test_sanity() -> Result<(), Reason> {
+        check_strategy_sanity(of(0_i32..1000_i32), None)
     }
 }

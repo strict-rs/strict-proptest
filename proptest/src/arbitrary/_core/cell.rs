@@ -15,32 +15,34 @@ wrap_from!([Copy] Cell);
 wrap_from!(RefCell);
 wrap_from!(UnsafeCell);
 
-lazy_just!(BorrowError, || {
-    // False positive:
-    #[allow(clippy::let_and_return)]
-    {
-        let _rc = RefCell::new(());
-        // The first borrow of a fresh cell always succeeds; holding the
-        // guard (inside the Ok) keeps the cell mutably borrowed.
-        let _bm = _rc.try_borrow_mut();
-        let _tb = _rc.try_borrow();
-        let ret = _rc.try_borrow().expect_err("reborrowed RefCell");
-        ret
+lazy_just!(
+    BorrowError,
+    || {
+        loop {
+            let cell = RefCell::new(());
+            let Ok(borrow_mut_guard) = cell.try_borrow_mut() else {
+                continue;
+            };
+            if let Err(error) = cell.try_borrow() {
+                drop(borrow_mut_guard);
+                return error;
+            }
+        }
+    };
+    BorrowMutError,
+    || {
+        loop {
+            let cell = RefCell::new(());
+            let Ok(borrow_guard) = cell.try_borrow() else {
+                continue;
+            };
+            if let Err(error) = cell.try_borrow_mut() {
+                drop(borrow_guard);
+                return error;
+            }
+        }
     }
-});
-lazy_just!(BorrowMutError, || {
-    // False positive:
-    #[allow(clippy::let_and_return)]
-    {
-        let _rc = RefCell::new(());
-        // The first borrow of a fresh cell always succeeds; holding the
-        // guard (inside the Ok) keeps the cell mutably borrowed.
-        let _bm = _rc.try_borrow_mut();
-        let _tb = _rc.try_borrow();
-        let ret = _rc.try_borrow_mut().expect_err("reborrowed RefCell");
-        ret
-    }
-});
+);
 
 #[cfg(test)]
 mod test {

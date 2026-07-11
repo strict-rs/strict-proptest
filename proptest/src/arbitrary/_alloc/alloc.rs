@@ -11,38 +11,50 @@
 
 use core::cmp;
 use core::ops::Range;
-use core::usize;
 
 multiplex_alloc!(::alloc::alloc, ::std::alloc);
 
-use crate::arbitrary::*;
-use crate::strategy::statics::static_map;
-use crate::strategy::*;
+use crate::arbitrary::{StrategyFor, any};
+use crate::strategy::{FilterMap, Just, Strategy as _};
+
+/// Candidate `(align_power, size)` pair used to build a checked `Layout`.
+type LayoutCandidate = (u8, usize);
+/// Function pointer used by the `Layout` filter-map strategy.
+type LayoutMapper = fn(LayoutCandidate) -> Option<alloc::Layout>;
 
 arbitrary!(alloc::Global; alloc::Global);
 
 // Not Debug.
 //lazy_just!(System, || System);
 
-arbitrary!(alloc::Layout, SFnPtrMap<(Range<u8>, StrategyFor<usize>), Self>;
-    // 1. align must be a power of two and <= (1 << 31):
-    // 2. "when rounded up to the nearest multiple of align, must not overflow".
-    static_map((0u8..32u8, any::<usize>()), |(align_power, size)| {
-        let align = 1usize << align_power;
-        // TODO: This may only work on 64 bit processors, but previously it was broken
-        // even on 64 bit so still an improvement. 63 -> uint size - 1.
-        let max_size = (1usize << (usize::BITS - 1)) - (1 << usize::from(align_power));
-        // Not quite a uniform distribution due to clamping,
-        // but probably good enough
-        alloc::Layout::from_size_align(cmp::min(max_size, size), align).unwrap()
-    })
+arbitrary!(
+    alloc::Layout,
+    FilterMap<(Range<u8>, StrategyFor<usize>), LayoutMapper>;
+    {
+        let mapper: LayoutMapper = |(align_power, size)| {
+            // 1. align must be a power of two and <= (1 << 31):
+            // 2. "when rounded up to the nearest multiple of align, must not overflow".
+            let align = 1_usize.checked_shl(u32::from(align_power))?;
+            // TODO: This may only work on 64 bit processors, but previously it was broken
+            // even on 64 bit so still an improvement. 63 -> uint size - 1.
+            let max_size = (1_usize << (usize::BITS - 1)).checked_sub(align)?;
+            // Not quite a uniform distribution due to clamping,
+            // but probably good enough.
+            let clamped_size = cmp::min(max_size, size);
+            alloc::Layout::from_size_align(clamped_size, align).ok()
+        };
+        (0_u8..32_u8, any::<usize>()).prop_filter_map(
+            "layout align and rounded size must be valid",
+            mapper,
+        )
+    }
 );
 
 arbitrary!(alloc::AllocError, Just<Self>; Just(alloc::AllocError));
 /* 2018-07-28 CollectionAllocErr is not currently available outside of using
  * the `alloc` crate, which would require a different nightly feature. For now,
  * disable.
-arbitrary!(alloc::collections::CollectionAllocErr, TupleUnion<(WA<Just<Self>>, WA<Just<Self>>)>;
+arbitrary!(alloc::collections::CollectionAllocErr, TupleUnion<(WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>)>;
            prop_oneof![Just(alloc::collections::CollectionAllocErr::AllocErr),
                        Just(alloc::collections::CollectionAllocErr::CapacityOverflow)]);
  */

@@ -17,6 +17,7 @@
 
 ### Other Notes
 
+- Added crate README metadata for package metadata lint coverage.
 - The crate's one elided lifetime is now written explicitly (`ParseStream<'_>`); no generated-code changes.
 
 ## 0.5.0

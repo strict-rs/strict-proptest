@@ -13,30 +13,27 @@
 //! is, the input range is not itself a strategy, but is rather fixed when
 //! the strategy is created.
 
-use rand::RngExt;
+use rand::RngExt as _;
 
+use core::error::Error;
 use core::fmt;
 use core::hash::Hash;
 use core::ops::Range;
 
-use crate::bits::{BitSetLike, VarBitSet};
+use crate::bits::{BitSetLike as _, VarBitSet};
+use crate::collection::EmptySizeRange;
 use crate::num::sample_uniform_incl;
 use crate::sample::SizeRange;
-use crate::std_facade::HashMap;
-use crate::std_facade::Vec;
-use crate::strategy::*;
-use crate::test_runner::*;
+use crate::std_facade::{HashMap, Vec, string::ToString as _};
+#[cfg(test)]
+use crate::strategy::check_strategy_sanity;
+use crate::strategy::{Strategy, ValueTree};
+use crate::test_runner::{Reason, TestRunner};
 
 /// Sample subsets whose size are within `size` from the given `range`.
 ///
 /// This is roughly analogous to `rand::sample`, except that it samples _without_ replacement.
 ///
-/// ## Panics
-///
-/// Panics if the maximum size implied by `size` is larger than the size of
-/// `values`.
-///
-/// Panics if `size` is a zero-length range.
 pub fn range_subset<T>(
     range: Range<T>,
     size: impl Into<SizeRange>,
@@ -45,9 +42,9 @@ where
     T: Copy + Ord + fmt::Debug,
     Range<T>: ExactSizeIterator<Item = T>,
 {
-    match try_range_subset(range, size) {
-        Ok(strategy) => strategy,
-        Err(error) => panic!("{}", error),
+    RangeSubset {
+        range,
+        size: size.into(),
     }
 }
 
@@ -56,7 +53,7 @@ where
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RangeSubsetError {
     /// The requested size range is empty.
-    EmptySizeRange(crate::collection::EmptySizeRange),
+    EmptySizeRange(EmptySizeRange),
     /// The requested maximum subset size exceeds the range length.
     TooLarge {
         /// Inclusive maximum of the requested size range.
@@ -68,18 +65,18 @@ pub enum RangeSubsetError {
 
 impl fmt::Display for RangeSubsetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match *self {
             Self::EmptySizeRange(inner) => inner.fmt(f),
             Self::TooLarge { size_end_incl, len } => write!(
                 f,
-                "Maximum size of subset {} exceeds length of input {}",
-                size_end_incl, len
+                "Maximum size of subset {size_end_incl} exceeds length of \
+                 input {len}"
             ),
         }
     }
 }
 
-impl core::error::Error for RangeSubsetError {}
+impl Error for RangeSubsetError {}
 
 /// Fallible form of [`range_subset`]: returns a typed error instead of
 /// panicking when `size` is an empty range or exceeds the range length.
@@ -102,17 +99,21 @@ where
     Range<T>: ExactSizeIterator<Item = T>,
 {
     let len = range.len();
-    let size = size.into();
+    let size_range = size.into();
 
-    size.ensure_nonempty()
+    size_range
+        .ensure_nonempty()
         .map_err(RangeSubsetError::EmptySizeRange)?;
-    if size.end_incl() > len {
+    if size_range.end_incl() > len {
         return Err(RangeSubsetError::TooLarge {
-            size_end_incl: size.end_incl(),
+            size_end_incl: size_range.end_incl(),
             len,
         });
     }
-    Ok(RangeSubset { range, size })
+    Ok(RangeSubset {
+        range,
+        size: size_range,
+    })
 }
 
 /// Strategy to generate `Vec`s by sampling a subset from an index range.
@@ -136,11 +137,22 @@ where
     type Value = Vec<T>;
 
     fn new_tree(&self, runner: &mut TestRunner) -> Result<Self::Tree, Reason> {
+        self.size
+            .ensure_nonempty()
+            .map_err(|error| Reason::from(error.to_string()))?;
+        let range_len = self.range.len();
+        if self.size.end_incl() > range_len {
+            return Err(Reason::from(
+                RangeSubsetError::TooLarge {
+                    size_end_incl: self.size.end_incl(),
+                    len: range_len,
+                }
+                .to_string(),
+            ));
+        }
         let (min_size, max_size) = (self.size.start(), self.size.end_incl());
 
-        let count = sample_uniform_incl(runner, min_size, max_size);
-
-        let range_len = self.range.len();
+        let count = sample_uniform_incl(runner, min_size, max_size)?;
 
         let mut swaps: HashMap<T, T> = HashMap::default();
 
@@ -162,10 +174,14 @@ where
         for i in 0..count {
             let j: usize = rng.random_range(i..range_len);
 
-            let iv = self.range.clone().nth(i).unwrap();
+            let iv = self.range.clone().nth(i).ok_or_else(|| {
+                Reason::from("range_subset sampled source index out of range")
+            })?;
             let vi = *swaps.get(&iv).unwrap_or(&iv);
 
-            let jv = self.range.clone().nth(j).unwrap();
+            let jv = self.range.clone().nth(j).ok_or_else(|| {
+                Reason::from("range_subset sampled swap index out of range")
+            })?;
             let vj = *swaps.get(&jv).unwrap_or(&jv);
 
             let _previous_i = swaps.insert(iv, vj);
@@ -225,7 +241,7 @@ where
         while self.shrink < self.values.len()
             && !self.included_values.test(self.shrink)
         {
-            self.shrink += 1;
+            self.shrink = self.shrink.saturating_add(1);
         }
 
         if self.shrink >= self.values.len() {
@@ -234,7 +250,7 @@ where
         } else {
             self.prev_shrink = Some(self.shrink);
             self.included_values.clear(self.shrink);
-            self.shrink += 1;
+            self.shrink = self.shrink.saturating_add(1);
             true
         }
     }
@@ -280,14 +296,20 @@ mod test {
             // Chose distinct items
             ensure_eq(
                 &value.len(),
-                &value.iter().cloned().collect::<BTreeSet<_>>().len(),
+                &value.iter().copied().collect::<BTreeSet<_>>().len(),
                 "the subset contains only distinct items",
             )?;
 
-            size_counts[value.len()] += 1;
+            if let Some(count) = size_counts.get_mut(value.len()) {
+                *count += 1;
+            }
 
-            for value in value {
-                value_counts[value] += 1;
+            for selected_index in value {
+                let count = ensure_some(
+                    value_counts.get_mut(selected_index),
+                    "range_subset only generates indices from the input range",
+                )?;
+                *count += 1;
             }
         }
 
@@ -299,7 +321,7 @@ mod test {
             )?;
         }
 
-        for &index_count in value_counts.iter() {
+        for &index_count in &value_counts {
             ensure(
                 (1024..1500).contains(&index_count),
                 "each index is chosen a plausible number of times",
@@ -309,8 +331,8 @@ mod test {
     }
 
     #[test]
-    fn test_sample_sanity() {
-        check_strategy_sanity(range_subset(0..5, 1..3), None);
+    fn test_sample_sanity() -> Result<(), Reason> {
+        check_strategy_sanity(range_subset(0..5, 1..3), None)
     }
 
     #[test]
@@ -379,7 +401,7 @@ mod test {
             "range_subset generates a value tree",
         )?
         .current();
-        values.sort();
+        values.sort_unstable();
         ensure(
             Vec::<usize>::from_iter(range) == values,
             "a full-width subset covers the whole range",

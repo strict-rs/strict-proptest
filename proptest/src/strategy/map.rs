@@ -11,8 +11,8 @@ use crate::std_facade::Arc;
 use core::fmt;
 use core::marker::PhantomData;
 
-use crate::strategy::traits::*;
-use crate::test_runner::*;
+use crate::strategy::traits::{NewTree, Strategy, ValueTree};
+use crate::test_runner::{TestRng, TestRunner};
 
 //==============================================================================
 // Map
@@ -41,7 +41,7 @@ impl<S: fmt::Debug, F> fmt::Debug for Map<S, F> {
 
 impl<S: Clone, F> Clone for Map<S, F> {
     fn clone(&self) -> Self {
-        Map {
+        Self {
             source: self.source.clone(),
             fun: Arc::clone(&self.fun),
         }
@@ -99,7 +99,7 @@ pub struct MapInto<S, O> {
 impl<S, O> MapInto<S, O> {
     /// Construct a `MapInto` mapper from an `S` strategy into a strategy
     /// producing `O`s.
-    pub(super) fn new(source: S) -> Self {
+    pub(super) const fn new(source: S) -> Self {
         Self {
             source,
             output: PhantomData,
@@ -179,7 +179,7 @@ impl<S: fmt::Debug, F> fmt::Debug for Perturb<S, F> {
 
 impl<S: Clone, F> Clone for Perturb<S, F> {
     fn clone(&self) -> Self {
-        Perturb {
+        Self {
             source: self.source.clone(),
             fun: Arc::clone(&self.fun),
         }
@@ -229,7 +229,7 @@ impl<S: fmt::Debug, F> fmt::Debug for PerturbValueTree<S, F> {
 
 impl<S: Clone, F> Clone for PerturbValueTree<S, F> {
     fn clone(&self) -> Self {
-        PerturbValueTree {
+        Self {
             source: self.source.clone(),
             fun: Arc::clone(&self.fun),
             rng: self.rng.clone(),
@@ -263,26 +263,30 @@ impl<S: ValueTree, O: fmt::Debug, F: Fn(S::Value, TestRng) -> O> ValueTree
 mod test {
     use std::collections::HashSet;
 
-    use rand::Rng;
+    use rand::Rng as _;
 
     use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
 
     use super::*;
     use crate::strategy::just::Just;
+    use crate::strict::ensure_property;
+    use crate::test_runner::test_runner_without_persistence;
 
     #[test]
     fn test_map() -> Result<(), TestFailure> {
-        crate::strict::ensure_property(
-            &(0..10).prop_map(|element| element * 2),
+        ensure_property(
+            &(0..10_i32).prop_map(|element| element * 2),
             "prop_map applies the mapping to every value",
-            |mapped| ensure(0 == mapped % 2, "the mapped value is even"),
+            |mapped| {
+                ensure(0 == mapped.rem_euclid(2), "the mapped value is even")
+            },
         )
     }
 
     #[test]
     fn test_map_into() -> Result<(), TestFailure> {
-        crate::strict::ensure_property(
-            &(0..10u8).prop_map_into::<usize>(),
+        ensure_property(
+            &(0..10_u8).prop_map_into::<usize>(),
             "prop_map_into converts every value",
             |converted| {
                 ensure(converted < 10, "the converted value keeps its bound")
@@ -292,7 +296,7 @@ mod test {
 
     #[test]
     fn perturb_uses_same_rng_every_time() -> Result<(), TestFailure> {
-        let mut runner = TestRunner::default();
+        let mut runner = test_runner_without_persistence();
         let input =
             Just(1).prop_perturb(|element, mut rng| element + rng.next_u32());
 
@@ -312,7 +316,7 @@ mod test {
 
     #[test]
     fn perturb_uses_varying_random_seeds() -> Result<(), TestFailure> {
-        let mut runner = TestRunner::default();
+        let mut runner = test_runner_without_persistence();
         let input =
             Just(1).prop_perturb(|element, mut rng| element + rng.next_u32());
 

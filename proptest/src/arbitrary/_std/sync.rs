@@ -10,13 +10,18 @@
 //! Arbitrary implementations for `std::sync`.
 
 use std::fmt;
-use std::sync::mpsc::*;
-use std::sync::*;
+use std::sync::mpsc::{
+    IntoIter, Receiver, RecvError, RecvTimeoutError, SendError, Sender,
+    SyncSender, TryRecvError, TrySendError, channel, sync_channel,
+};
+use std::sync::{Arc, Barrier, BarrierWaitResult, Once};
 use std::thread;
 
-use crate::arbitrary::*;
+use crate::arbitrary::{Arbitrary, SMapped, any, any_with};
 use crate::strategy::statics::static_map;
-use crate::strategy::*;
+use crate::strategy::{
+    Just, LazyJust, LazyJustFn, TupleUnion, WeightedStrategy,
+};
 
 // OnceState can not escape Once::call_once_force.
 // PoisonError depends implicitly on the lifetime on MutexGuard, etc.
@@ -32,11 +37,11 @@ use crate::strategy::*;
 // panicking lock/unwrap internals.
 
 arbitrary!(Barrier, SMapped<u16, Self>;  // usize would be extreme!
-    static_map(any::<u16>(), |n| Barrier::new(n as usize))
+    static_map(any::<u16>(), |n| Barrier::new(usize::from(n)))
 );
 
 arbitrary!(BarrierWaitResult,
-    TupleUnion<(WA<LazyJustFn<Self>>, WA<LazyJustFn<Self>>)>;
+    TupleUnion<(WeightedStrategy<LazyJustFn<Self>>, WeightedStrategy<LazyJustFn<Self>>)>;
     prop_oneof![LazyJust::new(bwr_true), LazyJust::new(bwr_false)]
 );
 
@@ -64,8 +69,9 @@ fn bwr_false() -> BarrierWaitResult {
     // this thread may call `wait` (a lone `wait` on a 2-barrier blocks
     // forever), so on spawn failure degrade to the single-participant
     // (leader) result instead.
-    match thread::Builder::new().spawn(move || b2.wait()) {
-        Ok(join_handle) => {
+    thread::Builder::new().spawn(move || b2.wait()).map_or_else(
+        |_| bwr_true(),
+        |join_handle| {
             let bwr1 = barrier.wait();
             match join_handle.join() {
                 Ok(bwr2) => {
@@ -80,9 +86,8 @@ fn bwr_false() -> BarrierWaitResult {
                 // degrading to the already-held result.
                 Err(_) => bwr1,
             }
-        }
-        Err(_) => bwr_true(),
-    }
+        },
+    )
 }
 
 arbitrary!(RecvError; RecvError);
@@ -91,14 +96,14 @@ arbitrary!([T: Arbitrary] SendError<T>, SMapped<T, Self>, T::Parameters;
     args => static_map(any_with::<T>(args), SendError)
 );
 
-arbitrary!(RecvTimeoutError, TupleUnion<(WA<Just<Self>>, WA<Just<Self>>)>;
+arbitrary!(RecvTimeoutError, TupleUnion<(WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>)>;
     prop_oneof![
         Just(RecvTimeoutError::Disconnected),
         Just(RecvTimeoutError::Timeout)
     ]
 );
 
-arbitrary!(TryRecvError, TupleUnion<(WA<Just<Self>>, WA<Just<Self>>)>;
+arbitrary!(TryRecvError, TupleUnion<(WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>)>;
     prop_oneof![
         Just(TryRecvError::Disconnected),
         Just(TryRecvError::Empty)
@@ -107,7 +112,7 @@ arbitrary!(TryRecvError, TupleUnion<(WA<Just<Self>>, WA<Just<Self>>)>;
 
 arbitrary!(
     [P: Clone + Default, T: Arbitrary<Parameters = P>] TrySendError<T>,
-    TupleUnion<(WA<SMapped<T, Self>>, WA<SMapped<T, Self>>)>, P;
+    TupleUnion<(WeightedStrategy<SMapped<T, Self>>, WeightedStrategy<SMapped<T, Self>>)>, P;
     args => prop_oneof![
         static_map(any_with::<T>(args.clone()), TrySendError::Disconnected),
         static_map(any_with::<T>(args), TrySendError::Full),
@@ -128,12 +133,12 @@ arbitrary!([A: fmt::Debug] (Sender<A>, IntoIter<A>), LazyJustFn<Self>;
 );
 
 arbitrary!([A] (SyncSender<A>, Receiver<A>), SMapped<u16, Self>;
-    static_map(any::<u16>(), |size| sync_channel(size as usize))
+    static_map(any::<u16>(), |size| sync_channel(usize::from(size)))
 );
 
 arbitrary!([A: fmt::Debug] (SyncSender<A>, IntoIter<A>), SMapped<u16, Self>;
     static_map(any::<u16>(), |size| {
-        let (rx, tx) = sync_channel(size as usize);
+        let (rx, tx) = sync_channel(usize::from(size));
         (rx, tx.into_iter())
     })
 );

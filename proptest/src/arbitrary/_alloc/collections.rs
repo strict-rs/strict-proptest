@@ -24,12 +24,22 @@ use core::ops::{Bound, RangeInclusive};
 #[cfg(feature = "std")]
 use crate::std_facade::{HashMap, HashSet, hash_map, hash_set};
 #[cfg(feature = "std")]
-use core::hash::Hash;
+use core::hash::{BuildHasher, Hash};
 
-use crate::arbitrary::*;
-use crate::collection::*;
+use crate::arbitrary::{
+    Arbitrary, SFnPtrMap, SMapped, StrategyFor, any, any_with, functor,
+};
+use crate::collection::{
+    BTreeMapStrategy, BTreeSetStrategy, BinaryHeapStrategy, HashMapStrategy,
+    HashSetStrategy, LinkedListStrategy, SizeRange, VecDequeStrategy,
+    VecStrategy, binary_heap, btree_map, btree_set, hash_map, hash_set,
+    linked_list, vec, vec_deque,
+};
 use crate::strategy::statics::static_map;
-use crate::strategy::*;
+use crate::strategy::{
+    BoxedStrategy, LazyJust, LazyJustFn, MapInto, Strategy, TupleUnion,
+    WeightedStrategy,
+};
 
 //==============================================================================
 // Macros:
@@ -133,26 +143,40 @@ into_iter_1!(hash_set, HashSet, Hash, Eq);
 //==============================================================================
 
 #[cfg(feature = "std")]
-arbitrary!([A: Arbitrary + Hash + Eq, B: Arbitrary] HashMap<A, B>,
-HashMapStrategy<A::Strategy, B::Strategy>,
-RangedParams2<A::Parameters, B::Parameters>;
+/// Rebuild a generated default-hasher map with the caller's hasher type.
+fn hash_map_with_hasher<K: Hash + Eq, V, S: BuildHasher + Default>(
+    map: HashMap<K, V>,
+) -> HashMap<K, V, S> {
+    map.into_iter().collect()
+}
+
+#[cfg(feature = "std")]
+arbitrary!([K: Arbitrary + Hash + Eq, V: Arbitrary, S: BuildHasher + Default] HashMap<K, V, S>,
+SFnPtrMap<HashMapStrategy<K::Strategy, V::Strategy>, Self>,
+RangedParams2<K::Parameters, V::Parameters>;
 args => {
     let product_unpack![range, key_params, elem_params] = args;
-    hash_map(any_with::<A>(key_params), any_with::<B>(elem_params), range)
+    static_map(
+        hash_map(any_with::<K>(key_params), any_with::<V>(elem_params), range),
+        hash_map_with_hasher::<K, V, S>,
+    )
 });
 
 #[cfg(feature = "std")]
-arbitrary!([A: Arbitrary + Hash + Eq, B: Arbitrary] hash_map::IntoIter<A, B>,
-    SMapped<HashMap<A, B>, Self>,
-    <HashMap<A, B> as Arbitrary>::Parameters;
-    args => static_map(any_with::<HashMap<A, B>>(args), HashMap::into_iter));
+arbitrary!([K: Arbitrary + Hash + Eq, V: Arbitrary] hash_map::IntoIter<K, V>,
+    SMapped<HashMap<K, V>, Self>,
+    <HashMap<K, V> as Arbitrary>::Parameters;
+    args => static_map(any_with::<HashMap<K, V>>(args), HashMap::into_iter));
 
 #[cfg(feature = "std")]
-lift1!([, K: Hash + Eq + Arbitrary + 'static] HashMap<K, A>,
+lift1!(['static, K: Hash + Eq + Arbitrary + 'static, H: BuildHasher + Default + 'static] HashMap<K, A, H>,
     RangedParams1<K::Parameters>;
     base, args => {
         let product_unpack![range, key_params] = args;
-        hash_map(any_with::<K>(key_params), base, range)
+        static_map(
+            hash_map(any_with::<K>(key_params), base, range),
+            hash_map_with_hasher::<K, A, H>,
+        )
     }
 );
 
@@ -166,8 +190,11 @@ lift1!(['static, K: Hash + Eq + Arbitrary + 'static] hash_map::IntoIter<K, A>,
 );
 
 #[cfg(feature = "std")]
-impl<A: fmt::Debug + Eq + Hash, B: fmt::Debug> functor::ArbitraryF2<A, B>
-    for HashMap<A, B>
+impl<
+    K: fmt::Debug + Eq + Hash + 'static,
+    V: fmt::Debug + 'static,
+    S: BuildHasher + Default + 'static,
+> functor::ArbitraryF2<K, V> for HashMap<K, V, S>
 {
     type Parameters = SizeRange;
 
@@ -177,16 +204,17 @@ impl<A: fmt::Debug + Eq + Hash, B: fmt::Debug> functor::ArbitraryF2<A, B>
         args: Self::Parameters,
     ) -> BoxedStrategy<Self>
     where
-        AS: Strategy<Value = A> + 'static,
-        BS: Strategy<Value = B> + 'static,
+        AS: Strategy<Value = K> + 'static,
+        BS: Strategy<Value = V> + 'static,
     {
-        hash_map(fst, snd, args).boxed()
+        static_map(hash_map(fst, snd, args), hash_map_with_hasher::<K, V, S>)
+            .boxed()
     }
 }
 
 #[cfg(feature = "std")]
-impl<A: fmt::Debug + Eq + Hash + 'static, B: fmt::Debug + 'static>
-    functor::ArbitraryF2<A, B> for hash_map::IntoIter<A, B>
+impl<K: fmt::Debug + Eq + Hash + 'static, V: fmt::Debug + 'static>
+    functor::ArbitraryF2<K, V> for hash_map::IntoIter<K, V>
 {
     type Parameters = SizeRange;
 
@@ -196,8 +224,8 @@ impl<A: fmt::Debug + Eq + Hash + 'static, B: fmt::Debug + 'static>
         args: Self::Parameters,
     ) -> BoxedStrategy<Self>
     where
-        AS: Strategy<Value = A> + 'static,
-        BS: Strategy<Value = B> + 'static,
+        AS: Strategy<Value = K> + 'static,
+        BS: Strategy<Value = V> + 'static,
     {
         static_map(hash_map(fst, snd, args), HashMap::into_iter).boxed()
     }
@@ -207,12 +235,12 @@ impl<A: fmt::Debug + Eq + Hash + 'static, B: fmt::Debug + 'static>
 // BTreeMap:
 //==============================================================================
 
-arbitrary!([A: Arbitrary + Ord, B: Arbitrary] BTreeMap<A, B>,
-BTreeMapStrategy<A::Strategy, B::Strategy>,
-RangedParams2<A::Parameters, B::Parameters>;
+arbitrary!([K: Arbitrary + Ord, V: Arbitrary] BTreeMap<K, V>,
+BTreeMapStrategy<K::Strategy, V::Strategy>,
+RangedParams2<K::Parameters, V::Parameters>;
 args => {
     let product_unpack![range, key_params, elem_params] = args;
-    btree_map(any_with::<A>(key_params), any_with::<B>(elem_params), range)
+    btree_map(any_with::<K>(key_params), any_with::<V>(elem_params), range)
 });
 
 lift1!([, K: Ord + Arbitrary + 'static] BTreeMap<K, A>,
@@ -223,8 +251,8 @@ lift1!([, K: Ord + Arbitrary + 'static] BTreeMap<K, A>,
     }
 );
 
-impl<A: fmt::Debug + Ord, B: fmt::Debug> functor::ArbitraryF2<A, B>
-    for BTreeMap<A, B>
+impl<K: fmt::Debug + Ord, V: fmt::Debug> functor::ArbitraryF2<K, V>
+    for BTreeMap<K, V>
 {
     type Parameters = SizeRange;
     fn lift2_with<AS, BS>(
@@ -233,20 +261,20 @@ impl<A: fmt::Debug + Ord, B: fmt::Debug> functor::ArbitraryF2<A, B>
         args: Self::Parameters,
     ) -> BoxedStrategy<Self>
     where
-        AS: Strategy<Value = A> + 'static,
-        BS: Strategy<Value = B> + 'static,
+        AS: Strategy<Value = K> + 'static,
+        BS: Strategy<Value = V> + 'static,
     {
         btree_map(fst, snd, args).boxed()
     }
 }
 
-arbitrary!([A: Arbitrary + Ord, B: Arbitrary] btree_map::IntoIter<A, B>,
-    SMapped<BTreeMap<A, B>, Self>,
-    <BTreeMap<A, B> as Arbitrary>::Parameters;
-    args => static_map(any_with::<BTreeMap<A, B>>(args), BTreeMap::into_iter));
+arbitrary!([K: Arbitrary + Ord, V: Arbitrary] btree_map::IntoIter<K, V>,
+    SMapped<BTreeMap<K, V>, Self>,
+    <BTreeMap<K, V> as Arbitrary>::Parameters;
+    args => static_map(any_with::<BTreeMap<K, V>>(args), BTreeMap::into_iter));
 
-impl<A: fmt::Debug + Ord + 'static, B: fmt::Debug + 'static>
-    functor::ArbitraryF2<A, B> for btree_map::IntoIter<A, B>
+impl<K: fmt::Debug + Ord + 'static, V: fmt::Debug + 'static>
+    functor::ArbitraryF2<K, V> for btree_map::IntoIter<K, V>
 {
     type Parameters = SizeRange;
 
@@ -256,8 +284,8 @@ impl<A: fmt::Debug + Ord + 'static, B: fmt::Debug + 'static>
         args: Self::Parameters,
     ) -> BoxedStrategy<Self>
     where
-        AS: Strategy<Value = A> + 'static,
-        BS: Strategy<Value = B> + 'static,
+        AS: Strategy<Value = K> + 'static,
+        BS: Strategy<Value = V> + 'static,
     {
         static_map(btree_map(fst, snd, args), BTreeMap::into_iter).boxed()
     }
@@ -269,15 +297,15 @@ impl<A: fmt::Debug + Ord + 'static, B: fmt::Debug + 'static>
 
 arbitrary!([A: Arbitrary] Bound<A>,
     TupleUnion<(
-        WA<SFnPtrMap<Arc<A::Strategy>, Self>>,
-        WA<SFnPtrMap<Arc<A::Strategy>, Self>>,
-        WA<LazyJustFn<Self>>
+        WeightedStrategy<SFnPtrMap<Rc<A::Strategy>, Self>>,
+        WeightedStrategy<SFnPtrMap<Rc<A::Strategy>, Self>>,
+        WeightedStrategy<LazyJustFn<Self>>
     )>,
     A::Parameters;
     args => {
-        let base = Arc::new(any_with::<A>(args));
+        let base = Rc::new(any_with::<A>(args));
         prop_oneof![
-            2 => static_map(base.clone(), Bound::Included),
+            2 => static_map(Rc::clone(&base), Bound::Included),
             2 => static_map(base, Bound::Excluded),
             1 => LazyJust::new(|| Bound::Unbounded),
         ]
@@ -287,7 +315,7 @@ arbitrary!([A: Arbitrary] Bound<A>,
 lift1!(['static] Bound<A>; base => {
     let base = Rc::new(base);
     prop_oneof![
-        2 => base.clone().prop_map(Bound::Included),
+        2 => Rc::clone(&base).prop_map(Bound::Included),
         2 => base.prop_map(Bound::Excluded),
         1 => LazyJustFn::new(|| Bound::Unbounded),
     ]

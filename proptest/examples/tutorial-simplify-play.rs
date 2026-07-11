@@ -20,16 +20,22 @@
 // This is *not* how proptest is normally used; it is simply used to play
 // around with value generation.
 
-use proptest::strategy::{Strategy, ValueTree};
+use std::io::{self, Write as _};
+
+use proptest::strategy::{Strategy as _, ValueTree as _};
 use proptest::test_runner::TestRunner;
 
-fn main() {
+fn main() -> io::Result<()> {
     let mut runner = TestRunner::default();
     let mut str_val = "[a-z]{1,4}\\p{Cyrillic}{1,4}\\p{Greek}{1,4}"
         .new_tree(&mut runner)
-        .unwrap();
-    println!("str_val = {}", str_val.current());
+        .map_err(|reason| {
+            io::Error::new(io::ErrorKind::InvalidInput, reason.to_string())
+        })?;
+    let mut output = io::stdout().lock();
+    writeln!(output, "str_val = {}", str_val.current())?;
     while str_val.simplify() {
-        println!("        = {}", str_val.current());
+        writeln!(output, "        = {}", str_val.current())?;
     }
+    Ok(())
 }

@@ -18,13 +18,16 @@
 //! inclusive ranges.
 
 use crate::std_facade::{Cow, vec};
+use core::char::from_u32;
 use core::ops::RangeInclusive;
 
-use rand::{Rng, RngExt};
+use rand::{Rng, RngExt as _};
 
 use crate::num;
-use crate::strategy::*;
-use crate::test_runner::*;
+#[cfg(test)]
+use crate::strategy::{CheckStrategySanityOptions, check_strategy_sanity};
+use crate::strategy::{NewTree, Strategy, ValueTree};
+use crate::test_runner::TestRunner;
 
 /// An inclusive char range from fst to snd.
 type CharRange = RangeInclusive<char>;
@@ -36,20 +39,42 @@ type CharRange = RangeInclusive<char>;
 /// difficult to handle in particular contexts.
 pub const DEFAULT_SPECIAL_CHARS: &[char] = &[
     // Things to give shell scripts and filesystem logic difficulties
-    '/', '\\', '$', '.', '*', '{', '\'', '"', '`', ':',
+    '/',
+    '\\',
+    '$',
+    '.',
+    '*',
+    '{',
+    '\'',
+    '"',
+    '`',
+    ':',
     // Characters with special significance in URLs and elsewhere
-    '?', '%', '=', '&', '<',
+    '?',
+    '%',
+    '=',
+    '&',
+    '<',
     // Interesting ASCII control characters
     // NUL, HT,   CR,   LF,   VT      ESC     DEL
-    '\x00', '\t', '\r', '\n', '\x0B', '\x1B', '\x7F',
+    '\x00',
+    '\t',
+    '\r',
+    '\n',
+    '\x0B',
+    '\x1B',
+    '\x7F',
     // ¥ both to test simple Unicode handling and because it has interesting
     // properties on MS Shift-JIS systems.
-    '¥', // No non-Unicode encoding has both ¥ and Ѩ
-    'Ѩ',
+    '\u{a5}', // No non-Unicode encoding has both ¥ and Ѩ
+    '\u{468}',
     // In UTF-8, Ⱥ increases in length from 2 to 3 bytes when lowercased
-    'Ⱥ',
+    '\u{23a}',
     // More Unicode edge-cases: BOM, replacement character, RTL override, and non-BMP
-    '\u{FEFF}', '\u{FFFD}', '\u{202E}', '🕴',
+    '\u{FEFF}',
+    '\u{FFFD}',
+    '\u{202E}',
+    '\u{1f574}',
 ];
 
 /// A default sequence of ranges used preferentially when generating random
@@ -91,12 +116,6 @@ pub const DEFAULT_PREFERRED_RANGES: &[CharRange] = &[
 /// external property, and the fact that a range is small often means it is
 /// more interesting.
 ///
-/// # Panics
-///
-/// Panics if the chosen code point is not a valid `char`. The selection logic
-/// only ever composes code points from characters that are already valid, so
-/// this is an internal invariant check rather than something reachable through
-/// any combination of arguments.
 pub fn select_char(
     rnd: &mut impl Rng,
     special: &[char],
@@ -104,7 +123,15 @@ pub fn select_char(
     ranges: &[CharRange],
 ) -> char {
     let (base, offset) = select_range_index(rnd, special, preferred, ranges);
-    ::core::char::from_u32(base + offset).expect("bad character selected")
+    let fallback = ranges.first().map_or('a', |range| *range.start());
+    char_from_range_index(base, offset, fallback)
+}
+
+/// Convert a selected `(base, offset)` pair into a scalar value, falling back
+/// to a known-valid range endpoint if the numeric point lands in a gap such as
+/// the surrogate range.
+fn char_from_range_index(base: u32, offset: u32, fallback: char) -> char {
+    from_u32(base.saturating_add(offset)).unwrap_or(fallback)
 }
 
 /// Chooses a character as `(range base, offset within range)`, applying the
@@ -124,14 +151,17 @@ fn select_range_index(
             .iter()
             .find(|range| ch >= *range.start() && ch <= *range.end())
             .map(|range| {
-                (*range.start() as u32, ch as u32 - *range.start() as u32)
+                (
+                    u32::from(*range.start()),
+                    u32::from(ch).saturating_sub(u32::from(*range.start())),
+                )
             })
     }
 
     // An empty `ranges` list cannot generate anything; degrade to the
     // canonical ASCII simplification target instead of panicking.
     let Some(first_range) = ranges.first() else {
-        return ('a' as u32, 0);
+        return (u32::from('a'), 0);
     };
 
     if !special.is_empty() && rnd.random() {
@@ -147,8 +177,9 @@ fn select_range_index(
         let selected = preferred
             .get(rnd.random_range(0..preferred.len()))
             .and_then(|range| {
-                ::core::char::from_u32(rnd.random_range(
-                    *range.start() as u32..*range.end() as u32 + 1,
+                from_u32(rnd.random_range(
+                    u32::from(*range.start())
+                        ..u32::from(*range.end()).saturating_add(1),
                 ))
             });
         if let Some(ret) = selected.and_then(|ch| in_range(ranges, ch)) {
@@ -160,15 +191,19 @@ fn select_range_index(
         let Some(range) = ranges.get(rnd.random_range(0..ranges.len())) else {
             continue;
         };
-        if let Some(ch) = ::core::char::from_u32(
-            rnd.random_range(*range.start() as u32..*range.end() as u32 + 1),
-        ) {
-            return (*range.start() as u32, ch as u32 - *range.start() as u32);
+        if let Some(ch) = from_u32(rnd.random_range(
+            u32::from(*range.start())
+                ..u32::from(*range.end()).saturating_add(1),
+        )) {
+            return (
+                u32::from(*range.start()),
+                u32::from(ch).saturating_sub(u32::from(*range.start())),
+            );
         }
     }
 
     // Give up and return a character we at least know is valid.
-    (*first_range.start() as u32, 0)
+    (u32::from(*first_range.start()), 0)
 }
 
 /// Strategy for generating `char`s.
@@ -215,7 +250,7 @@ impl<'a> CharStrategy<'a> {
         clippy::single_call_fn,
         reason = "assemble a CharStrategy from explicit special, preferred, and full range pools"
     )]
-    pub fn new(
+    pub const fn new(
         special: Cow<'a, [char]>,
         preferred: Cow<'a, [CharRange]>,
         ranges: Cow<'a, [CharRange]>,
@@ -228,7 +263,7 @@ impl<'a> CharStrategy<'a> {
     }
 
     /// Same as `CharStrategy::new()` but using `Cow::Borrowed` for all parts.
-    pub fn new_borrowed(
+    pub const fn new_borrowed(
         special: &'a [char],
         preferred: &'a [CharRange],
         ranges: &'a [CharRange],
@@ -250,7 +285,7 @@ const WHOLE_RANGE: &[CharRange] = &[RangeInclusive::new('\x00', char::MAX)];
     clippy::single_call_fn,
     reason = "the whole-Unicode CharStrategy with default biases that backs char::any"
 )]
-pub fn any() -> CharStrategy<'static> {
+pub const fn any() -> CharStrategy<'static> {
     CharStrategy {
         special: Cow::Borrowed(DEFAULT_SPECIAL_CHARS),
         preferred: Cow::Borrowed(DEFAULT_PREFERRED_RANGES),
@@ -274,7 +309,7 @@ pub fn range(start: char, end: char) -> CharStrategy<'static> {
     clippy::single_call_fn,
     reason = "a CharStrategy over caller-supplied ranges using the default selection biases"
 )]
-pub fn ranges(ranges: Cow<'_, [CharRange]>) -> CharStrategy<'_> {
+pub const fn ranges(ranges: Cow<'_, [CharRange]>) -> CharStrategy<'_> {
     CharStrategy {
         special: Cow::Borrowed(DEFAULT_SPECIAL_CHARS),
         preferred: Cow::Borrowed(DEFAULT_PREFERRED_RANGES),
@@ -287,6 +322,8 @@ pub fn ranges(ranges: Cow<'_, [CharRange]>) -> CharStrategy<'_> {
 pub struct CharValueTree {
     /// Binary-search shrinker over the character's `u32` code point.
     value: num::u32::BinarySearch,
+    /// Last valid scalar value produced by `value`.
+    current: char,
 }
 
 impl Strategy for CharStrategy<'_> {
@@ -302,23 +339,27 @@ impl Strategy for CharStrategy<'_> {
         );
 
         // Select a minimum point more convenient than 0
-        let start = base + offset;
-        let bottom = if start >= '¡' as u32 && base < '¡' as u32 {
-            '¡' as u32
-        } else if start >= 'a' as u32 && base < 'a' as u32 {
-            'a' as u32
-        } else if start >= 'A' as u32 && base < 'A' as u32 {
-            'A' as u32
-        } else if start >= '0' as u32 && base < '0' as u32 {
-            '0' as u32
-        } else if start >= ' ' as u32 && base < ' ' as u32 {
-            ' ' as u32
+        let fallback = self.ranges.first().map_or('a', |range| *range.start());
+        let selected = char_from_range_index(base, offset, fallback);
+        let start = u32::from(selected);
+        let latin1_start = u32::from('\u{a1}');
+        let bottom = if start >= latin1_start && base < latin1_start {
+            latin1_start
+        } else if start >= u32::from('a') && base < u32::from('a') {
+            u32::from('a')
+        } else if start >= u32::from('A') && base < u32::from('A') {
+            u32::from('A')
+        } else if start >= u32::from('0') && base < u32::from('0') {
+            u32::from('0')
+        } else if start >= u32::from(' ') && base < u32::from(' ') {
+            u32::from(' ')
         } else {
             base
         };
 
         Ok(CharValueTree {
             value: num::u32::BinarySearch::new_above(bottom, start),
+            current: selected,
         })
     }
 }
@@ -326,14 +367,19 @@ impl Strategy for CharStrategy<'_> {
 impl CharValueTree {
     /// Advances the shrinker off any `u32` that is not a valid `char`.
     ///
-    /// A simplify/complicate step can land the code point in the surrogate
-    /// gap; this complicates until `current()` is representable again.
-    fn reposition(&mut self) {
-        while ::core::char::from_u32(self.value.current()).is_none() {
+    /// A simplify/complicate step can land in the surrogate gap; this
+    /// complicates until the numeric shrinker reaches a scalar value again.
+    fn reposition(&mut self) -> bool {
+        for _ in 0..65_536 {
+            if let Some(current) = from_u32(self.value.current()) {
+                self.current = current;
+                return true;
+            }
             if !self.value.complicate() {
-                panic!("Converged to non-char value");
+                return false;
             }
         }
+        false
     }
 }
 
@@ -341,14 +387,12 @@ impl ValueTree for CharValueTree {
     type Value = char;
 
     fn current(&self) -> char {
-        ::core::char::from_u32(self.value.current())
-            .expect("Generated non-char value")
+        self.current
     }
 
     fn simplify(&mut self) -> bool {
         if self.value.simplify() {
-            self.reposition();
-            true
+            self.reposition()
         } else {
             false
         }
@@ -356,8 +400,7 @@ impl ValueTree for CharValueTree {
 
     fn complicate(&mut self) -> bool {
         if self.value.complicate() {
-            self.reposition();
-            true
+            self.reposition()
         } else {
             false
         }
@@ -366,60 +409,92 @@ impl ValueTree for CharValueTree {
 
 #[cfg(test)]
 mod test {
+    use core::slice;
+    use std::char::from_u32 as std_from_u32;
     use std::cmp::{max, min};
     use std::vec::Vec;
+
+    use crate::test_runner::{Reason, test_runner_without_persistence};
 
     use strict_test_support::{TestFailure, ensure, ensure_some};
 
     use super::*;
     use crate::collection;
+    use crate::strict::ensure_property;
+
+    fn ensure_current_char_in_input_ranges<V>(
+        value: &V,
+        input_ranges: &[(u32, u32)],
+    ) -> Result<(), TestFailure>
+    where
+        V: ValueTree<Value = char>,
+    {
+        let ch = u32::from(value.current());
+        ensure(
+            input_ranges
+                .iter()
+                .any(|&(lo, hi)| ch >= min(lo, hi) && ch <= max(lo, hi)),
+            "generated char lies in one of the input ranges",
+        )
+    }
+
+    #[allow(
+        clippy::single_call_fn,
+        reason = "the range property names the generated-char shrink walk separately from strategy construction"
+    )]
+    fn ensure_generated_chars_stay_within_input_ranges(
+        input_ranges: &[(u32, u32)],
+        char_ranges: Vec<CharRange>,
+    ) -> Result<(), TestFailure> {
+        let input = ranges(Cow::Owned(char_ranges));
+        let mut runner = test_runner_without_persistence();
+        for _ in 0..256 {
+            let mut value = ensure_some(
+                input.new_tree(&mut runner).ok(),
+                "char strategy generates a value tree",
+            )?;
+
+            ensure_current_char_in_input_ranges(&value, input_ranges)?;
+            while value.simplify() {
+                ensure_current_char_in_input_ranges(&value, input_ranges)?;
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn stays_in_range() -> Result<(), TestFailure> {
         // The non-char pairs are filtered out in the strategy (the legacy
         // test rejected them from inside the test body instead).
         let valid_range_pairs = Strategy::prop_filter_map(
-            collection::vec((0..char::MAX as u32, 0..char::MAX as u32), 1..5),
+            collection::vec(
+                (0..u32::from(char::MAX), 0..u32::from(char::MAX)),
+                1..5,
+            ),
             "pair does not describe a char range",
             |pairs| {
                 pairs
                     .iter()
                     .map(|&(lo, hi)| {
-                        ::std::char::from_u32(lo).and_then(|lo| {
-                            ::std::char::from_u32(hi)
-                                .map(|hi| min(lo, hi)..=max(lo, hi))
-                        })
+                        let lower_char = std_from_u32(lo)?;
+                        let upper_char = std_from_u32(hi)?;
+                        Some(
+                            min(lower_char, upper_char)
+                                ..=max(lower_char, upper_char),
+                        )
                     })
                     .collect::<Option<Vec<CharRange>>>()
                     .map(|char_ranges| (pairs, char_ranges))
             },
         );
-        crate::strict::ensure_property(
+        ensure_property(
             &valid_range_pairs,
             "generated chars stay within the requested ranges",
             |(input_ranges, char_ranges)| {
-                let input = ranges(Cow::Owned(char_ranges));
-                let mut runner = TestRunner::default();
-                for _ in 0..256 {
-                    let mut value = ensure_some(
-                        input.new_tree(&mut runner).ok(),
-                        "char strategy generates a value tree",
-                    )?;
-                    loop {
-                        let ch = value.current() as u32;
-                        ensure(
-                            input_ranges.iter().any(|&(lo, hi)| {
-                                ch >= min(lo, hi) && ch <= max(lo, hi)
-                            }),
-                            "generated char lies in one of the input ranges",
-                        )?;
-
-                        if !value.simplify() {
-                            break;
-                        }
-                    }
-                }
-                Ok(())
+                ensure_generated_chars_stay_within_input_ranges(
+                    &input_ranges,
+                    char_ranges,
+                )
             },
         )
     }
@@ -436,9 +511,12 @@ mod test {
                 "char strategy generates a value tree",
             )?
             .current();
-            if '🕴' == ch {
+            if '\u{1f574}' == ch {
                 men_in_business_suits_levitating += 1;
-            } else if (' '..='~').contains(&ch) {
+                continue;
+            }
+
+            if (' '..='~').contains(&ch) {
                 ascii_printable += 1;
             }
         }
@@ -481,7 +559,7 @@ mod test {
     }
 
     #[test]
-    fn test_sanity() {
+    fn test_sanity() -> Result<(), Reason> {
         check_strategy_sanity(
             any(),
             Some(CheckStrategySanityOptions {
@@ -491,7 +569,7 @@ mod test {
                 strict_complicate_after_simplify: false,
                 ..CheckStrategySanityOptions::default()
             }),
-        );
+        )
     }
     #[test]
     fn select_char_degrades_to_ascii_a_on_empty_ranges()
@@ -502,9 +580,15 @@ mod test {
             'a' == selected,
             "an empty range list degrades to the canonical 'a' target",
         )?;
-        let in_range = select_char(runner.rng(), &[], &[], &['p'..='t']);
+        let allowed_range = 'p'..='t';
+        let in_range = select_char(
+            runner.rng(),
+            &[],
+            &[],
+            slice::from_ref(&allowed_range),
+        );
         ensure(
-            in_range >= 'p' && in_range <= 't',
+            ('p'..='t').contains(&in_range),
             "a non-empty range list still selects from the ranges",
         )
     }

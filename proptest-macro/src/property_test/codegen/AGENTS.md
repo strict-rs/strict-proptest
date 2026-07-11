@@ -4,7 +4,7 @@ This file provides guidance to coding agents when working with code in this repo
 
 Scope: `proptest-macro/src/property_test/codegen/` — the code-generation stage of `#[property_test]`, invoked by the parent `property_test` module (after `validate`) to rewrite a validated test fn into a `#[test]` returning `<proptest>::strict::TestResult` that drives the strict runner (`<proptest>::strict::ensure_property`). `<proptest>` below stands for the configured crate path (see "Proptest path indirection"). For shared conventions and the crate-wide snapshot workflow see the workspace-root and `proptest-macro/` `AGENTS.md`s.
 
-## Entry point: `generate()` (`mod.rs`)
+## Entry point: `generate()` (`codegen.rs`)
 
 `generate(item_fn: ItemFn, options: Options) -> TokenStream` is the only `pub(super)` item and drives the whole pipeline:
 
@@ -56,7 +56,7 @@ Every emitted path is prefixed with `options.true_proptest_path()` (parent `opti
 
 ## Snapshot tests & fixtures
 
-Two `#[cfg(test)]` modules live at the bottom of `mod.rs`:
+Two `#[cfg(test)]` modules live at the bottom of `codegen.rs`:
 
 - `tests` — plain unit tests for `generate_struct` (`generates_correct_struct`, `derives_debug`) plus `generates_arbitrary_impl`, which snapshots `gen_arbitrary_impl(...).to_string()` as *raw* (unformatted) tokens.
 - `snapshot_tests` — the `snapshot_test!` macro `include_str!`s `test_data/<name>.rs`, runs `generate()`, formats with `prettyplease::unparse`, and `insta::assert_snapshot!`s the result. Cases: `simple`, `many_params`, `arg_pattern`, `arg_ident_and_pattern`, `return_value`, and `with_options::simple` (which passes a custom `Options` carrying `proptest_path` — its snapshot renders `::hello::world::strict::…`, proving the strict module resolves through the override). Every `test_data/*.rs` input is a valid strict property: it declares `-> ::proptest::strict::TestResult` (spelled `Result<(), ::proptest::strict::TestFailure>` in `return_value.rs`) and ends with `Ok(())`.

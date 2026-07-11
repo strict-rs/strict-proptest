@@ -10,20 +10,22 @@
 //! Strategies for generating `std::collections` of values.
 
 use core::cmp::Ord;
+use core::error::Error;
 use core::hash::Hash;
 use core::ops::{Add, Range, RangeInclusive, RangeTo, RangeToInclusive};
 
 use crate::std_facade::{
     BTreeMap, BTreeSet, BinaryHeap, LinkedList, Vec, VecDeque, fmt,
+    string::ToString as _,
 };
 
 #[cfg(feature = "std")]
 use crate::std_facade::{HashMap, HashSet};
 
-use crate::bits::{BitSetLike, VarBitSet};
+use crate::bits::{BitSetLike as _, VarBitSet};
 use crate::num::sample_uniform_incl;
-use crate::strategy::*;
-use crate::test_runner::*;
+use crate::strategy::{NewTree, Strategy, ValueTree, statics};
+use crate::test_runner::{Config, Reason, TestRunner};
 use crate::tuple::TupleValueTree;
 
 //==============================================================================
@@ -56,6 +58,7 @@ impl Default for SizeRange {
 
 impl SizeRange {
     /// Creates a `SizeBounds` from a `RangeInclusive<usize>`.
+    #[must_use]
     pub fn new(range: RangeInclusive<usize>) -> Self {
         range.into()
     }
@@ -66,7 +69,7 @@ impl SizeRange {
     /// type expected by some implementations of `A: Arbitrary` in
     /// `A::Parameters`. This can be more ergonomic to work with and may
     /// help type inference.
-    pub fn with<X>(self, and: X) -> product_type![Self, X] {
+    pub const fn with<X>(self, and: X) -> product_type![Self, X] {
         product_pack![self, and]
     }
 
@@ -74,27 +77,32 @@ impl SizeRange {
     /// default value producing a product type expected by some
     /// implementations of `A: Arbitrary` in `A::Parameters`.
     /// This can be more ergonomic to work with and may help type inference.
+    #[must_use]
     pub fn lift<X: Default>(self) -> product_type![Self, X] {
         self.with(Default::default())
     }
 
     /// The lower bound of the range (inclusive).
-    pub fn start(&self) -> usize {
+    #[must_use]
+    pub const fn start(&self) -> usize {
         self.0.start
     }
 
     /// Extract the ends `[low, high]` of a `SizeRange`.
-    pub fn start_end_incl(&self) -> (usize, usize) {
+    #[must_use]
+    pub const fn start_end_incl(&self) -> (usize, usize) {
         (self.start(), self.end_incl())
     }
 
     /// The upper bound of the range (inclusive).
-    pub fn end_incl(&self) -> usize {
-        self.0.end - 1
+    #[must_use]
+    pub const fn end_incl(&self) -> usize {
+        self.0.end.saturating_sub(1)
     }
 
     /// The upper bound of the range (exclusive).
-    pub fn end_excl(&self) -> usize {
+    #[must_use]
+    pub const fn end_excl(&self) -> usize {
         self.0.end
     }
 
@@ -104,13 +112,13 @@ impl SizeRange {
     }
 
     /// Returns whether the range admits no sizes at all (`start == end`).
-    pub(crate) fn is_empty(&self) -> bool {
+    pub(crate) const fn is_empty(&self) -> bool {
         self.start() == self.end_excl()
     }
 
     /// Validate that this size range is non-empty, naming the violated
     /// invariant as a typed error instead of panicking.
-    pub(crate) fn ensure_nonempty(&self) -> Result<(), EmptySizeRange> {
+    pub(crate) const fn ensure_nonempty(&self) -> Result<(), EmptySizeRange> {
         if self.is_empty() {
             Err(EmptySizeRange {
                 start: self.start(),
@@ -118,16 +126,6 @@ impl SizeRange {
             })
         } else {
             Ok(())
-        }
-    }
-
-    /// Panics with the [`EmptySizeRange`] message when the range is empty.
-    ///
-    /// The panicking counterpart of [`SizeRange::ensure_nonempty`], used by the
-    /// infallible collection constructors.
-    pub(crate) fn assert_nonempty(&self) {
-        if let Err(error) = self.ensure_nonempty() {
-            panic!("{}", error);
         }
     }
 }
@@ -155,7 +153,7 @@ impl fmt::Display for EmptySizeRange {
     }
 }
 
-impl core::error::Error for EmptySizeRange {}
+impl Error for EmptySizeRange {}
 
 /// Given `(low: usize, high: usize)`,
 /// then a size range of `[low..high)` is the result.
@@ -182,7 +180,7 @@ impl From<RangeTo<usize>> for SizeRange {
 /// Given `low .. high`, then a size range `[low, high)` is the result.
 impl From<Range<usize>> for SizeRange {
     fn from(range: Range<usize>) -> Self {
-        SizeRange(range)
+        Self(range)
     }
 }
 
@@ -206,15 +204,16 @@ impl From<SizeRange> for Range<usize> {
     }
 }
 
-/// Adds `usize` to both start and end of the bounds.
-///
-/// Panics if adding to either end overflows `usize`.
+/// Adds `usize` to both start and end of the bounds, saturating each endpoint
+/// at `usize::MAX`.
 impl Add<usize> for SizeRange {
-    type Output = SizeRange;
+    type Output = Self;
 
     fn add(self, rhs: usize) -> Self::Output {
-        let (start, end) = self.start_end_incl();
-        size_range((start + rhs)..=(end + rhs))
+        let (lower_bound, upper_bound) = self.start_end_incl();
+        let start = lower_bound.saturating_add(rhs);
+        let end = upper_bound.saturating_add(rhs);
+        size_range(start..=end)
     }
 }
 
@@ -243,9 +242,11 @@ pub fn vec<T: Strategy>(
     element: T,
     size: impl Into<SizeRange>,
 ) -> VecStrategy<T> {
-    let size = size.into();
-    size.assert_nonempty();
-    VecStrategy { element, size }
+    let size_range = size.into();
+    VecStrategy {
+        element,
+        size: size_range,
+    }
 }
 
 /// Fallible form of [`vec()`]: returns a typed [`EmptySizeRange`] error instead
@@ -259,9 +260,12 @@ pub fn try_vec<T: Strategy>(
     element: T,
     size: impl Into<SizeRange>,
 ) -> Result<VecStrategy<T>, EmptySizeRange> {
-    let size = size.into();
-    size.ensure_nonempty()?;
-    Ok(VecStrategy { element, size })
+    let size_range = size.into();
+    size_range.ensure_nonempty()?;
+    Ok(VecStrategy {
+        element,
+        size: size_range,
+    })
 }
 
 mapfn! {
@@ -465,11 +469,11 @@ pub fn hash_set<T: Strategy>(
 where
     T::Value: Hash + Eq,
 {
-    let size = size.into();
+    let size_range = size.into();
     HashSetStrategy(statics::Filter::new(
-        statics::Map::new(vec(element, size.clone()), VecToHashSet),
+        statics::Map::new(vec(element, size_range.clone()), VecToHashSet),
         "HashSet minimum size".into(),
-        MinSize(size.start()),
+        MinSize(size_range.start()),
     ))
 }
 
@@ -489,11 +493,11 @@ pub fn try_hash_set<T: Strategy>(
 where
     T::Value: Hash + Eq,
 {
-    let size = size.into();
+    let size_range = size.into();
     Ok(HashSetStrategy(statics::Filter::new(
-        statics::Map::new(try_vec(element, size.clone())?, VecToHashSet),
+        statics::Map::new(try_vec(element, size_range.clone())?, VecToHashSet),
         "HashSet minimum size".into(),
-        MinSize(size.start()),
+        MinSize(size_range.start()),
     )))
 }
 
@@ -538,11 +542,11 @@ pub fn btree_set<T: Strategy>(
 where
     T::Value: Ord,
 {
-    let size = size.into();
+    let size_range = size.into();
     BTreeSetStrategy(statics::Filter::new(
-        statics::Map::new(vec(element, size.clone()), VecToBTreeSet),
+        statics::Map::new(vec(element, size_range.clone()), VecToBTreeSet),
         "BTreeSet minimum size".into(),
-        MinSize(size.start()),
+        MinSize(size_range.start()),
     ))
 }
 
@@ -560,11 +564,11 @@ pub fn try_btree_set<T: Strategy>(
 where
     T::Value: Ord,
 {
-    let size = size.into();
+    let size_range = size.into();
     Ok(BTreeSetStrategy(statics::Filter::new(
-        statics::Map::new(try_vec(element, size.clone())?, VecToBTreeSet),
+        statics::Map::new(try_vec(element, size_range.clone())?, VecToBTreeSet),
         "BTreeSet minimum size".into(),
-        MinSize(size.start()),
+        MinSize(size_range.start()),
     )))
 }
 
@@ -622,14 +626,14 @@ pub fn hash_map<K: Strategy, V: Strategy>(
 where
     K::Value: Hash + Eq,
 {
-    let size = size.into();
+    let size_range = size.into();
     HashMapStrategy(statics::Filter::new(
         statics::Map::new(
-            vec((key, value_strategy), size.clone()),
+            vec((key, value_strategy), size_range.clone()),
             VecToHashMap,
         ),
         "HashMap minimum size".into(),
-        MinSize(size.start()),
+        MinSize(size_range.start()),
     ))
 }
 
@@ -650,14 +654,14 @@ pub fn try_hash_map<K: Strategy, V: Strategy>(
 where
     K::Value: Hash + Eq,
 {
-    let size = size.into();
+    let size_range = size.into();
     Ok(HashMapStrategy(statics::Filter::new(
         statics::Map::new(
-            try_vec((key, value_strategy), size.clone())?,
+            try_vec((key, value_strategy), size_range.clone())?,
             VecToHashMap,
         ),
         "HashMap minimum size".into(),
-        MinSize(size.start()),
+        MinSize(size_range.start()),
     )))
 }
 
@@ -709,14 +713,14 @@ pub fn btree_map<K: Strategy, V: Strategy>(
 where
     K::Value: Ord,
 {
-    let size = size.into();
+    let size_range = size.into();
     BTreeMapStrategy(statics::Filter::new(
         statics::Map::new(
-            vec((key, value_strategy), size.clone()),
+            vec((key, value_strategy), size_range.clone()),
             VecToBTreeMap,
         ),
         "BTreeMap minimum size".into(),
-        MinSize(size.start()),
+        MinSize(size_range.start()),
     ))
 }
 
@@ -735,14 +739,14 @@ pub fn try_btree_map<K: Strategy, V: Strategy>(
 where
     K::Value: Ord,
 {
-    let size = size.into();
+    let size_range = size.into();
     Ok(BTreeMapStrategy(statics::Filter::new(
         statics::Map::new(
-            try_vec((key, value_strategy), size.clone())?,
+            try_vec((key, value_strategy), size_range.clone())?,
             VecToBTreeMap,
         ),
         "BTreeMap minimum size".into(),
-        MinSize(size.start()),
+        MinSize(size_range.start()),
     )))
 }
 
@@ -775,8 +779,11 @@ impl<T: Strategy> Strategy for VecStrategy<T> {
     type Value = Vec<T::Value>;
 
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+        self.size
+            .ensure_nonempty()
+            .map_err(|error| Reason::from(error.to_string()))?;
         let (start, end) = self.size.start_end_incl();
-        let max_size = sample_uniform_incl(runner, start, end);
+        let max_size = sample_uniform_incl(runner, start, end)?;
         let mut elements = Vec::with_capacity(max_size);
         while elements.len() < max_size {
             elements.push(self.element.new_tree(runner)?);
@@ -842,7 +849,7 @@ impl<T: ValueTree> ValueTree for VecValueTree<T> {
             } else {
                 self.included_elements.clear(ix);
                 self.prev_shrink = Some(self.shrink);
-                self.shrink = Shrink::DeleteElement(ix + 1);
+                self.shrink = Shrink::DeleteElement(ix.saturating_add(1));
                 return true;
             }
         }
@@ -855,26 +862,23 @@ impl<T: ValueTree> ValueTree for VecValueTree<T> {
 
             if !self.included_elements.test(ix) {
                 // No use shrinking something we're not including.
-                self.shrink = Shrink::ShrinkElement(ix + 1);
+                self.shrink = Shrink::ShrinkElement(ix.saturating_add(1));
                 continue;
             }
 
             // A missing slot (impossible: `ix` is bounded by the element
             // count above) reads as "cannot simplify further".
-            let simplified = self
-                .elements
-                .get_mut(ix)
-                .is_some_and(|element| element.simplify());
-            if !simplified {
-                // Move on to the next element
-                self.shrink = Shrink::ShrinkElement(ix + 1);
-            } else {
+            let simplified =
+                self.elements.get_mut(ix).is_some_and(ValueTree::simplify);
+            if simplified {
                 self.prev_shrink = Some(self.shrink);
                 return true;
             }
+            // Move on to the next element.
+            self.shrink = Shrink::ShrinkElement(ix.saturating_add(1));
         }
 
-        panic!("Unexpected shrink state");
+        false
     }
 
     fn complicate(&mut self) -> bool {
@@ -893,7 +897,7 @@ impl<T: ValueTree> ValueTree for VecValueTree<T> {
                 let complicated = self
                     .elements
                     .get_mut(ix)
-                    .is_some_and(|element| element.complicate());
+                    .is_some_and(ValueTree::complicate);
                 if complicated {
                     // Don't unset prev_shrink; we may be able to complicate
                     // again.
@@ -914,7 +918,7 @@ impl<T: ValueTree> ValueTree for VecValueTree<T> {
 
 #[cfg(test)]
 mod test {
-    use std::string::ToString;
+    use std::string::ToString as _;
     use std::vec;
 
     use strict_test_support::{
@@ -924,14 +928,50 @@ mod test {
     use super::*;
 
     use crate::bits;
-    use crate::test_runner::TestCaseError;
+    use crate::strategy::check_strategy_sanity;
+    use crate::test_runner::{
+        TestCaseError, TestCaseResult, TestError,
+        test_runner_without_persistence,
+    };
+
+    #[allow(
+        clippy::single_call_fn,
+        reason = "the vec shrink test names the sum threshold that should falsify the generated case"
+    )]
+    fn reject_vec_sum_at_nine(generated: &[usize]) -> TestCaseResult {
+        if generated.iter().copied().sum::<usize>() >= 9 {
+            return Err(TestCaseError::fail("greater than 8"));
+        }
+        Ok(())
+    }
+
+    fn ensure_parallel_vec_value(current: &[u32]) -> Result<(), TestFailure> {
+        ensure_eq(&2, &current.len(), "a parallel vec keeps its fixed length")?;
+        let first = ensure_some(
+            current.first().copied(),
+            "parallel vec exposes its first generated value",
+        )?;
+        let second = ensure_some(
+            current.get(1).copied(),
+            "parallel vec exposes its second generated value",
+        )?;
+        ensure(
+            (1..=10).contains(&first),
+            "the first element obeys its range strategy",
+        )?;
+        ensure_eq(
+            &0,
+            &(second & !0xF0),
+            "the second element obeys its bit mask",
+        )
+    }
 
     #[test]
     fn try_constructors_accept_nonempty_size_ranges() -> Result<(), TestFailure>
     {
         let mut runner = TestRunner::deterministic();
         let strategy = ensure_ok(
-            try_vec(0u8..4, 1..4),
+            try_vec(0_u8..4, 1..4),
             "try_vec accepts a non-empty size range",
         )?;
         let value = ensure_some(
@@ -944,43 +984,42 @@ mod test {
             "the generated vec honors the requested size range",
         )?;
         ensure(
-            try_vec_deque(0u8..4, 1..4).is_ok(),
+            try_vec_deque(0_u8..4, 1..4).is_ok(),
             "try_vec_deque accepts a non-empty size range",
         )?;
         ensure(
-            try_linked_list(0u8..4, 1..4).is_ok(),
+            try_linked_list(0_u8..4, 1..4).is_ok(),
             "try_linked_list accepts a non-empty size range",
         )?;
         ensure(
-            try_binary_heap(0u8..4, 1..4).is_ok(),
+            try_binary_heap(0_u8..4, 1..4).is_ok(),
             "try_binary_heap accepts a non-empty size range",
         )?;
         ensure(
-            try_btree_set(0u8..4, 1..4).is_ok(),
+            try_btree_set(0_u8..4, 1..4).is_ok(),
             "try_btree_set accepts a non-empty size range",
         )?;
         ensure(
-            try_btree_map(0u8..4, 0u8..4, 1..4).is_ok(),
+            try_btree_map(0_u8..4, 0_u8..4, 1..4).is_ok(),
             "try_btree_map accepts a non-empty size range",
         )?;
         #[cfg(feature = "std")]
-        {
-            ensure(
-                try_hash_set(0u8..4, 1..4).is_ok(),
-                "try_hash_set accepts a non-empty size range",
-            )?;
-            ensure(
-                try_hash_map(0u8..4, 0u8..4, 1..4).is_ok(),
-                "try_hash_map accepts a non-empty size range",
-            )?;
-        }
+        ensure(
+            try_hash_set(0_u8..4, 1..4).is_ok(),
+            "try_hash_set accepts a non-empty size range",
+        )?;
+        #[cfg(feature = "std")]
+        ensure(
+            try_hash_map(0_u8..4, 0_u8..4, 1..4).is_ok(),
+            "try_hash_map accepts a non-empty size range",
+        )?;
         Ok(())
     }
 
     #[test]
     fn try_constructors_reject_empty_size_ranges() -> Result<(), TestFailure> {
         let error = ensure_some(
-            try_vec(0u8..4, 3..3).err(),
+            try_vec(0_u8..4, 3..3).err(),
             "try_vec rejects an empty size range",
         )?;
         ensure_contains(
@@ -989,42 +1028,41 @@ mod test {
             "the typed error carries the corrective hint",
         )?;
         ensure(
-            try_vec_deque(0u8..4, 0..0).is_err(),
+            try_vec_deque(0_u8..4, 0..0).is_err(),
             "try_vec_deque rejects an empty size range",
         )?;
         ensure(
-            try_linked_list(0u8..4, 0..0).is_err(),
+            try_linked_list(0_u8..4, 0..0).is_err(),
             "try_linked_list rejects an empty size range",
         )?;
         ensure(
-            try_binary_heap(0u8..4, 0..0).is_err(),
+            try_binary_heap(0_u8..4, 0..0).is_err(),
             "try_binary_heap rejects an empty size range",
         )?;
         ensure(
-            try_btree_set(0u8..4, 0..0).is_err(),
+            try_btree_set(0_u8..4, 0..0).is_err(),
             "try_btree_set rejects an empty size range",
         )?;
         ensure(
-            try_btree_map(0u8..4, 0u8..4, 0..0).is_err(),
+            try_btree_map(0_u8..4, 0_u8..4, 0..0).is_err(),
             "try_btree_map rejects an empty size range",
         )?;
         #[cfg(feature = "std")]
-        {
-            ensure(
-                try_hash_set(0u8..4, 0..0).is_err(),
-                "try_hash_set rejects an empty size range",
-            )?;
-            ensure(
-                try_hash_map(0u8..4, 0u8..4, 0..0).is_err(),
-                "try_hash_map rejects an empty size range",
-            )?;
-        }
+        ensure(
+            try_hash_set(0_u8..4, 0..0).is_err(),
+            "try_hash_set rejects an empty size range",
+        )?;
+        #[cfg(feature = "std")]
+        ensure(
+            try_hash_map(0_u8..4, 0_u8..4, 0..0).is_err(),
+            "try_hash_map rejects an empty size range",
+        )?;
         Ok(())
     }
 
     #[test]
     fn test_vec() -> Result<(), TestFailure> {
-        let input = vec(1usize..20usize, 5..20);
+        let input = vec(1_usize..20_usize, 5..20);
         let mut num_successes = 0;
 
         let mut runner = TestRunner::deterministic();
@@ -1045,13 +1083,8 @@ mod test {
                 "the generated vec has at least two distinct values",
             )?;
 
-            let result = runner.run_one(case, |generated| {
-                if generated.iter().copied().sum::<usize>() < 9 {
-                    Ok(())
-                } else {
-                    Err(TestCaseError::fail("greater than 8"))
-                }
-            });
+            let result = runner
+                .run_one(case, |generated| reject_vec_sum_at_nine(&generated));
 
             match result {
                 Ok(true) => num_successes += 1,
@@ -1079,42 +1112,25 @@ mod test {
     }
 
     #[test]
-    fn test_vec_sanity() {
-        check_strategy_sanity(vec(0i32..1000, 5..10), None);
+    fn test_vec_sanity() -> Result<(), Reason> {
+        check_strategy_sanity(vec(0_i32..1000, 5..10), None)
     }
 
     #[test]
     fn test_parallel_vec() -> Result<(), TestFailure> {
         let input =
-            vec![(1u32..10).boxed(), bits::u32::masked(0xF0u32).boxed()];
+            vec![(1_u32..10).boxed(), bits::u32::masked(0xF0_u32).boxed()];
 
         for _ in 0..256 {
-            let mut runner = TestRunner::default();
+            let mut runner = test_runner_without_persistence();
             let mut case = ensure_some(
                 input.new_tree(&mut runner).ok(),
                 "parallel vec strategy generates a value tree",
             )?;
 
-            loop {
-                let current = case.current();
-                ensure_eq(
-                    &2,
-                    &current.len(),
-                    "a parallel vec keeps its fixed length",
-                )?;
-                ensure(
-                    current[0] >= 1 && current[0] <= 10,
-                    "the first element obeys its range strategy",
-                )?;
-                ensure_eq(
-                    &0,
-                    &(current[1] & !0xF0),
-                    "the second element obeys its bit mask",
-                )?;
-
-                if !case.simplify() {
-                    break;
-                }
+            ensure_parallel_vec_value(&case.current())?;
+            while case.simplify() {
+                ensure_parallel_vec_value(&case.current())?;
             }
         }
         Ok(())

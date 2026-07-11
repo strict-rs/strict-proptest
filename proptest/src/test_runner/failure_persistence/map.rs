@@ -18,9 +18,9 @@ use crate::test_runner::failure_persistence::PersistedSeed;
 /// Loads and saves seeds in memory rather than on disk. This may be
 /// useful when accumulating test failures across multiple `TestRunner`
 /// instances for external reporting or batched persistence.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MapFailurePersistence {
-    /// Backing map, keyed by source_file.
+    /// Backing map, keyed by `source_file`.
     pub map: BTreeMap<&'static str, BTreeSet<PersistedSeed>>,
 }
 
@@ -41,9 +41,8 @@ impl FailurePersistence for MapFailurePersistence {
         seed: PersistedSeed,
         _shrunken_value: &dyn fmt::Debug,
     ) {
-        let source = match source_file {
-            Some(sf) => sf,
-            None => return,
+        let Some(source) = source_file else {
+            return;
         };
         let set = self.map.entry(source).or_default();
         let _inserted = set.insert(seed);
