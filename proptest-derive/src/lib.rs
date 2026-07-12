@@ -20,11 +20,11 @@ use proc_macro::TokenStream;
 /// See module level documentation for more information.
 #[proc_macro_derive(Arbitrary, attributes(proptest))]
 #[allow(
-    clippy::single_call_fn,
-    reason = "proc_macro_derive shim that converts tokens and delegates to the impl pipeline"
+  clippy::single_call_fn,
+  reason = "proc_macro_derive shim that converts tokens and delegates to the impl pipeline"
 )]
 pub fn derive_proptest_arbitrary(input: TokenStream) -> TokenStream {
-    // Bootstrap!
-    // This function just converts tokens and delegates to the internal crate.
-    proptest_derive_internal::derive_arbitrary(input.into()).into()
+  // Bootstrap!
+  // This function just converts tokens and delegates to the internal crate.
+  proptest_derive_internal::derive_arbitrary(input.into()).into()
 }

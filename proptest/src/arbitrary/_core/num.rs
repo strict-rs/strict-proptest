@@ -9,13 +9,17 @@
 
 //! Arbitrary implementations for `std::num`.
 
+use core::num::FpCategory;
+use core::num::ParseFloatError;
+use core::num::ParseIntError;
+use core::num::Saturating;
 #[cfg(feature = "unstable")]
 use core::num::TryFromIntError;
-use core::num::{
-    FpCategory, ParseFloatError, ParseIntError, Saturating, Wrapping,
-};
+use core::num::Wrapping;
 
-use crate::strategy::{Just, TupleUnion, WeightedStrategy};
+use crate::strategy::Just;
+use crate::strategy::TupleUnion;
+use crate::strategy::WeightedStrategy;
 
 arbitrary!(ParseFloatError; {
     loop {
@@ -65,18 +69,18 @@ arbitrary!(FpCategory,
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        parse_float_error => ParseFloatError,
-        parse_int_error => ParseIntError,
-        wrapping => Wrapping<u8>,
-        saturating => Saturating<u8>,
-        fp_category => FpCategory
-    );
+  no_panic_test!(
+      parse_float_error => ParseFloatError,
+      parse_int_error => ParseIntError,
+      wrapping => Wrapping<u8>,
+      saturating => Saturating<u8>,
+      fp_category => FpCategory
+  );
 
-    #[cfg(feature = "unstable")]
-    no_panic_test!(
-        try_from_int_error => TryFromIntError
-    );
+  #[cfg(feature = "unstable")]
+  no_panic_test!(
+      try_from_int_error => TryFromIntError
+  );
 }

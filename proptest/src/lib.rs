@@ -17,10 +17,7 @@
 #![forbid(future_incompatible)]
 #![deny(missing_docs, bare_trait_objects)]
 #![no_std]
-#![cfg_attr(
-    feature = "unstable",
-    feature(allocator_api, coroutine_trait, never_type)
-)]
+#![cfg_attr(feature = "unstable", feature(allocator_api, coroutine_trait, never_type))]
 #![cfg_attr(feature = "f16", feature(f16))]
 #![cfg_attr(all(feature = "std", feature = "unstable"), feature(ip))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -81,28 +78,28 @@ pub use proptest_macro::property_test;
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "attr-macro")]
-    #[test]
-    fn compile_tests() -> Result<(), trybuild::TryBuildError> {
-        let mut cases = trybuild::TestCases::new();
-        cases.pass("tests/pass/*.rs");
-        cases.compile_fail("tests/fail/*.rs");
-        cases.run()
-    }
+  #[cfg(feature = "attr-macro")]
+  #[test]
+  fn compile_tests() -> Result<(), trybuild::TryBuildError> {
+    let mut cases = trybuild::TestCases::new();
+    cases.pass("tests/pass/*.rs");
+    cases.compile_fail("tests/fail/*.rs");
+    cases.run()
+  }
 
-    #[test]
-    fn sugar_macro_compile_tests() -> Result<(), trybuild::TryBuildError> {
-        let mut cases = trybuild::TestCases::new();
-        cases.pass("tests/sugar/pass/*.rs");
-        cases.compile_fail("tests/sugar/fail/*.rs");
-        cases.run()
-    }
+  #[test]
+  fn sugar_macro_compile_tests() -> Result<(), trybuild::TryBuildError> {
+    let mut cases = trybuild::TestCases::new();
+    cases.pass("tests/sugar/pass/*.rs");
+    cases.compile_fail("tests/sugar/fail/*.rs");
+    cases.run()
+  }
 
-    #[test]
-    fn prelude_compile_tests() -> Result<(), trybuild::TryBuildError> {
-        let mut cases = trybuild::TestCases::new();
-        cases.pass("tests/prelude/pass/*.rs");
-        cases.compile_fail("tests/prelude/fail/*.rs");
-        cases.run()
-    }
+  #[test]
+  fn prelude_compile_tests() -> Result<(), trybuild::TryBuildError> {
+    let mut cases = trybuild::TestCases::new();
+    cases.pass("tests/prelude/pass/*.rs");
+    cases.compile_fail("tests/prelude/fail/*.rs");
+    cases.run()
+  }
 }

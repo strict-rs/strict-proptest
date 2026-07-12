@@ -9,21 +9,32 @@
 
 //! Arbitrary implementations for `std::ops`.
 
-use crate::std_facade::Rc;
 #[cfg(feature = "unstable")]
 use core::ops::CoroutineState;
-use core::ops::{
-    Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive,
-};
+use core::ops::Range;
+use core::ops::RangeFrom;
+use core::ops::RangeFull;
+use core::ops::RangeInclusive;
+use core::ops::RangeTo;
+use core::ops::RangeToInclusive;
 
+use crate::arbitrary::Arbitrary;
+use crate::arbitrary::SMapped;
+use crate::arbitrary::any_with;
 #[cfg(feature = "unstable")]
 use crate::arbitrary::functor;
-use crate::arbitrary::{Arbitrary, SMapped, any_with};
+use crate::std_facade::Rc;
+#[cfg(feature = "unstable")]
+use crate::strategy::BoxedStrategy;
 #[cfg(not(feature = "unstable"))]
 use crate::strategy::Strategy as _;
-use crate::strategy::statics::static_map;
 #[cfg(feature = "unstable")]
-use crate::strategy::{BoxedStrategy, Strategy, TupleUnion, WeightedStrategy};
+use crate::strategy::Strategy;
+#[cfg(feature = "unstable")]
+use crate::strategy::TupleUnion;
+#[cfg(feature = "unstable")]
+use crate::strategy::WeightedStrategy;
+use crate::strategy::statics::static_map;
 
 arbitrary!(RangeFull; ..);
 wrap_ctor!(RangeFrom, |endpoint| endpoint..);
@@ -73,43 +84,33 @@ arbitrary!(
 use core::fmt;
 
 #[cfg(feature = "unstable")]
-impl<A: fmt::Debug + 'static, B: fmt::Debug + 'static>
-    functor::ArbitraryF2<A, B> for CoroutineState<A, B>
-{
-    type Parameters = ();
+impl<A: fmt::Debug + 'static, B: fmt::Debug + 'static> functor::ArbitraryF2<A, B> for CoroutineState<A, B> {
+  type Parameters = ();
 
-    fn lift2_with<AS, BS>(
-        fst: AS,
-        snd: BS,
-        _args: Self::Parameters,
-    ) -> BoxedStrategy<Self>
-    where
-        AS: Strategy<Value = A> + 'static,
-        BS: Strategy<Value = B> + 'static,
-    {
-        prop_oneof![
-            fst.prop_map(CoroutineState::Yielded),
-            snd.prop_map(CoroutineState::Complete)
-        ]
-        .boxed()
-    }
+  fn lift2_with<AS, BS>(fst: AS, snd: BS, _args: Self::Parameters) -> BoxedStrategy<Self>
+  where
+    AS: Strategy<Value = A> + 'static,
+    BS: Strategy<Value = B> + 'static,
+  {
+    prop_oneof![fst.prop_map(CoroutineState::Yielded), snd.prop_map(CoroutineState::Complete)].boxed()
+  }
 }
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        range_full => RangeFull,
-        range_from => RangeFrom<usize>,
-        range_to   => RangeTo<usize>,
-        range      => Range<usize>,
-        range_inclusive => RangeInclusive<usize>,
-        range_to_inclusive => RangeToInclusive<usize>
-    );
+  no_panic_test!(
+      range_full => RangeFull,
+      range_from => RangeFrom<usize>,
+      range_to   => RangeTo<usize>,
+      range      => Range<usize>,
+      range_inclusive => RangeInclusive<usize>,
+      range_to_inclusive => RangeToInclusive<usize>
+  );
 
-    #[cfg(feature = "unstable")]
-    no_panic_test!(
-        generator_state => CoroutineState<u32, u64>
-    );
+  #[cfg(feature = "unstable")]
+  no_panic_test!(
+      generator_state => CoroutineState<u32, u64>
+  );
 }

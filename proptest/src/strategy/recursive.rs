@@ -7,236 +7,211 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{Arc, Box, Vec, fmt};
+use num_traits::ToPrimitive as _;
 
-use crate::strategy::traits::{BoxedStrategy, NewTree, Strategy, ValueTree};
+use crate::std_facade::Arc;
+use crate::std_facade::Box;
+use crate::std_facade::Vec;
+use crate::std_facade::fmt;
+use crate::strategy::traits::BoxedStrategy;
+use crate::strategy::traits::NewTree;
+use crate::strategy::traits::Strategy;
+use crate::strategy::traits::ValueTree;
 use crate::strategy::unions::float_to_weight;
 use crate::test_runner::TestRunner;
-use num_traits::ToPrimitive as _;
 
 /// Return type from `Strategy::prop_recursive()`.
 #[must_use = "strategies do nothing unless used"]
 pub struct Recursive<T, F> {
-    /// The leaf strategy, boxed, that produces the non-recursive base cases.
-    base: BoxedStrategy<T>,
-    /// The closure that wraps a level's strategy into the next, deeper level,
-    /// held behind an `Arc` so the wrapper clones cheaply.
-    recurse: Arc<F>,
-    /// The hard cap on how many branch levels the generated structure may
-    /// nest.
-    depth: u32,
-    /// The target total number of elements the generated structure should
-    /// have, used to tune branch probability.
-    desired_size: u32,
-    /// The expected maximum size of any single recursive collection, used
-    /// alongside `desired_size` to derive per-level branch probability.
-    expected_branch_size: u32,
+  /// The leaf strategy, boxed, that produces the non-recursive base cases.
+  base:                 BoxedStrategy<T>,
+  /// The closure that wraps a level's strategy into the next, deeper level,
+  /// held behind an `Arc` so the wrapper clones cheaply.
+  recurse:              Arc<F>,
+  /// The hard cap on how many branch levels the generated structure may
+  /// nest.
+  depth:                u32,
+  /// The target total number of elements the generated structure should
+  /// have, used to tune branch probability.
+  desired_size:         u32,
+  /// The expected maximum size of any single recursive collection, used
+  /// alongside `desired_size` to derive per-level branch probability.
+  expected_branch_size: u32,
 }
 
 impl<T: fmt::Debug, F> fmt::Debug for Recursive<T, F> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Recursive")
-            .field("base", &self.base)
-            .field("recurse", &"<function>")
-            .field("depth", &self.depth)
-            .field("desired_size", &self.desired_size)
-            .field("expected_branch_size", &self.expected_branch_size)
-            .finish()
-    }
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("Recursive")
+      .field("base", &self.base)
+      .field("recurse", &"<function>")
+      .field("depth", &self.depth)
+      .field("desired_size", &self.desired_size)
+      .field("expected_branch_size", &self.expected_branch_size)
+      .finish()
+  }
 }
 
 impl<T, F> Clone for Recursive<T, F> {
-    fn clone(&self) -> Self {
-        Self {
-            base: self.base.clone(),
-            recurse: Arc::clone(&self.recurse),
-            depth: self.depth,
-            desired_size: self.desired_size,
-            expected_branch_size: self.expected_branch_size,
-        }
+  fn clone(&self) -> Self {
+    Self {
+      base:                 self.base.clone(),
+      recurse:              Arc::clone(&self.recurse),
+      depth:                self.depth,
+      desired_size:         self.desired_size,
+      expected_branch_size: self.expected_branch_size,
     }
+  }
 }
 
-impl<
-    T: fmt::Debug + 'static,
-    R: Strategy<Value = T> + 'static,
-    F: Fn(BoxedStrategy<T>) -> R,
-> Recursive<T, F>
-{
-    /// Build a recursive strategy from the leaf strategy `base` and the
-    /// `recurse` closure, capturing the depth and size targets that shape
-    /// generation.
-    #[allow(
-        clippy::single_call_fn,
-        reason = "capture the leaf strategy, recursion closure, and depth and size caps for prop_recursive"
-    )]
-    pub(super) fn new(
-        base: impl Strategy<Value = T> + 'static,
-        depth: u32,
-        desired_size: u32,
-        expected_branch_size: u32,
-        recurse: F,
-    ) -> Self {
-        Self {
-            base: base.boxed(),
-            recurse: Arc::new(recurse),
-            depth,
-            desired_size,
-            expected_branch_size,
-        }
+impl<T: fmt::Debug + 'static, R: Strategy<Value = T> + 'static, F: Fn(BoxedStrategy<T>) -> R> Recursive<T, F> {
+  /// Build a recursive strategy from the leaf strategy `base` and the
+  /// `recurse` closure, capturing the depth and size targets that shape
+  /// generation.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "capture the leaf strategy, recursion closure, and depth and size caps for prop_recursive"
+  )]
+  pub(super) fn new(
+    base: impl Strategy<Value = T> + 'static,
+    depth: u32,
+    desired_size: u32,
+    expected_branch_size: u32,
+    recurse: F,
+  ) -> Self {
+    Self {
+      base: base.boxed(),
+      recurse: Arc::new(recurse),
+      depth,
+      desired_size,
+      expected_branch_size,
     }
+  }
 }
 
-impl<
-    T: fmt::Debug + 'static,
-    R: Strategy<Value = T> + 'static,
-    F: Fn(BoxedStrategy<T>) -> R,
-> Strategy for Recursive<T, F>
-{
-    type Tree = Box<dyn ValueTree<Value = T>>;
-    type Value = T;
+impl<T: fmt::Debug + 'static, R: Strategy<Value = T> + 'static, F: Fn(BoxedStrategy<T>) -> R> Strategy for Recursive<T, F> {
+  type Tree = Box<dyn ValueTree<Value = T>>;
+  type Value = T;
 
-    fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-        // Since the generator is stateless, we can't implement any "absolutely
-        // X many items" rule. We _can_, however, with extremely high
-        // probability, obtain a value near what we want by using decaying
-        // probabilities of branching as we go down the tree.
-        //
-        // We are given a target size S and a branch size K (branch size =
-        // expected number of items immediately below each branch). We select
-        // some probability P for each level.
-        //
-        // A single level l is thus expected to hold PlK branches. Each of
-        // those will have P(l+1)K child branches of their own, so there are
-        // PlP(l+1)K² second-level branches. The total branches in the tree is
-        // thus (Σ PlK^l) for l from 0 to infinity. Each level is expected to
-        // hold K items, so the total number of items is simply K times the
-        // number of branches, or (K Σ PlK^l). So we want to find a P sequence
-        // such that (lim (K Σ PlK^l) = S), or more simply,
-        // (lim Σ PlK^l = S/K).
-        //
-        // Let Q be a second probability sequence such that Pl = Ql/K^l. This
-        // changes the formulation to (lim Σ Ql = S/K). The series Σ0.5^(l+1)
-        // converges on 1.0, so we can let Ql = S/K * 0.5^(l+1), and so
-        // Pl = S/K^(l+1) * 0.5^(l+1) = S / (2K) ^ (l+1)
-        //
-        // We don't actually have infinite levels here since we _can_ easily
-        // cap to a fixed max depth, so this will be a minor underestimate. We
-        // also clamp all probabilities to 0.9 to ensure that we can't end up
-        // with levels which are always pure branches, which further
-        // underestimates size.
+  fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+    // Since the generator is stateless, we can't implement any "absolutely
+    // X many items" rule. We _can_, however, with extremely high
+    // probability, obtain a value near what we want by using decaying
+    // probabilities of branching as we go down the tree.
+    //
+    // We are given a target size S and a branch size K (branch size =
+    // expected number of items immediately below each branch). We select
+    // some probability P for each level.
+    //
+    // A single level l is thus expected to hold PlK branches. Each of
+    // those will have P(l+1)K child branches of their own, so there are
+    // PlP(l+1)K² second-level branches. The total branches in the tree is
+    // thus (Σ PlK^l) for l from 0 to infinity. Each level is expected to
+    // hold K items, so the total number of items is simply K times the
+    // number of branches, or (K Σ PlK^l). So we want to find a P sequence
+    // such that (lim (K Σ PlK^l) = S), or more simply,
+    // (lim Σ PlK^l = S/K).
+    //
+    // Let Q be a second probability sequence such that Pl = Ql/K^l. This
+    // changes the formulation to (lim Σ Ql = S/K). The series Σ0.5^(l+1)
+    // converges on 1.0, so we can let Ql = S/K * 0.5^(l+1), and so
+    // Pl = S/K^(l+1) * 0.5^(l+1) = S / (2K) ^ (l+1)
+    //
+    // We don't actually have infinite levels here since we _can_ easily
+    // cap to a fixed max depth, so this will be a minor underestimate. We
+    // also clamp all probabilities to 0.9 to ensure that we can't end up
+    // with levels which are always pure branches, which further
+    // underestimates size.
 
-        let mut branch_probabilities = Vec::new();
-        let mut k2 = u64::from(self.expected_branch_size) * 2;
-        for _ in 0..self.depth {
-            let denominator = k2.to_f64().unwrap_or(f64::INFINITY);
-            branch_probabilities.push(
-                f64::from(self.desired_size).mul_add(denominator.recip(), 0.0),
-            );
-            k2 = k2.saturating_mul(u64::from(self.expected_branch_size) * 2);
-        }
-
-        let mut strat = self.base.clone();
-        while let Some(branch_probability) = branch_probabilities.pop() {
-            let recursed = (self.recurse)(strat.clone());
-            let recursive_choice = recursed.boxed();
-            let non_recursive_choice = strat;
-            // Clamp the maximum branch probability to 0.9 to ensure we can
-            // generate non-recursive cases reasonably often.
-            let clamped_branch_probability = branch_probability.min(0.9);
-            let (weight_branch, weight_leaf) =
-                float_to_weight(clamped_branch_probability);
-            let branch = prop_oneof![
-                weight_leaf => non_recursive_choice,
-                weight_branch => recursive_choice,
-            ];
-            strat = branch.boxed();
-        }
-
-        strat.new_tree(runner)
+    let mut branch_probabilities = Vec::new();
+    let mut k2 = u64::from(self.expected_branch_size) * 2;
+    for _ in 0..self.depth {
+      let denominator = k2.to_f64().unwrap_or(f64::INFINITY);
+      branch_probabilities.push(f64::from(self.desired_size).mul_add(denominator.recip(), 0.0));
+      k2 = k2.saturating_mul(u64::from(self.expected_branch_size) * 2);
     }
+
+    let mut strat = self.base.clone();
+    while let Some(branch_probability) = branch_probabilities.pop() {
+      let recursed = (self.recurse)(strat.clone());
+      let recursive_choice = recursed.boxed();
+      let non_recursive_choice = strat;
+      // Clamp the maximum branch probability to 0.9 to ensure we can
+      // generate non-recursive cases reasonably often.
+      let clamped_branch_probability = branch_probability.min(0.9);
+      let (weight_branch, weight_leaf) = float_to_weight(clamped_branch_probability);
+      let branch = prop_oneof![
+          weight_leaf => non_recursive_choice,
+          weight_branch => recursive_choice,
+      ];
+      strat = branch.boxed();
+    }
+
+    strat.new_tree(runner)
+  }
 }
 
 #[cfg(test)]
 mod test {
-    use std::cmp::max;
+  use std::cmp::max;
 
-    use strict_test_support::{TestFailure, ensure, ensure_some};
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_some;
 
-    use super::*;
-    use crate::collection::vec;
-    use crate::strategy::just::Just;
+  use super::*;
+  use crate::collection::vec;
+  use crate::strategy::just::Just;
 
-    #[derive(Clone, Debug, PartialEq)]
-    enum Tree {
-        Leaf,
-        Branch(Vec<Self>),
+  #[derive(Clone, Debug, PartialEq)]
+  enum Tree {
+    Leaf,
+    Branch(Vec<Self>),
+  }
+
+  impl Tree {
+    fn stats(&self) -> (u32, u32) {
+      match *self {
+        Self::Leaf => (0, 1),
+        Self::Branch(ref children) => children.iter().fold((1_u32, 1_u32), |(depth, count), child| {
+          let (child_depth, child_count) = child.stats();
+          (max(child_depth.saturating_add(1), depth), count.saturating_add(child_count))
+        }),
+      }
+    }
+  }
+
+  #[test]
+  fn test_recursive() -> Result<(), TestFailure> {
+    let mut max_depth = 0;
+    let mut max_count = 0;
+
+    let strat = Just(Tree::Leaf).prop_recursive(4, 64, 16, |element| vec(element, 8..16).prop_map(Tree::Branch));
+
+    let mut runner = TestRunner::deterministic();
+    for _ in 0..65536 {
+      let tree = ensure_some(strat.new_tree(&mut runner).ok(), "recursive strategy generates a value tree")?.current();
+      let (depth, count) = tree.stats();
+      ensure(depth <= 4, "the depth budget is respected")?;
+      ensure(count <= 128, "the size budget is respected")?;
+      max_depth = max(depth, max_depth);
+      max_count = max(count, max_count);
     }
 
-    impl Tree {
-        fn stats(&self) -> (u32, u32) {
-            match *self {
-                Self::Leaf => (0, 1),
-                Self::Branch(ref children) => children.iter().fold(
-                    (1_u32, 1_u32),
-                    |(depth, count), child| {
-                        let (child_depth, child_count) = child.stats();
-                        (
-                            max(child_depth.saturating_add(1), depth),
-                            count.saturating_add(child_count),
-                        )
-                    },
-                ),
-            }
-        }
+    ensure(max_depth >= 3, "deep trees are actually generated")?;
+    ensure(max_count > 48, "large trees are actually generated")
+  }
+
+  #[test]
+  fn simplifies_to_non_recursive() -> Result<(), TestFailure> {
+    let strat = Just(Tree::Leaf).prop_recursive(4, 64, 16, |element| vec(element, 8..16).prop_map(Tree::Branch));
+
+    let mut runner = TestRunner::deterministic();
+    for _ in 0..256 {
+      let mut value = ensure_some(strat.new_tree(&mut runner).ok(), "recursive strategy generates a value tree")?;
+      while value.simplify() {}
+
+      ensure(Tree::Leaf == value.current(), "shrinking converges to the non-recursive case")?;
     }
-
-    #[test]
-    fn test_recursive() -> Result<(), TestFailure> {
-        let mut max_depth = 0;
-        let mut max_count = 0;
-
-        let strat = Just(Tree::Leaf).prop_recursive(4, 64, 16, |element| {
-            vec(element, 8..16).prop_map(Tree::Branch)
-        });
-
-        let mut runner = TestRunner::deterministic();
-        for _ in 0..65536 {
-            let tree = ensure_some(
-                strat.new_tree(&mut runner).ok(),
-                "recursive strategy generates a value tree",
-            )?
-            .current();
-            let (depth, count) = tree.stats();
-            ensure(depth <= 4, "the depth budget is respected")?;
-            ensure(count <= 128, "the size budget is respected")?;
-            max_depth = max(depth, max_depth);
-            max_count = max(count, max_count);
-        }
-
-        ensure(max_depth >= 3, "deep trees are actually generated")?;
-        ensure(max_count > 48, "large trees are actually generated")
-    }
-
-    #[test]
-    fn simplifies_to_non_recursive() -> Result<(), TestFailure> {
-        let strat = Just(Tree::Leaf).prop_recursive(4, 64, 16, |element| {
-            vec(element, 8..16).prop_map(Tree::Branch)
-        });
-
-        let mut runner = TestRunner::deterministic();
-        for _ in 0..256 {
-            let mut value = ensure_some(
-                strat.new_tree(&mut runner).ok(),
-                "recursive strategy generates a value tree",
-            )?;
-            while value.simplify() {}
-
-            ensure(
-                Tree::Leaf == value.current(),
-                "shrinking converges to the non-recursive case",
-            )?;
-        }
-        Ok(())
-    }
+    Ok(())
+  }
 }

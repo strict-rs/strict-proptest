@@ -9,17 +9,27 @@
 
 //! Arbitrary implementations for `std::path`.
 
-use std::path::{
-    MAIN_SEPARATOR, Path, PathBuf, StripPrefixError, is_separator,
-};
+use std::path::MAIN_SEPARATOR;
+use std::path::Path;
+use std::path::PathBuf;
+use std::path::StripPrefixError;
+use std::path::is_separator;
 
-use crate::{
-    arbitrary::{SMapped, StrategyFor},
-    path::PathParams,
-    prelude::{Arbitrary, Strategy as _, any, any_with},
-    std_facade::{Arc, Box, Rc, String, Vec, string::ToString as _},
-    strategy::{MapInto, statics::static_map},
-};
+use crate::arbitrary::SMapped;
+use crate::arbitrary::StrategyFor;
+use crate::path::PathParams;
+use crate::prelude::Arbitrary;
+use crate::prelude::Strategy as _;
+use crate::prelude::any;
+use crate::prelude::any_with;
+use crate::std_facade::Arc;
+use crate::std_facade::Box;
+use crate::std_facade::Rc;
+use crate::std_facade::String;
+use crate::std_facade::Vec;
+use crate::std_facade::string::ToString as _;
+use crate::strategy::MapInto;
+use crate::strategy::statics::static_map;
 
 arbitrary!(StripPrefixError; {
     loop {
@@ -43,33 +53,27 @@ arbitrary!(StripPrefixError; {
 /// representation of `PathParams` can be changed without affecting the API.
 #[derive(Debug)]
 pub struct PathParamsOutput {
-    /// Whether to generate an absolute path (rooted at `MAIN_SEPARATOR`)
-    /// rather than a relative one.
-    is_absolute: bool,
-    /// The path components to append in order; each has any embedded path
-    /// separators stripped before being pushed.
-    components: Vec<String>,
+  /// Whether to generate an absolute path (rooted at `MAIN_SEPARATOR`)
+  /// rather than a relative one.
+  is_absolute: bool,
+  /// The path components to append in order; each has any embedded path
+  /// separators stripped before being pushed.
+  components:  Vec<String>,
 }
 
 impl Arbitrary for PathParamsOutput {
-    type Parameters = PathParams;
-    type Strategy = SMapped<(bool, Vec<String>), Self>;
+  type Parameters = PathParams;
+  type Strategy = SMapped<(bool, Vec<String>), Self>;
 
-    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-        static_map(
-            (
-                any::<bool>(),
-                any_with::<Vec<String>>((
-                    args.components(),
-                    args.component_regex(),
-                )),
-            ),
-            |(is_absolute, components)| Self {
-                is_absolute,
-                components,
-            },
-        )
-    }
+  fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+    static_map(
+      (any::<bool>(), any_with::<Vec<String>>((args.components(), args.component_regex()))),
+      |(is_absolute, components)| Self {
+        is_absolute,
+        components,
+      },
+    )
+  }
 }
 
 /// This implementation accepts as its argument a [`PathParams`] struct. It generates either a
@@ -81,35 +85,32 @@ impl Arbitrary for PathParamsOutput {
 /// * Paths with a [`PrefixComponent`](std::path::PrefixComponent) on Windows, e.g. `C:\` (this may
 ///   change in the future)
 impl Arbitrary for PathBuf {
-    type Parameters = PathParams;
-    type Strategy = SMapped<PathParamsOutput, Self>;
+  type Parameters = PathParams;
+  type Strategy = SMapped<PathParamsOutput, Self>;
 
-    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-        static_map(
-            any_with::<PathParamsOutput>(args),
-            |PathParamsOutput {
-                 is_absolute,
-                 components,
-             }| {
-                let mut out = Self::new();
-                if is_absolute {
-                    out.push(MAIN_SEPARATOR.to_string());
-                }
+  fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+    static_map(
+      any_with::<PathParamsOutput>(args),
+      |PathParamsOutput {
+         is_absolute,
+         components,
+       }| {
+        let mut out = Self::new();
+        if is_absolute {
+          out.push(MAIN_SEPARATOR.to_string());
+        }
 
-                for component in components {
-                    // If a component has an embedded / (or \ on Windows), remove it from the
-                    // string.
-                    let sanitized_component = component
-                        .chars()
-                        .filter(|&ch| !is_separator(ch))
-                        .collect::<String>();
-                    out.push(&sanitized_component);
-                }
+        for component in components {
+          // If a component has an embedded / (or \ on Windows), remove it from the
+          // string.
+          let sanitized_component = component.chars().filter(|&ch| !is_separator(ch)).collect::<String>();
+          out.push(&sanitized_component);
+        }
 
-                out
-            },
-        )
-    }
+        out
+      },
+    )
+  }
 }
 
 /// Implements `Arbitrary` for a DST-pointer wrapper around `Path`
@@ -138,13 +139,13 @@ dst_wrapped!(Box, Rc, Arc);
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        strip_prefix_error => StripPrefixError,
-        path_buf => PathBuf,
-        box_path => Box<Path>,
-        rc_path => Rc<Path>,
-        arc_path => Arc<Path>
-    );
+  no_panic_test!(
+      strip_prefix_error => StripPrefixError,
+      path_buf => PathBuf,
+      box_path => Box<Path>,
+      rc_path => Rc<Path>,
+      arc_path => Arc<Path>
+  );
 }

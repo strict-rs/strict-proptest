@@ -17,48 +17,45 @@
 
 #[cfg(test)]
 mod tests {
-    use std::marker::PhantomData;
+  use std::marker::PhantomData;
 
-    use proptest::prelude::Arbitrary;
-    use proptest_derive::Arbitrary;
-    use strict_test_support::{TestFailure, ensure};
+  use proptest::prelude::Arbitrary;
+  use proptest_derive::Arbitrary;
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
 
-    #[derive(Debug)]
-    struct NotArbitrary;
+  #[derive(Debug)]
+  struct NotArbitrary;
 
-    #[derive(Debug, Arbitrary)]
-    // Generic types are not in alphabetical order on purpose.
-    struct Foo<V, T, U> {
-        first: V,
-        second: T,
-        phantom: PhantomData<U>,
+  #[derive(Debug, Arbitrary)]
+  // Generic types are not in alphabetical order on purpose.
+  struct Foo<V, T, U> {
+    first:   V,
+    second:  T,
+    phantom: PhantomData<U>,
+  }
+
+  impl<V, T, U> Foo<V, T, U> {
+    fn into_parts(self) -> (V, T) {
+      (self.first, self.second)
     }
+  }
 
-    impl<V, T, U> Foo<V, T, U> {
-        fn into_parts(self) -> (V, T) {
-            (self.first, self.second)
-        }
-    }
+  #[test]
+  fn foo_fields_are_available_without_u_arbitrary_bound() -> Result<(), TestFailure> {
+    let foo = Foo {
+      first:   1,
+      second:  2,
+      phantom: PhantomData::<NotArbitrary>,
+    };
 
-    #[test]
-    fn foo_fields_are_available_without_u_arbitrary_bound()
-    -> Result<(), TestFailure> {
-        let foo = Foo {
-            first: 1,
-            second: 2,
-            phantom: PhantomData::<NotArbitrary>,
-        };
+    ensure(foo.into_parts() == (1, 2), "the non-phantom fields round-trip without a bound on U")
+  }
 
-        ensure(
-            foo.into_parts() == (1, 2),
-            "the non-phantom fields round-trip without a bound on U",
-        )
-    }
+  #[test]
+  fn asserting_arbitrary() {
+    fn assert_arbitrary<T: Arbitrary>() {}
 
-    #[test]
-    fn asserting_arbitrary() {
-        fn assert_arbitrary<T: Arbitrary>() {}
-
-        assert_arbitrary::<Foo<i32, i32, NotArbitrary>>();
-    }
+    assert_arbitrary::<Foo<i32, i32, NotArbitrary>>();
+  }
 }

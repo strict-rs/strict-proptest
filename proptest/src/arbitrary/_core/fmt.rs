@@ -14,7 +14,7 @@ arbitrary!(Error; Error);
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(error => Error);
+  no_panic_test!(error => Error);
 }

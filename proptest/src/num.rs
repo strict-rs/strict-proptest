@@ -14,18 +14,23 @@
 
 mod float_samplers;
 
-use crate::test_runner::{Reason, TestRunner};
-use bitflags::bitflags;
 use core::error::Error;
 use core::fmt;
-use rand::distr::uniform::{SampleUniform, Uniform};
-use rand::distr::{Distribution, StandardUniform};
+
+use bitflags::bitflags;
+use rand::distr::Distribution;
+use rand::distr::StandardUniform;
+use rand::distr::uniform::SampleUniform;
+use rand::distr::uniform::Uniform;
+
+use crate::test_runner::Reason;
+use crate::test_runner::TestRunner;
 
 /// Convert an exclusive range end into the inclusive bound used by the
 /// shrinker for this numeric type.
 trait NumericRangeEndpoint: Copy {
-    /// Return the inclusive upper bound represented by `end` and `epsilon`.
-    fn inclusive_end_from_exclusive(end: Self, epsilon: Self) -> Self;
+  /// Return the inclusive upper bound represented by `end` and `epsilon`.
+  fn inclusive_end_from_exclusive(end: Self, epsilon: Self) -> Self;
 }
 
 /// Implements [`NumericRangeEndpoint`] for integer types whose exclusive upper
@@ -45,99 +50,85 @@ macro_rules! numeric_range_endpoint {
     };
 }
 
-numeric_range_endpoint!(
-    i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize,
-);
+numeric_range_endpoint!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize,);
 
 /// Which uniform range constructor rejected its bounds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UniformRangeKind {
-    /// Half-open uniform range `[start, end)`.
-    HalfOpen,
-    /// Inclusive uniform range `[start, end]`.
-    Inclusive,
+  /// Half-open uniform range `[start, end)`.
+  HalfOpen,
+  /// Inclusive uniform range `[start, end]`.
+  Inclusive,
 }
 
 /// Error returned when a uniform range cannot be sampled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UniformRangeError {
-    /// The constructor shape that rejected its bounds.
-    kind: UniformRangeKind,
+  /// The constructor shape that rejected its bounds.
+  kind: UniformRangeKind,
 }
 
 impl UniformRangeError {
-    /// Error for a rejected half-open range.
-    const fn half_open() -> Self {
-        Self {
-            kind: UniformRangeKind::HalfOpen,
-        }
+  /// Error for a rejected half-open range.
+  const fn half_open() -> Self {
+    Self {
+      kind: UniformRangeKind::HalfOpen,
     }
+  }
 
-    /// Error for a rejected inclusive range.
-    const fn inclusive() -> Self {
-        Self {
-            kind: UniformRangeKind::Inclusive,
-        }
+  /// Error for a rejected inclusive range.
+  const fn inclusive() -> Self {
+    Self {
+      kind: UniformRangeKind::Inclusive,
     }
+  }
 }
 
 impl fmt::Display for UniformRangeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.kind {
-            UniformRangeKind::HalfOpen => {
-                f.write_str("invalid half-open uniform range")
-            }
-            UniformRangeKind::Inclusive => {
-                f.write_str("invalid inclusive uniform range")
-            }
-        }
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self.kind {
+      UniformRangeKind::HalfOpen => f.write_str("invalid half-open uniform range"),
+      UniformRangeKind::Inclusive => f.write_str("invalid inclusive uniform range"),
     }
+  }
 }
 
 impl Error for UniformRangeError {}
 
 impl From<UniformRangeError> for Reason {
-    fn from(error: UniformRangeError) -> Self {
-        match error.kind {
-            UniformRangeKind::HalfOpen => {
-                "invalid half-open uniform range".into()
-            }
-            UniformRangeKind::Inclusive => {
-                "invalid inclusive uniform range".into()
-            }
-        }
+  fn from(error: UniformRangeError) -> Self {
+    match error.kind {
+      UniformRangeKind::HalfOpen => "invalid half-open uniform range".into(),
+      UniformRangeKind::Inclusive => "invalid inclusive uniform range".into(),
     }
+  }
 }
 
 #[cfg(feature = "f16")]
 impl NumericRangeEndpoint for f16 {
-    fn inclusive_end_from_exclusive(end: Self, _epsilon: Self) -> Self {
-        end
-    }
+  fn inclusive_end_from_exclusive(end: Self, _epsilon: Self) -> Self {
+    end
+  }
 }
 
 impl NumericRangeEndpoint for f32 {
-    fn inclusive_end_from_exclusive(end: Self, _epsilon: Self) -> Self {
-        end
-    }
+  fn inclusive_end_from_exclusive(end: Self, _epsilon: Self) -> Self {
+    end
+  }
 }
 
 impl NumericRangeEndpoint for f64 {
-    fn inclusive_end_from_exclusive(end: Self, _epsilon: Self) -> Self {
-        end
-    }
+  fn inclusive_end_from_exclusive(end: Self, _epsilon: Self) -> Self {
+    end
+  }
 }
 
 /// Generate a random value of `X`, sampled uniformly from the half
 /// open range `[low, high)` (excluding `high`).
-pub(crate) fn sample_uniform<X: SampleUniform>(
-    run: &mut TestRunner,
-    start: X,
-    end: X,
-) -> Result<X, UniformRangeError> {
-    Uniform::new(start, end)
-        .map_err(|_error| UniformRangeError::half_open())
-        .map(|uniform| uniform.sample(run.rng()))
+pub(crate) fn sample_uniform<X: SampleUniform>(run: &mut TestRunner, start: X, end: X) -> Result<X, UniformRangeError> {
+  Uniform::new(start, end)
+    .map_err(|_error| UniformRangeError::half_open())
+    .map(|uniform| uniform.sample(run.rng()))
 }
 
 /// Generate a random value of `X`, sampled uniformly from the closed
@@ -147,14 +138,10 @@ pub(crate) fn sample_uniform<X: SampleUniform>(
 ///
 /// Returns [`UniformRangeError`] if the range is empty and has no value to
 /// draw.
-pub fn sample_uniform_incl<X: SampleUniform>(
-    run: &mut TestRunner,
-    start: X,
-    end: X,
-) -> Result<X, UniformRangeError> {
-    Uniform::new_inclusive(start, end)
-        .map_err(|_error| UniformRangeError::inclusive())
-        .map(|uniform| uniform.sample(run.rng()))
+pub fn sample_uniform_incl<X: SampleUniform>(run: &mut TestRunner, start: X, end: X) -> Result<X, UniformRangeError> {
+  Uniform::new_inclusive(start, end)
+    .map_err(|_error| UniformRangeError::inclusive())
+    .map(|uniform| uniform.sample(run.rng()))
 }
 
 /// Defines a pair of uniform samplers that go through a wider integer type.
@@ -164,51 +151,43 @@ pub fn sample_uniform_incl<X: SampleUniform>(
 /// which cast through `$from` before sampling to reach types `rand` cannot
 /// sample directly.
 macro_rules! sample_uniform {
-    ($name: ident, $incl:ident, $from:ty, $to:ty) => {
-        fn $name(
-            run: &mut TestRunner,
-            start: $to,
-            end: $to,
-        ) -> Result<$to, UniformRangeError> {
-            let start = match <$from>::try_from(start) {
-                Ok(value) => value,
-                Err(_error) => <$from>::MAX,
-            };
-            let end = match <$from>::try_from(end) {
-                Ok(value) => value,
-                Err(_error) => <$from>::MAX,
-            };
-            let sample = Uniform::<$from>::new(start, end)
-                .map_err(|_error| UniformRangeError::half_open())?
-                .sample(run.rng());
-            Ok(match <$to>::try_from(sample) {
-                Ok(value) => value,
-                Err(_error) => <$to>::MAX,
-            })
-        }
+  ($name:ident, $incl:ident, $from:ty, $to:ty) => {
+    fn $name(run: &mut TestRunner, start: $to, end: $to) -> Result<$to, UniformRangeError> {
+      let start = match <$from>::try_from(start) {
+        Ok(value) => value,
+        Err(_error) => <$from>::MAX,
+      };
+      let end = match <$from>::try_from(end) {
+        Ok(value) => value,
+        Err(_error) => <$from>::MAX,
+      };
+      let sample = Uniform::<$from>::new(start, end)
+        .map_err(|_error| UniformRangeError::half_open())?
+        .sample(run.rng());
+      Ok(match <$to>::try_from(sample) {
+        Ok(value) => value,
+        Err(_error) => <$to>::MAX,
+      })
+    }
 
-        fn $incl(
-            run: &mut TestRunner,
-            start: $to,
-            end: $to,
-        ) -> Result<$to, UniformRangeError> {
-            let start = match <$from>::try_from(start) {
-                Ok(value) => value,
-                Err(_error) => <$from>::MAX,
-            };
-            let end = match <$from>::try_from(end) {
-                Ok(value) => value,
-                Err(_error) => <$from>::MAX,
-            };
-            let sample = Uniform::<$from>::new_inclusive(start, end)
-                .map_err(|_error| UniformRangeError::inclusive())?
-                .sample(run.rng());
-            Ok(match <$to>::try_from(sample) {
-                Ok(value) => value,
-                Err(_error) => <$to>::MAX,
-            })
-        }
-    };
+    fn $incl(run: &mut TestRunner, start: $to, end: $to) -> Result<$to, UniformRangeError> {
+      let start = match <$from>::try_from(start) {
+        Ok(value) => value,
+        Err(_error) => <$from>::MAX,
+      };
+      let end = match <$from>::try_from(end) {
+        Ok(value) => value,
+        Err(_error) => <$from>::MAX,
+      };
+      let sample = Uniform::<$from>::new_inclusive(start, end)
+        .map_err(|_error| UniformRangeError::inclusive())?
+        .sample(run.rng());
+      Ok(match <$to>::try_from(sample) {
+        Ok(value) => value,
+        Err(_error) => <$to>::MAX,
+      })
+    }
+  };
 }
 
 /// Dispatches to a uniform sampler in either `generic` or `plain` mode.
@@ -217,30 +196,12 @@ macro_rules! sample_uniform {
 /// (used by the primitive ranges); in `plain` mode they are forwarded as-is
 /// (used where the value type already is the sample type).
 macro_rules! sample_uniform_value {
-    (
-        generic,
-        $uniform:ident,
-        $sample_typ:ty,
-        $runner:expr,
-        $start:expr,
-        $end:expr $(,)?
-    ) => {
-        $crate::num::$uniform::<$sample_typ>(
-            $runner,
-            $start.into(),
-            $end.into(),
-        )
-    };
-    (
-        plain,
-        $uniform:ident,
-        $sample_typ:ty,
-        $runner:expr,
-        $start:expr,
-        $end:expr $(,)?
-    ) => {
-        $crate::num::$uniform($runner, $start, $end)
-    };
+  (generic, $uniform:ident, $sample_typ:ty, $runner:expr, $start:expr, $end:expr $(,)?) => {
+    $crate::num::$uniform::<$sample_typ>($runner, $start.into(), $end.into())
+  };
+  (plain, $uniform:ident, $sample_typ:ty, $runner:expr, $start:expr, $end:expr $(,)?) => {
+    $crate::num::$uniform($runner, $start, $end)
+  };
 }
 
 #[cfg(target_pointer_width = "64")]
@@ -261,9 +222,9 @@ sample_uniform!(isize_sample_uniform, isize_sample_uniform_incl, i16, isize);
 ///
 /// Used for the integer types `rand` samples natively.
 macro_rules! supported_int_any {
-    ($runner:ident, $typ:ty) => {
-        $runner.rng().random()
-    };
+  ($runner:ident, $typ:ty) => {
+    $runner.rng().random()
+  };
 }
 
 /// Draws a fully arbitrary integer for a type the RNG cannot sample directly.
@@ -272,9 +233,9 @@ macro_rules! supported_int_any {
 /// `usize`/`isize` on 64-bit targets.
 #[cfg(target_pointer_width = "64")]
 macro_rules! unsupported_int_any {
-    ($runner:ident, $typ:ty) => {
-        <$typ>::from_ne_bytes($runner.rng().next_u64().to_ne_bytes())
-    };
+  ($runner:ident, $typ:ty) => {
+    <$typ>::from_ne_bytes($runner.rng().next_u64().to_ne_bytes())
+  };
 }
 
 /// Draws a fully arbitrary integer for a type the RNG cannot sample directly.
@@ -283,9 +244,9 @@ macro_rules! unsupported_int_any {
 /// `usize`/`isize` on 32-bit targets.
 #[cfg(target_pointer_width = "32")]
 macro_rules! unsupported_int_any {
-    ($runner:ident, $typ:ty) => {
-        <$typ>::from_ne_bytes($runner.rng().next_u32().to_ne_bytes())
-    };
+  ($runner:ident, $typ:ty) => {
+    <$typ>::from_ne_bytes($runner.rng().next_u32().to_ne_bytes())
+  };
 }
 
 /// Draws a fully arbitrary integer for a type the RNG cannot sample directly.
@@ -294,12 +255,12 @@ macro_rules! unsupported_int_any {
 /// `usize`/`isize` on 16-bit targets.
 #[cfg(target_pointer_width = "16")]
 macro_rules! unsupported_int_any {
-    ($runner:ident, $typ:ty) => {
-        <$typ>::from_ne_bytes({
-            let bytes = $runner.rng().next_u32().to_ne_bytes();
-            [bytes[0], bytes[1]]
-        })
-    };
+  ($runner:ident, $typ:ty) => {
+    <$typ>::from_ne_bytes({
+      let bytes = $runner.rng().next_u32().to_ne_bytes();
+      [bytes[0], bytes[1]]
+    })
+  };
 }
 
 /// Defines the `Any` strategy type and its `ANY` constant for one integer
@@ -308,34 +269,34 @@ macro_rules! unsupported_int_any {
 /// The generated `Any` produces completely arbitrary values (via `$int_any`)
 /// and shrinks them through the module's `BinarySearch` toward `0`.
 macro_rules! int_any {
-    ($typ: ident, $int_any: ident) => {
-        /// Type of the `ANY` constant.
-        #[derive(Clone, Copy, Debug)]
-        #[must_use = "strategies do nothing unless used"]
-        pub struct Any(());
-        /// Generates integers with completely arbitrary values, uniformly
-        /// distributed over the whole range.
-        pub const ANY: Any = Any(());
+  ($typ:ident, $int_any:ident) => {
+    /// Type of the `ANY` constant.
+    #[derive(Clone, Copy, Debug)]
+    #[must_use = "strategies do nothing unless used"]
+    pub struct Any(());
+    /// Generates integers with completely arbitrary values, uniformly
+    /// distributed over the whole range.
+    pub const ANY: Any = Any(());
 
-        impl Strategy for Any {
-            type Tree = BinarySearch;
-            type Value = $typ;
+    impl Strategy for Any {
+      type Tree = BinarySearch;
+      type Value = $typ;
 
-            fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-                Ok(BinarySearch::new($int_any!(runner, $typ)))
-            }
-        }
-    };
+      fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+        Ok(BinarySearch::new($int_any!(runner, $typ)))
+      }
+    }
+  };
 }
 
 /// Imports the RNG trait required by one generated integer module.
 macro_rules! integer_rng_import {
-    (generic) => {
-        use rand::RngExt;
-    };
-    (plain) => {
-        use rand::Rng;
-    };
+  (generic) => {
+    use rand::RngExt;
+  };
+  (plain) => {
+    use rand::Rng;
+  };
 }
 
 /// Implements `Strategy` for every `Range*` shape over one numeric type.
@@ -346,135 +307,80 @@ macro_rules! integer_rng_import {
 /// via `BinarySearch`. The leading selector chooses the sampling mode and the
 /// concrete uniform helpers.
 macro_rules! numeric_api {
-    (@with_mode
-        $sample_mode:ident,
-        $typ:ident,
-        $sample_typ:ty,
-        $epsilon:expr,
-        $uniform:ident,
-        $incl:ident
-    ) => {
-        impl Strategy for ::core::ops::Range<$typ> {
-            type Tree = BinarySearch;
-            type Value = $typ;
+  (@with_mode $sample_mode:ident, $typ:ident, $sample_typ:ty, $epsilon:expr, $uniform:ident, $incl:ident) => {
+    impl Strategy for ::core::ops::Range<$typ> {
+      type Tree = BinarySearch;
+      type Value = $typ;
 
-            fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-                if self.is_empty() {
-                    return Err("Invalid use of empty range.".into());
-                }
-
-                Ok(BinarySearch::new_clamped(
-                    self.start,
-                    sample_uniform_value!(
-                        $sample_mode,
-                        $uniform,
-                        $sample_typ,
-                        runner,
-                        self.start,
-                        self.end,
-                    )
-                    ?
-                    .into(),
-                    <$typ as super::NumericRangeEndpoint>::inclusive_end_from_exclusive(
-                        self.end,
-                        $epsilon,
-                    ),
-                ))
-            }
+      fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+        if self.is_empty() {
+          return Err("Invalid use of empty range.".into());
         }
 
-        impl Strategy for ::core::ops::RangeInclusive<$typ> {
-            type Tree = BinarySearch;
-            type Value = $typ;
+        Ok(BinarySearch::new_clamped(
+          self.start,
+          sample_uniform_value!($sample_mode, $uniform, $sample_typ, runner, self.start, self.end,)?.into(),
+          <$typ as super::NumericRangeEndpoint>::inclusive_end_from_exclusive(self.end, $epsilon),
+        ))
+      }
+    }
 
-            fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-                if self.is_empty() {
-                    return Err("Invalid use of empty inclusive range.".into());
-                }
+    impl Strategy for ::core::ops::RangeInclusive<$typ> {
+      type Tree = BinarySearch;
+      type Value = $typ;
 
-                Ok(BinarySearch::new_clamped(
-                    *self.start(),
-                    sample_uniform_value!(
-                        $sample_mode,
-                        $incl,
-                        $sample_typ,
-                        runner,
-                        *self.start(),
-                        *self.end(),
-                    )
-                    ?
-                    .into(),
-                    *self.end(),
-                ))
-            }
+      fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+        if self.is_empty() {
+          return Err("Invalid use of empty inclusive range.".into());
         }
 
-        impl Strategy for ::core::ops::RangeFrom<$typ> {
-            type Tree = BinarySearch;
-            type Value = $typ;
+        Ok(BinarySearch::new_clamped(
+          *self.start(),
+          sample_uniform_value!($sample_mode, $incl, $sample_typ, runner, *self.start(), *self.end(),)?.into(),
+          *self.end(),
+        ))
+      }
+    }
 
-            fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-                Ok(BinarySearch::new_clamped(
-                    self.start,
-                    sample_uniform_value!(
-                        $sample_mode,
-                        $incl,
-                        $sample_typ,
-                        runner,
-                        self.start,
-                        <$typ>::MAX,
-                    )
-                    ?
-                    .into(),
-                    <$typ>::MAX,
-                ))
-            }
-        }
+    impl Strategy for ::core::ops::RangeFrom<$typ> {
+      type Tree = BinarySearch;
+      type Value = $typ;
 
-        impl Strategy for ::core::ops::RangeTo<$typ> {
-            type Tree = BinarySearch;
-            type Value = $typ;
+      fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+        Ok(BinarySearch::new_clamped(
+          self.start,
+          sample_uniform_value!($sample_mode, $incl, $sample_typ, runner, self.start, <$typ>::MAX,)?.into(),
+          <$typ>::MAX,
+        ))
+      }
+    }
 
-            fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-                Ok(BinarySearch::new_clamped(
-                    <$typ>::MIN,
-                    sample_uniform_value!(
-                        $sample_mode,
-                        $uniform,
-                        $sample_typ,
-                        runner,
-                        <$typ>::MIN,
-                        self.end,
-                    )
-                    ?
-                    .into(),
-                    self.end,
-                ))
-            }
-        }
+    impl Strategy for ::core::ops::RangeTo<$typ> {
+      type Tree = BinarySearch;
+      type Value = $typ;
 
-        impl Strategy for ::core::ops::RangeToInclusive<$typ> {
-            type Tree = BinarySearch;
-            type Value = $typ;
+      fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+        Ok(BinarySearch::new_clamped(
+          <$typ>::MIN,
+          sample_uniform_value!($sample_mode, $uniform, $sample_typ, runner, <$typ>::MIN, self.end,)?.into(),
+          self.end,
+        ))
+      }
+    }
 
-            fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-                Ok(BinarySearch::new_clamped(
-                    <$typ>::MIN,
-                    sample_uniform_value!(
-                        $sample_mode,
-                        $incl,
-                        $sample_typ,
-                        runner,
-                        <$typ>::MIN,
-                        self.end,
-                    )
-                    ?
-                    .into(),
-                    self.end,
-                ))
-            }
-        }
-    };
+    impl Strategy for ::core::ops::RangeToInclusive<$typ> {
+      type Tree = BinarySearch;
+      type Value = $typ;
+
+      fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+        Ok(BinarySearch::new_clamped(
+          <$typ>::MIN,
+          sample_uniform_value!($sample_mode, $incl, $sample_typ, runner, <$typ>::MIN, self.end,)?.into(),
+          self.end,
+        ))
+      }
+    }
+  };
 }
 
 /// Defines the complete strategy submodule for one signed integer type.
@@ -734,23 +640,13 @@ signed_integer_bin_search!(i16);
 signed_integer_bin_search!(i32);
 signed_integer_bin_search!(i64);
 signed_integer_bin_search!(i128);
-signed_integer_bin_search!(
-    isize,
-    unsupported_int_any,
-    isize_sample_uniform,
-    isize_sample_uniform_incl
-);
+signed_integer_bin_search!(isize, unsupported_int_any, isize_sample_uniform, isize_sample_uniform_incl);
 unsigned_integer_bin_search!(u8);
 unsigned_integer_bin_search!(u16);
 unsigned_integer_bin_search!(u32);
 unsigned_integer_bin_search!(u64);
 unsigned_integer_bin_search!(u128);
-unsigned_integer_bin_search!(
-    usize,
-    unsupported_int_any,
-    usize_sample_uniform,
-    usize_sample_uniform_incl
-);
+unsigned_integer_bin_search!(usize, unsupported_int_any, usize_sample_uniform, usize_sample_uniform_incl);
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -775,27 +671,20 @@ bitflags! {
 }
 
 impl FloatTypes {
-    /// Fills in the implied classes an `Any` left unspecified.
-    ///
-    /// If no sign was requested, `POSITIVE` is added; if no value class was
-    /// requested, `NORMAL` is added, matching the documented `Any` defaults.
-    fn normalise(mut self) -> Self {
-        if !self.intersects(Self::POSITIVE | Self::NEGATIVE) {
-            self |= Self::POSITIVE;
-        }
-
-        if !self.intersects(
-            Self::NORMAL
-                | Self::SUBNORMAL
-                | Self::ZERO
-                | Self::INFINITE
-                | Self::QUIET_NAN
-                | Self::SIGNALING_NAN,
-        ) {
-            self |= Self::NORMAL;
-        }
-        self
+  /// Fills in the implied classes an `Any` left unspecified.
+  ///
+  /// If no sign was requested, `POSITIVE` is added; if no value class was
+  /// requested, `NORMAL` is added, matching the documented `Any` defaults.
+  fn normalise(mut self) -> Self {
+    if !self.intersects(Self::POSITIVE | Self::NEGATIVE) {
+      self |= Self::POSITIVE;
     }
+
+    if !self.intersects(Self::NORMAL | Self::SUBNORMAL | Self::ZERO | Self::INFINITE | Self::QUIET_NAN | Self::SIGNALING_NAN) {
+      self |= Self::NORMAL;
+    }
+    self
+  }
 }
 
 /// Describes the IEEE 754 bit layout of a float type for `Any` generation.
@@ -805,49 +694,48 @@ impl FloatTypes {
 /// chosen class by manipulating raw bits.
 trait FloatLayout
 where
-    StandardUniform: Distribution<Self::Bits>,
+  StandardUniform: Distribution<Self::Bits>,
 {
-    /// Unsigned integer type holding this float's raw bit pattern.
-    type Bits: Copy;
+  /// Unsigned integer type holding this float's raw bit pattern.
+  type Bits: Copy;
 
-    /// Mask isolating the sign bit.
-    const SIGN_MASK: Self::Bits;
-    /// Mask isolating the exponent field.
-    const EXP_MASK: Self::Bits;
-    /// Exponent field of `1.0`, substituted when an edge exponent is
-    /// disallowed.
-    const EXP_ZERO: Self::Bits;
-    /// Mask isolating the mantissa field.
-    const MANTISSA_MASK: Self::Bits;
+  /// Mask isolating the sign bit.
+  const SIGN_MASK: Self::Bits;
+  /// Mask isolating the exponent field.
+  const EXP_MASK: Self::Bits;
+  /// Exponent field of `1.0`, substituted when an edge exponent is
+  /// disallowed.
+  const EXP_ZERO: Self::Bits;
+  /// Mask isolating the mantissa field.
+  const MANTISSA_MASK: Self::Bits;
 }
 
 #[cfg(feature = "f16")]
 impl FloatLayout for f16 {
-    type Bits = u16;
+  type Bits = u16;
 
-    const SIGN_MASK: u16 = 0x8000;
-    const EXP_MASK: u16 = 0x7c00;
-    const EXP_ZERO: u16 = Self::to_bits(1.0);
-    const MANTISSA_MASK: u16 =
-        !(<Self as FloatLayout>::SIGN_MASK | Self::EXP_MASK);
+  const SIGN_MASK: u16 = 0x8000;
+  const EXP_MASK: u16 = 0x7c00;
+  const EXP_ZERO: u16 = Self::to_bits(1.0);
+  const MANTISSA_MASK: u16 = !(<Self as FloatLayout>::SIGN_MASK | Self::EXP_MASK);
 }
 
 impl FloatLayout for f32 {
-    type Bits = u32;
+  type Bits = u32;
 
-    const SIGN_MASK: u32 = 0x8000_0000;
-    const EXP_MASK: u32 = 0x7F80_0000;
-    const EXP_ZERO: u32 = 0x3F80_0000;
-    const MANTISSA_MASK: u32 = 0x007F_FFFF;
+  const SIGN_MASK: u32 = 0x8000_0000;
+  const EXP_MASK: u32 = 0x7F80_0000;
+  const EXP_ZERO: u32 = 0x3F80_0000;
+  const MANTISSA_MASK: u32 = 0x007F_FFFF;
 }
 
 impl FloatLayout for f64 {
-    type Bits = u64;
+  type Bits = u64;
 
-    const SIGN_MASK: u64 = 0x8000_0000_0000_0000;
-    const EXP_MASK: u64 = 0x7FF0_0000_0000_0000;
-    const EXP_ZERO: u64 = 0x3FF0_0000_0000_0000;
-    const MANTISSA_MASK: u64 = 0x000F_FFFF_FFFF_FFFF;
+  const SIGN_MASK: u64 = 0x8000_0000_0000_0000;
+  const EXP_MASK: u64 = 0x7FF0_0000_0000_0000;
+  const EXP_ZERO: u64 = 0x3FF0_0000_0000_0000;
+  const MANTISSA_MASK: u64 = 0x000F_FFFF_FFFF_FFFF;
 }
 
 /// Defines the float-class `Any` strategy surface for one float type.
@@ -1338,856 +1226,669 @@ float_bin_search!(f64, F64U);
 
 #[cfg(test)]
 mod test {
-    use strict_test_support::{
-        TestFailure, ensure, ensure_eq, ensure_ok, ensure_some,
-    };
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_eq;
+  use strict_test_support::ensure_ok;
+  use strict_test_support::ensure_some;
 
-    use crate::bits::u32 as bits_u32;
-    use crate::strategy::*;
-    use crate::strict::ensure_property_with_config;
-    use crate::test_runner::*;
+  use super::*;
+  use crate::bits::u32 as bits_u32;
+  use crate::strategy::*;
+  use crate::strict::ensure_property_with_config;
+  use crate::test_runner::*;
 
-    use super::*;
+  fn require_inclusive_end<T: PartialEq>(candidate: &T, inclusive_end: &T) -> TestCaseResult {
+    if candidate == inclusive_end {
+      return Ok(());
+    }
+    Err(TestCaseError::fail("not the inclusive end"))
+  }
 
-    fn require_inclusive_end<T: PartialEq>(
-        candidate: &T,
-        inclusive_end: &T,
-    ) -> TestCaseResult {
-        if candidate == inclusive_end {
-            return Ok(());
-        }
-        Err(TestCaseError::fail("not the inclusive end"))
+  #[allow(
+    clippy::single_call_fn,
+    reason = "the signed binary-search test names the convergence walk from each start toward the target boundary"
+  )]
+  fn ensure_i8_converges<P: Fn(i32) -> bool>(start: i8, pass: P) -> Result<(), TestFailure> {
+    let mut state = i8::BinarySearch::new(start);
+    loop {
+      let advanced = if pass(i32::from(state.current())) {
+        state.complicate()
+      } else {
+        state.simplify()
+      };
+      if advanced {
+        continue;
+      }
+      break;
     }
 
-    #[allow(
-        clippy::single_call_fn,
-        reason = "the signed binary-search test names the convergence walk from each start toward the target boundary"
-    )]
-    fn ensure_i8_converges<P: Fn(i32) -> bool>(
-        start: i8,
-        pass: P,
-    ) -> Result<(), TestFailure> {
-        let mut state = i8::BinarySearch::new(start);
+    let current = i32::from(state.current());
+    ensure(!pass(current), "the converged value still fails")?;
+    let predecessor_passes = current.checked_sub(1).is_some_and(&pass);
+    let successor_passes = current.checked_add(1).is_some_and(pass);
+    ensure(predecessor_passes || successor_passes, "a neighbour of the converged value passes")
+  }
+
+  #[allow(
+    clippy::single_call_fn,
+    reason = "the unsigned binary-search test names the convergence walk from each start toward the target boundary"
+  )]
+  fn ensure_u8_converges<P: Fn(u32) -> bool>(start: u8, pass: P) -> Result<(), TestFailure> {
+    let mut state = u8::BinarySearch::new(start);
+    loop {
+      let advanced = if pass(u32::from(state.current())) {
+        state.complicate()
+      } else {
+        state.simplify()
+      };
+      if advanced {
+        continue;
+      }
+      break;
+    }
+
+    let current = u32::from(state.current());
+    ensure(!pass(current), "the converged value still fails")?;
+    ensure(
+      current.checked_sub(1).is_some_and(pass),
+      "the predecessor of the converged value passes",
+    )
+  }
+
+  #[test]
+  fn u8_inclusive_end_included() -> Result<(), TestFailure> {
+    let mut runner = TestRunner::deterministic();
+    let mut ok = 0;
+    for _ in 0..20 {
+      let tree = ensure_some((0..=1_i32).new_tree(&mut runner).ok(), "inclusive range generates a value tree")?;
+      let test = runner.run_one(tree, |candidate| require_inclusive_end(&candidate, &1));
+      if test.is_ok() {
+        ok += 1;
+      }
+    }
+    ensure(ok > 1, "the inclusive end is included")
+  }
+
+  #[test]
+  fn u8_inclusive_to_end_included() -> Result<(), TestFailure> {
+    let mut runner = TestRunner::deterministic();
+    let mut ok = 0;
+    for _ in 0..20 {
+      let tree = ensure_some((..=1_u8).new_tree(&mut runner).ok(), "inclusive-to range generates a value tree")?;
+      let test = runner.run_one(tree, |candidate| require_inclusive_end(&candidate, &1));
+      if test.is_ok() {
+        ok += 1;
+      }
+    }
+    ensure(ok > 1, "the inclusive end is included")
+  }
+
+  #[test]
+  fn i8_binary_search_always_converges() -> Result<(), TestFailure> {
+    for start in -128..0 {
+      for target in start + 1..1 {
+        ensure_i8_converges(i8::try_from(start).unwrap_or(0), |probe| probe > target)?;
+      }
+    }
+
+    for start in 0..128 {
+      for target in 0..start {
+        ensure_i8_converges(i8::try_from(start).unwrap_or(0), |probe| probe < target)?;
+      }
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn u8_binary_search_always_converges() -> Result<(), TestFailure> {
+    for start in 0..255 {
+      for target in 0..start {
+        ensure_u8_converges(u8::try_from(start).unwrap_or(0), |probe| probe <= target)?;
+      }
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn signed_integer_range_including_zero_converges_to_zero() -> Result<(), TestFailure> {
+    let mut runner = test_runner_without_persistence();
+    for _ in 0..100 {
+      let mut state = ensure_some((-42_i32..64_i32).new_tree(&mut runner).ok(), "signed range generates a value tree")?;
+      let init_value = state.current();
+      ensure((-42..64).contains(&init_value), "the initial value is in bounds")?;
+
+      while state.simplify() {
+        let simplified = state.current();
+        ensure((-42..64).contains(&simplified), "every simplified value stays in bounds")?;
+      }
+
+      ensure_eq(&0, &state.current(), "a range containing zero converges to zero")?;
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn negative_integer_range_stays_in_bounds() -> Result<(), TestFailure> {
+    let mut runner = test_runner_without_persistence();
+    for _ in 0..100 {
+      let mut state = ensure_some((..-42_i32).new_tree(&mut runner).ok(), "negative range generates a value tree")?;
+      let init_value = state.current();
+      ensure(init_value < -42, "the initial value is in bounds")?;
+
+      while state.simplify() {
+        ensure(state.current() < -42, "every simplified value stays in bounds")?;
+      }
+
+      ensure_eq(&-43, &state.current(), "the range converges to its upper bound")?;
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn positive_signed_integer_range_stays_in_bounds() -> Result<(), TestFailure> {
+    let mut runner = test_runner_without_persistence();
+    for _ in 0..100 {
+      let mut state = ensure_some((42_i32..).new_tree(&mut runner).ok(), "positive range generates a value tree")?;
+      let init_value = state.current();
+      ensure(init_value >= 42, "the initial value is in bounds")?;
+
+      while state.simplify() {
+        ensure(state.current() >= 42, "every simplified value stays in bounds")?;
+      }
+
+      ensure_eq(&42, &state.current(), "the range converges to its lower bound")?;
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn unsigned_integer_range_stays_in_bounds() -> Result<(), TestFailure> {
+    let mut runner = test_runner_without_persistence();
+    for _ in 0..100 {
+      let mut state = ensure_some((42_u32..56_u32).new_tree(&mut runner).ok(), "unsigned range generates a value tree")?;
+      let init_value = state.current();
+      ensure((42..56).contains(&init_value), "the initial value is in bounds")?;
+
+      while state.simplify() {
+        ensure(state.current() >= 42, "every simplified value stays in bounds")?;
+      }
+
+      ensure_eq(&42, &state.current(), "the range converges to its lower bound")?;
+    }
+    Ok(())
+  }
+
+  mod contract_sanity {
+    macro_rules! contract_sanity {
+      ($t:tt, $forty_two:expr, $fifty_six:expr) => {
+        mod $t {
+          use crate::strategy::check_strategy_sanity;
+          use crate::test_runner::Reason;
+
+          const FORTY_TWO: $t = $forty_two;
+          const FIFTY_SIX: $t = $fifty_six;
+
+          #[test]
+          fn range() -> Result<(), Reason> {
+            check_strategy_sanity(FORTY_TWO..FIFTY_SIX, None)
+          }
+
+          #[test]
+          fn range_inclusive() -> Result<(), Reason> {
+            check_strategy_sanity(FORTY_TWO..=FIFTY_SIX, None)
+          }
+
+          #[test]
+          fn range_to() -> Result<(), Reason> {
+            check_strategy_sanity(..FIFTY_SIX, None)
+          }
+
+          #[test]
+          fn range_to_inclusive() -> Result<(), Reason> {
+            check_strategy_sanity(..=FIFTY_SIX, None)
+          }
+
+          #[test]
+          fn range_from() -> Result<(), Reason> {
+            check_strategy_sanity(FORTY_TWO.., None)
+          }
+        }
+      };
+    }
+    contract_sanity!(u8, 42, 56);
+    contract_sanity!(i8, 42, 56);
+    contract_sanity!(u16, 42, 56);
+    contract_sanity!(i16, 42, 56);
+    contract_sanity!(u32, 42, 56);
+    contract_sanity!(i32, 42, 56);
+    contract_sanity!(u64, 42, 56);
+    contract_sanity!(i64, 42, 56);
+    contract_sanity!(usize, 42, 56);
+    contract_sanity!(isize, 42, 56);
+    #[cfg(feature = "f16")]
+    contract_sanity!(f16, 42.0, 56.0);
+    contract_sanity!(f32, 42.0, 56.0);
+    contract_sanity!(f64, 42.0, 56.0);
+  }
+
+  #[test]
+  fn unsigned_integer_binsearch_simplify_complicate_contract_upheld() -> Result<(), Reason> {
+    check_strategy_sanity(0_u32..1000_u32, None)?;
+    check_strategy_sanity(0_u32..1_u32, None)
+  }
+
+  #[test]
+  fn signed_integer_binsearch_simplify_complicate_contract_upheld() -> Result<(), Reason> {
+    check_strategy_sanity(0_i32..1000_i32, None)?;
+    check_strategy_sanity(0_i32..1_i32, None)
+  }
+
+  #[test]
+  fn positive_float_simplifies_to_zero() -> Result<(), TestFailure> {
+    let mut runner = test_runner_without_persistence();
+    let mut value = ensure_some((0.0_f64..2.0).new_tree(&mut runner).ok(), "float range generates a value tree")?;
+
+    while value.simplify() {}
+
+    ensure_eq(&0.0, &value.current(), "the range shrinks to zero")
+  }
+
+  #[test]
+  fn positive_float_simplifies_to_base() -> Result<(), TestFailure> {
+    let mut runner = test_runner_without_persistence();
+    let mut value = ensure_some((1.0_f64..2.0).new_tree(&mut runner).ok(), "float range generates a value tree")?;
+
+    while value.simplify() {}
+
+    ensure_eq(&1.0, &value.current(), "the range shrinks to its base")
+  }
+
+  #[test]
+  fn negative_float_simplifies_to_zero() -> Result<(), TestFailure> {
+    let mut runner = test_runner_without_persistence();
+    let mut value = ensure_some((-2.0_f64..0.0).new_tree(&mut runner).ok(), "float range generates a value tree")?;
+
+    while value.simplify() {}
+
+    ensure_eq(&0.0, &value.current(), "the range shrinks to zero")
+  }
+
+  #[test]
+  fn positive_float_complicates_to_original() -> Result<(), TestFailure> {
+    let mut runner = test_runner_without_persistence();
+    let mut value = ensure_some((1.0_f64..2.0).new_tree(&mut runner).ok(), "float range generates a value tree")?;
+    let orig = value.current();
+
+    ensure(value.simplify(), "the tree simplifies once")?;
+    while value.complicate() {}
+
+    ensure_eq(&orig, &value.current(), "complicating restores the original")
+  }
+
+  #[test]
+  fn positive_infinity_simplifies_directly_to_zero() -> Result<(), TestFailure> {
+    let mut value = f64::BinarySearch::new(f64::INFINITY);
+
+    ensure(value.simplify(), "infinity simplifies once")?;
+    ensure_eq(&0.0, &value.current(), "infinity simplifies to zero")?;
+    ensure(value.complicate(), "the zero complicates back")?;
+    ensure_eq(&f64::INFINITY, &value.current(), "complicating restores infinity")?;
+    ensure(!value.clone().complicate(), "the restored tree cannot complicate")?;
+    ensure(!value.clone().simplify(), "the restored tree cannot simplify")
+  }
+
+  #[test]
+  fn negative_infinity_simplifies_directly_to_zero() -> Result<(), TestFailure> {
+    let mut value = f64::BinarySearch::new(f64::NEG_INFINITY);
+
+    ensure(value.simplify(), "negative infinity simplifies once")?;
+    ensure_eq(&0.0, &value.current(), "it simplifies to zero")?;
+    ensure(value.complicate(), "the zero complicates back")?;
+    ensure_eq(&f64::NEG_INFINITY, &value.current(), "complicating restores negative infinity")?;
+    ensure(!value.clone().complicate(), "the restored tree cannot complicate")?;
+    ensure(!value.clone().simplify(), "the restored tree cannot simplify")
+  }
+
+  #[test]
+  fn nan_simplifies_directly_to_zero() -> Result<(), TestFailure> {
+    let mut value = f64::BinarySearch::new(f64::NAN);
+
+    ensure(value.simplify(), "NaN simplifies once")?;
+    ensure_eq(&0.0, &value.current(), "NaN simplifies to zero")?;
+    ensure(value.complicate(), "the zero complicates back")?;
+    ensure(value.current().is_nan(), "complicating restores NaN")?;
+    ensure(!value.clone().complicate(), "the restored tree cannot complicate")?;
+    ensure(!value.clone().simplify(), "the restored tree cannot simplify")
+  }
+
+  #[test]
+  fn float_simplifies_to_smallest_normal() -> Result<(), TestFailure> {
+    let mut runner = test_runner_without_persistence();
+    let mut value = ensure_some(
+      (f64::MIN_POSITIVE..2.0).new_tree(&mut runner).ok(),
+      "float range generates a value tree",
+    )?;
+
+    while value.simplify() {}
+
+    ensure_eq(&f64::MIN_POSITIVE, &value.current(), "the range shrinks to the smallest normal")
+  }
+
+  /// The shared body of the per-type `*_any_generates_desired_values`
+  /// properties: it evaluates to `Result<(), TestFailure>` so the strict
+  /// property closures can return it directly.
+  macro_rules! float_generation_test_body {
+    ($strategy:ident, $typ:ident) => {{
+      use std::num::FpCategory;
+
+      let strategy = $strategy;
+      let bits = strategy.normal_bits();
+
+      let mut seen_positive = 0_u32;
+      let mut seen_negative = 0_u32;
+      let mut seen_normal = 0_u32;
+      let mut seen_subnormal = 0_u32;
+      let mut seen_zero = 0_u32;
+      let mut seen_infinite = 0_u32;
+      let mut seen_quiet_nan = 0_u32;
+      let mut seen_signaling_nan = 0_u32;
+      let mut runner = TestRunner::deterministic();
+
+      macro_rules! record_seen {
+        ($counter: ident,$increment: expr) => {
+          $counter = $counter.saturating_add($increment);
+        };
+      }
+
+      // Check whether this version of Rust honours the NaN payload in
+      // from_bits
+      let fidelity_1 = f32::from_bits(0x7F80_0001).to_bits();
+      let fidelity_2 = f32::from_bits(0xFF80_0001).to_bits();
+      let nan_fidelity = fidelity_1 != fidelity_2;
+
+      for _ in 0..1024 {
+        let mut tree = ensure_some(strategy.new_tree(&mut runner).ok(), "float class strategy generates a value tree")?;
+        let mut increment = 1_u32;
+
         loop {
-            let advanced = if pass(i32::from(state.current())) {
-                state.complicate()
-            } else {
-                state.simplify()
-            };
-            if advanced {
-                continue;
+          let value = tree.current();
+
+          let sign = value.signum(); // So we correctly handle -0
+          if sign < 0.0 {
+            ensure(bits.contains(FloatTypes::NEGATIVE), "a negative value implies the NEGATIVE class")?;
+            record_seen!(seen_negative, increment);
+          }
+
+          if sign > 0.0 {
+            // i.e., not NaN
+            ensure(bits.contains(FloatTypes::POSITIVE), "a positive value implies the POSITIVE class")?;
+            record_seen!(seen_positive, increment);
+          }
+
+          match value.classify() {
+            FpCategory::Nan if nan_fidelity => {
+              let raw = value.to_bits();
+              let is_negative = raw << 1 >> 1 != raw;
+              if is_negative {
+                ensure(bits.contains(FloatTypes::NEGATIVE), "a negative NaN implies the NEGATIVE class")?;
+                record_seen!(seen_negative, increment);
+              } else {
+                ensure(bits.contains(FloatTypes::POSITIVE), "a positive NaN implies the POSITIVE class")?;
+                record_seen!(seen_positive, increment);
+              }
+
+              let is_quiet = raw & ($typ::EXP_MASK >> 1) == $typ::NAN.to_bits() & ($typ::EXP_MASK >> 1);
+              if is_quiet {
+                // x86/AMD64 turn signalling NaNs into quiet
+                // NaNs quite aggressively depending on what
+                // registers LLVM decides to use to pass the
+                // value around, so accept either case here.
+                ensure(
+                  bits.contains(FloatTypes::QUIET_NAN) || bits.contains(FloatTypes::SIGNALING_NAN),
+                  "a quiet NaN implies a NaN class",
+                )?;
+                record_seen!(seen_quiet_nan, increment);
+                record_seen!(seen_signaling_nan, increment);
+              } else {
+                ensure(
+                  bits.contains(FloatTypes::SIGNALING_NAN),
+                  "a signaling NaN implies the SIGNALING_NAN class",
+                )?;
+                record_seen!(seen_signaling_nan, increment);
+              }
             }
+
+            FpCategory::Nan => {
+              // Since safe Rust doesn't currently allow
+              // generating any NaN other than one particular
+              // payload, don't check the sign or signallingness
+              // and consider this to be both signs and
+              // signallingness for counting purposes.
+              record_seen!(seen_positive, increment);
+              record_seen!(seen_negative, increment);
+              record_seen!(seen_quiet_nan, increment);
+              record_seen!(seen_signaling_nan, increment);
+              ensure(
+                bits.contains(FloatTypes::QUIET_NAN) || bits.contains(FloatTypes::SIGNALING_NAN),
+                "a NaN implies a NaN class",
+              )?;
+            }
+            FpCategory::Infinite => {
+              ensure(bits.contains(FloatTypes::INFINITE), "an infinity implies the INFINITE class")?;
+              record_seen!(seen_infinite, increment);
+            }
+            FpCategory::Zero => {
+              ensure(bits.contains(FloatTypes::ZERO), "a zero implies the ZERO class")?;
+              record_seen!(seen_zero, increment);
+            }
+            FpCategory::Subnormal => {
+              ensure(bits.contains(FloatTypes::SUBNORMAL), "a subnormal implies the SUBNORMAL class")?;
+              record_seen!(seen_subnormal, increment);
+            }
+            FpCategory::Normal => {
+              ensure(bits.contains(FloatTypes::NORMAL), "a normal value implies the NORMAL class")?;
+              record_seen!(seen_normal, increment);
+            }
+          }
+
+          // Don't count simplified values towards the counts
+          increment = 0;
+          if !tree.simplify() {
             break;
+          }
         }
-
-        let current = i32::from(state.current());
-        ensure(!pass(current), "the converged value still fails")?;
-        let predecessor_passes = current.checked_sub(1).is_some_and(&pass);
-        let successor_passes = current.checked_add(1).is_some_and(pass);
-        ensure(
-            predecessor_passes || successor_passes,
-            "a neighbour of the converged value passes",
-        )
-    }
-
-    #[allow(
-        clippy::single_call_fn,
-        reason = "the unsigned binary-search test names the convergence walk from each start toward the target boundary"
-    )]
-    fn ensure_u8_converges<P: Fn(u32) -> bool>(
-        start: u8,
-        pass: P,
-    ) -> Result<(), TestFailure> {
-        let mut state = u8::BinarySearch::new(start);
-        loop {
-            let advanced = if pass(u32::from(state.current())) {
-                state.complicate()
-            } else {
-                state.simplify()
-            };
-            if advanced {
-                continue;
-            }
-            break;
-        }
-
-        let current = u32::from(state.current());
-        ensure(!pass(current), "the converged value still fails")?;
-        ensure(
-            current.checked_sub(1).is_some_and(pass),
-            "the predecessor of the converged value passes",
-        )
-    }
-
-    #[test]
-    fn u8_inclusive_end_included() -> Result<(), TestFailure> {
-        let mut runner = TestRunner::deterministic();
-        let mut ok = 0;
-        for _ in 0..20 {
-            let tree = ensure_some(
-                (0..=1_i32).new_tree(&mut runner).ok(),
-                "inclusive range generates a value tree",
-            )?;
-            let test = runner.run_one(tree, |candidate| {
-                require_inclusive_end(&candidate, &1)
-            });
-            if test.is_ok() {
-                ok += 1;
-            }
-        }
-        ensure(ok > 1, "the inclusive end is included")
-    }
-
-    #[test]
-    fn u8_inclusive_to_end_included() -> Result<(), TestFailure> {
-        let mut runner = TestRunner::deterministic();
-        let mut ok = 0;
-        for _ in 0..20 {
-            let tree = ensure_some(
-                (..=1_u8).new_tree(&mut runner).ok(),
-                "inclusive-to range generates a value tree",
-            )?;
-            let test = runner.run_one(tree, |candidate| {
-                require_inclusive_end(&candidate, &1)
-            });
-            if test.is_ok() {
-                ok += 1;
-            }
-        }
-        ensure(ok > 1, "the inclusive end is included")
-    }
-
-    #[test]
-    fn i8_binary_search_always_converges() -> Result<(), TestFailure> {
-        for start in -128..0 {
-            for target in start + 1..1 {
-                ensure_i8_converges(
-                    i8::try_from(start).unwrap_or(0),
-                    |probe| probe > target,
-                )?;
-            }
-        }
-
-        for start in 0..128 {
-            for target in 0..start {
-                ensure_i8_converges(
-                    i8::try_from(start).unwrap_or(0),
-                    |probe| probe < target,
-                )?;
-            }
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn u8_binary_search_always_converges() -> Result<(), TestFailure> {
-        for start in 0..255 {
-            for target in 0..start {
-                ensure_u8_converges(
-                    u8::try_from(start).unwrap_or(0),
-                    |probe| probe <= target,
-                )?;
-            }
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn signed_integer_range_including_zero_converges_to_zero()
-    -> Result<(), TestFailure> {
-        let mut runner = test_runner_without_persistence();
-        for _ in 0..100 {
-            let mut state = ensure_some(
-                (-42_i32..64_i32).new_tree(&mut runner).ok(),
-                "signed range generates a value tree",
-            )?;
-            let init_value = state.current();
-            ensure(
-                (-42..64).contains(&init_value),
-                "the initial value is in bounds",
-            )?;
-
-            while state.simplify() {
-                let simplified = state.current();
-                ensure(
-                    (-42..64).contains(&simplified),
-                    "every simplified value stays in bounds",
-                )?;
-            }
-
-            ensure_eq(
-                &0,
-                &state.current(),
-                "a range containing zero converges to zero",
-            )?;
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn negative_integer_range_stays_in_bounds() -> Result<(), TestFailure> {
-        let mut runner = test_runner_without_persistence();
-        for _ in 0..100 {
-            let mut state = ensure_some(
-                (..-42_i32).new_tree(&mut runner).ok(),
-                "negative range generates a value tree",
-            )?;
-            let init_value = state.current();
-            ensure(init_value < -42, "the initial value is in bounds")?;
-
-            while state.simplify() {
-                ensure(
-                    state.current() < -42,
-                    "every simplified value stays in bounds",
-                )?;
-            }
-
-            ensure_eq(
-                &-43,
-                &state.current(),
-                "the range converges to its upper bound",
-            )?;
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn positive_signed_integer_range_stays_in_bounds() -> Result<(), TestFailure>
-    {
-        let mut runner = test_runner_without_persistence();
-        for _ in 0..100 {
-            let mut state = ensure_some(
-                (42_i32..).new_tree(&mut runner).ok(),
-                "positive range generates a value tree",
-            )?;
-            let init_value = state.current();
-            ensure(init_value >= 42, "the initial value is in bounds")?;
-
-            while state.simplify() {
-                ensure(
-                    state.current() >= 42,
-                    "every simplified value stays in bounds",
-                )?;
-            }
-
-            ensure_eq(
-                &42,
-                &state.current(),
-                "the range converges to its lower bound",
-            )?;
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn unsigned_integer_range_stays_in_bounds() -> Result<(), TestFailure> {
-        let mut runner = test_runner_without_persistence();
-        for _ in 0..100 {
-            let mut state = ensure_some(
-                (42_u32..56_u32).new_tree(&mut runner).ok(),
-                "unsigned range generates a value tree",
-            )?;
-            let init_value = state.current();
-            ensure(
-                (42..56).contains(&init_value),
-                "the initial value is in bounds",
-            )?;
-
-            while state.simplify() {
-                ensure(
-                    state.current() >= 42,
-                    "every simplified value stays in bounds",
-                )?;
-            }
-
-            ensure_eq(
-                &42,
-                &state.current(),
-                "the range converges to its lower bound",
-            )?;
-        }
-        Ok(())
-    }
-
-    mod contract_sanity {
-        macro_rules! contract_sanity {
-            ($t:tt, $forty_two:expr, $fifty_six:expr) => {
-                mod $t {
-                    use crate::strategy::check_strategy_sanity;
-                    use crate::test_runner::Reason;
-
-                    const FORTY_TWO: $t = $forty_two;
-                    const FIFTY_SIX: $t = $fifty_six;
-
-                    #[test]
-                    fn range() -> Result<(), Reason> {
-                        check_strategy_sanity(FORTY_TWO..FIFTY_SIX, None)
-                    }
-
-                    #[test]
-                    fn range_inclusive() -> Result<(), Reason> {
-                        check_strategy_sanity(FORTY_TWO..=FIFTY_SIX, None)
-                    }
-
-                    #[test]
-                    fn range_to() -> Result<(), Reason> {
-                        check_strategy_sanity(..FIFTY_SIX, None)
-                    }
-
-                    #[test]
-                    fn range_to_inclusive() -> Result<(), Reason> {
-                        check_strategy_sanity(..=FIFTY_SIX, None)
-                    }
-
-                    #[test]
-                    fn range_from() -> Result<(), Reason> {
-                        check_strategy_sanity(FORTY_TWO.., None)
-                    }
-                }
-            };
-        }
-        contract_sanity!(u8, 42, 56);
-        contract_sanity!(i8, 42, 56);
-        contract_sanity!(u16, 42, 56);
-        contract_sanity!(i16, 42, 56);
-        contract_sanity!(u32, 42, 56);
-        contract_sanity!(i32, 42, 56);
-        contract_sanity!(u64, 42, 56);
-        contract_sanity!(i64, 42, 56);
-        contract_sanity!(usize, 42, 56);
-        contract_sanity!(isize, 42, 56);
-        #[cfg(feature = "f16")]
-        contract_sanity!(f16, 42.0, 56.0);
-        contract_sanity!(f32, 42.0, 56.0);
-        contract_sanity!(f64, 42.0, 56.0);
-    }
-
-    #[test]
-    fn unsigned_integer_binsearch_simplify_complicate_contract_upheld()
-    -> Result<(), Reason> {
-        check_strategy_sanity(0_u32..1000_u32, None)?;
-        check_strategy_sanity(0_u32..1_u32, None)
-    }
-
-    #[test]
-    fn signed_integer_binsearch_simplify_complicate_contract_upheld()
-    -> Result<(), Reason> {
-        check_strategy_sanity(0_i32..1000_i32, None)?;
-        check_strategy_sanity(0_i32..1_i32, None)
-    }
-
-    #[test]
-    fn positive_float_simplifies_to_zero() -> Result<(), TestFailure> {
-        let mut runner = test_runner_without_persistence();
-        let mut value = ensure_some(
-            (0.0_f64..2.0).new_tree(&mut runner).ok(),
-            "float range generates a value tree",
-        )?;
-
-        while value.simplify() {}
-
-        ensure_eq(&0.0, &value.current(), "the range shrinks to zero")
-    }
-
-    #[test]
-    fn positive_float_simplifies_to_base() -> Result<(), TestFailure> {
-        let mut runner = test_runner_without_persistence();
-        let mut value = ensure_some(
-            (1.0_f64..2.0).new_tree(&mut runner).ok(),
-            "float range generates a value tree",
-        )?;
-
-        while value.simplify() {}
-
-        ensure_eq(&1.0, &value.current(), "the range shrinks to its base")
-    }
-
-    #[test]
-    fn negative_float_simplifies_to_zero() -> Result<(), TestFailure> {
-        let mut runner = test_runner_without_persistence();
-        let mut value = ensure_some(
-            (-2.0_f64..0.0).new_tree(&mut runner).ok(),
-            "float range generates a value tree",
-        )?;
-
-        while value.simplify() {}
-
-        ensure_eq(&0.0, &value.current(), "the range shrinks to zero")
-    }
-
-    #[test]
-    fn positive_float_complicates_to_original() -> Result<(), TestFailure> {
-        let mut runner = test_runner_without_persistence();
-        let mut value = ensure_some(
-            (1.0_f64..2.0).new_tree(&mut runner).ok(),
-            "float range generates a value tree",
-        )?;
-        let orig = value.current();
-
-        ensure(value.simplify(), "the tree simplifies once")?;
-        while value.complicate() {}
-
-        ensure_eq(
-            &orig,
-            &value.current(),
-            "complicating restores the original",
-        )
-    }
-
-    #[test]
-    fn positive_infinity_simplifies_directly_to_zero() -> Result<(), TestFailure>
-    {
-        let mut value = f64::BinarySearch::new(f64::INFINITY);
-
-        ensure(value.simplify(), "infinity simplifies once")?;
-        ensure_eq(&0.0, &value.current(), "infinity simplifies to zero")?;
-        ensure(value.complicate(), "the zero complicates back")?;
-        ensure_eq(
-            &f64::INFINITY,
-            &value.current(),
-            "complicating restores infinity",
-        )?;
-        ensure(
-            !value.clone().complicate(),
-            "the restored tree cannot complicate",
-        )?;
-        ensure(
-            !value.clone().simplify(),
-            "the restored tree cannot simplify",
-        )
-    }
-
-    #[test]
-    fn negative_infinity_simplifies_directly_to_zero() -> Result<(), TestFailure>
-    {
-        let mut value = f64::BinarySearch::new(f64::NEG_INFINITY);
-
-        ensure(value.simplify(), "negative infinity simplifies once")?;
-        ensure_eq(&0.0, &value.current(), "it simplifies to zero")?;
-        ensure(value.complicate(), "the zero complicates back")?;
-        ensure_eq(
-            &f64::NEG_INFINITY,
-            &value.current(),
-            "complicating restores negative infinity",
-        )?;
-        ensure(
-            !value.clone().complicate(),
-            "the restored tree cannot complicate",
-        )?;
-        ensure(
-            !value.clone().simplify(),
-            "the restored tree cannot simplify",
-        )
-    }
-
-    #[test]
-    fn nan_simplifies_directly_to_zero() -> Result<(), TestFailure> {
-        let mut value = f64::BinarySearch::new(f64::NAN);
-
-        ensure(value.simplify(), "NaN simplifies once")?;
-        ensure_eq(&0.0, &value.current(), "NaN simplifies to zero")?;
-        ensure(value.complicate(), "the zero complicates back")?;
-        ensure(value.current().is_nan(), "complicating restores NaN")?;
-        ensure(
-            !value.clone().complicate(),
-            "the restored tree cannot complicate",
-        )?;
-        ensure(
-            !value.clone().simplify(),
-            "the restored tree cannot simplify",
-        )
-    }
-
-    #[test]
-    fn float_simplifies_to_smallest_normal() -> Result<(), TestFailure> {
-        let mut runner = test_runner_without_persistence();
-        let mut value = ensure_some(
-            (f64::MIN_POSITIVE..2.0).new_tree(&mut runner).ok(),
-            "float range generates a value tree",
-        )?;
-
-        while value.simplify() {}
-
-        ensure_eq(
-            &f64::MIN_POSITIVE,
-            &value.current(),
-            "the range shrinks to the smallest normal",
-        )
-    }
-
-    /// The shared body of the per-type `*_any_generates_desired_values`
-    /// properties: it evaluates to `Result<(), TestFailure>` so the strict
-    /// property closures can return it directly.
-    macro_rules! float_generation_test_body {
-        ($strategy:ident, $typ:ident) => {{
-            use std::num::FpCategory;
-
-            let strategy = $strategy;
-            let bits = strategy.normal_bits();
-
-            let mut seen_positive = 0_u32;
-            let mut seen_negative = 0_u32;
-            let mut seen_normal = 0_u32;
-            let mut seen_subnormal = 0_u32;
-            let mut seen_zero = 0_u32;
-            let mut seen_infinite = 0_u32;
-            let mut seen_quiet_nan = 0_u32;
-            let mut seen_signaling_nan = 0_u32;
-            let mut runner = TestRunner::deterministic();
-
-            macro_rules! record_seen {
-                ($counter:ident, $increment:expr) => {
-                    $counter = $counter.saturating_add($increment);
-                };
-            }
-
-            // Check whether this version of Rust honours the NaN payload in
-            // from_bits
-            let fidelity_1 = f32::from_bits(0x7F80_0001).to_bits();
-            let fidelity_2 = f32::from_bits(0xFF80_0001).to_bits();
-            let nan_fidelity = fidelity_1 != fidelity_2;
-
-            for _ in 0..1024 {
-                let mut tree = ensure_some(
-                    strategy.new_tree(&mut runner).ok(),
-                    "float class strategy generates a value tree",
-                )?;
-                let mut increment = 1_u32;
-
-                loop {
-                    let value = tree.current();
-
-                    let sign = value.signum(); // So we correctly handle -0
-                    if sign < 0.0 {
-                        ensure(
-                            bits.contains(FloatTypes::NEGATIVE),
-                            "a negative value implies the NEGATIVE class",
-                        )?;
-                        record_seen!(seen_negative, increment);
-                    }
-
-                    if sign > 0.0 {
-                        // i.e., not NaN
-                        ensure(
-                            bits.contains(FloatTypes::POSITIVE),
-                            "a positive value implies the POSITIVE class",
-                        )?;
-                        record_seen!(seen_positive, increment);
-                    }
-
-                    match value.classify() {
-                        FpCategory::Nan if nan_fidelity => {
-                            let raw = value.to_bits();
-                            let is_negative = raw << 1 >> 1 != raw;
-                            if is_negative {
-                                ensure(
-                                    bits.contains(FloatTypes::NEGATIVE),
-                                    "a negative NaN implies the NEGATIVE \
-                                     class",
-                                )?;
-                                record_seen!(seen_negative, increment);
-                            } else {
-                                ensure(
-                                    bits.contains(FloatTypes::POSITIVE),
-                                    "a positive NaN implies the POSITIVE \
-                                     class",
-                                )?;
-                                record_seen!(seen_positive, increment);
-                            }
-
-                            let is_quiet = raw & ($typ::EXP_MASK >> 1)
-                                == $typ::NAN.to_bits() & ($typ::EXP_MASK >> 1);
-                            if is_quiet {
-                                // x86/AMD64 turn signalling NaNs into quiet
-                                // NaNs quite aggressively depending on what
-                                // registers LLVM decides to use to pass the
-                                // value around, so accept either case here.
-                                ensure(
-                                    bits.contains(FloatTypes::QUIET_NAN)
-                                        || bits.contains(
-                                            FloatTypes::SIGNALING_NAN,
-                                        ),
-                                    "a quiet NaN implies a NaN class",
-                                )?;
-                                record_seen!(seen_quiet_nan, increment);
-                                record_seen!(seen_signaling_nan, increment);
-                            } else {
-                                ensure(
-                                    bits.contains(FloatTypes::SIGNALING_NAN),
-                                    "a signaling NaN implies the \
-                                     SIGNALING_NAN class",
-                                )?;
-                                record_seen!(seen_signaling_nan, increment);
-                            }
-                        }
-
-                        FpCategory::Nan => {
-                            // Since safe Rust doesn't currently allow
-                            // generating any NaN other than one particular
-                            // payload, don't check the sign or signallingness
-                            // and consider this to be both signs and
-                            // signallingness for counting purposes.
-                            record_seen!(seen_positive, increment);
-                            record_seen!(seen_negative, increment);
-                            record_seen!(seen_quiet_nan, increment);
-                            record_seen!(seen_signaling_nan, increment);
-                            ensure(
-                                bits.contains(FloatTypes::QUIET_NAN)
-                                    || bits.contains(FloatTypes::SIGNALING_NAN),
-                                "a NaN implies a NaN class",
-                            )?;
-                        }
-                        FpCategory::Infinite => {
-                            ensure(
-                                bits.contains(FloatTypes::INFINITE),
-                                "an infinity implies the INFINITE class",
-                            )?;
-                            record_seen!(seen_infinite, increment);
-                        }
-                        FpCategory::Zero => {
-                            ensure(
-                                bits.contains(FloatTypes::ZERO),
-                                "a zero implies the ZERO class",
-                            )?;
-                            record_seen!(seen_zero, increment);
-                        }
-                        FpCategory::Subnormal => {
-                            ensure(
-                                bits.contains(FloatTypes::SUBNORMAL),
-                                "a subnormal implies the SUBNORMAL class",
-                            )?;
-                            record_seen!(seen_subnormal, increment);
-                        }
-                        FpCategory::Normal => {
-                            ensure(
-                                bits.contains(FloatTypes::NORMAL),
-                                "a normal value implies the NORMAL class",
-                            )?;
-                            record_seen!(seen_normal, increment);
-                        }
-                    }
-
-                    // Don't count simplified values towards the counts
-                    increment = 0;
-                    if !tree.simplify() {
-                        break;
-                    }
-                }
-            }
-
-            if bits.contains(FloatTypes::POSITIVE) {
-                ensure(
-                    seen_positive > 200,
-                    "the POSITIVE class is well represented",
-                )?;
-            }
-            if bits.contains(FloatTypes::NEGATIVE) {
-                ensure(
-                    seen_negative > 200,
-                    "the NEGATIVE class is well represented",
-                )?;
-            }
-            if bits.contains(FloatTypes::NORMAL) {
-                ensure(
-                    seen_normal > 100,
-                    "the NORMAL class is well represented",
-                )?;
-            }
-            if bits.contains(FloatTypes::SUBNORMAL) {
-                ensure(
-                    seen_subnormal > 5,
-                    "the SUBNORMAL class is represented",
-                )?;
-            }
-            if bits.contains(FloatTypes::ZERO) {
-                ensure(seen_zero > 5, "the ZERO class is represented")?;
-            }
-            if bits.contains(FloatTypes::INFINITE) {
-                ensure(seen_infinite > 0, "the INFINITE class is represented")?;
-            }
-            if bits.contains(FloatTypes::QUIET_NAN) {
-                ensure(
-                    seen_quiet_nan > 0,
-                    "the QUIET_NAN class is represented",
-                )?;
-            }
-            if bits.contains(FloatTypes::SIGNALING_NAN) {
-                ensure(
-                    seen_signaling_nan > 0,
-                    "the SIGNALING_NAN class is represented",
-                )?;
-            }
-            Ok(())
-        }};
-    }
-
-    /// Run one strict float-class property with the 1024-case config the
-    /// legacy `proptest!` block used.
-    fn run_float_class_property<S, F>(
-        strategy: &S,
-        context: &'static str,
-        property: F,
-    ) -> Result<(), TestFailure>
-    where
-        S: Strategy,
-        F: Fn(S::Value) -> Result<(), TestFailure>,
-    {
-        ensure_property_with_config(
+      }
+
+      if bits.contains(FloatTypes::POSITIVE) {
+        ensure(seen_positive > 200, "the POSITIVE class is well represented")?;
+      }
+      if bits.contains(FloatTypes::NEGATIVE) {
+        ensure(seen_negative > 200, "the NEGATIVE class is well represented")?;
+      }
+      if bits.contains(FloatTypes::NORMAL) {
+        ensure(seen_normal > 100, "the NORMAL class is well represented")?;
+      }
+      if bits.contains(FloatTypes::SUBNORMAL) {
+        ensure(seen_subnormal > 5, "the SUBNORMAL class is represented")?;
+      }
+      if bits.contains(FloatTypes::ZERO) {
+        ensure(seen_zero > 5, "the ZERO class is represented")?;
+      }
+      if bits.contains(FloatTypes::INFINITE) {
+        ensure(seen_infinite > 0, "the INFINITE class is represented")?;
+      }
+      if bits.contains(FloatTypes::QUIET_NAN) {
+        ensure(seen_quiet_nan > 0, "the QUIET_NAN class is represented")?;
+      }
+      if bits.contains(FloatTypes::SIGNALING_NAN) {
+        ensure(seen_signaling_nan > 0, "the SIGNALING_NAN class is represented")?;
+      }
+      Ok(())
+    }};
+  }
+
+  /// Run one strict float-class property with the 1024-case config the
+  /// legacy `proptest!` block used.
+  fn run_float_class_property<S, F>(strategy: &S, context: &'static str, property: F) -> Result<(), TestFailure>
+  where
+    S: Strategy,
+    F: Fn(S::Value) -> Result<(), TestFailure>,
+  {
+    ensure_property_with_config(
+      strategy,
+      context,
+      Config {
+        failure_persistence: None,
+        ..Config::with_cases(1024)
+      },
+      property,
+    )
+  }
+
+  #[cfg(feature = "f16")]
+  #[test]
+  fn f16_any_generates_desired_values() -> Result<(), TestFailure> {
+    run_float_class_property(
+      &bits_u32::ANY.prop_map(f16::Any::from_bits),
+      "every f16 class combination generates matching values",
+      |strategy| float_generation_test_body!(strategy, f16),
+    )
+  }
+
+  #[cfg(feature = "f16")]
+  #[test]
+  fn f16_any_sanity() -> Result<(), TestFailure> {
+    run_float_class_property(
+      &bits_u32::ANY.prop_map(f16::Any::from_bits),
+      "every f16 class combination upholds the shrink contract",
+      |strategy| {
+        ensure_ok(
+          check_strategy_sanity(
             strategy,
-            context,
-            Config {
-                failure_persistence: None,
-                ..Config::with_cases(1024)
-            },
-            property,
+            Some(CheckStrategySanityOptions {
+              strict_complicate_after_simplify: false,
+              ..CheckStrategySanityOptions::default()
+            }),
+          ),
+          "f16 class strategy upholds the shrink contract",
         )
-    }
+      },
+    )
+  }
 
-    #[cfg(feature = "f16")]
-    #[test]
-    fn f16_any_generates_desired_values() -> Result<(), TestFailure> {
-        run_float_class_property(
-            &bits_u32::ANY.prop_map(f16::Any::from_bits),
-            "every f16 class combination generates matching values",
-            |strategy| float_generation_test_body!(strategy, f16),
+  #[test]
+  fn f32_any_generates_desired_values() -> Result<(), TestFailure> {
+    run_float_class_property(
+      &bits_u32::ANY.prop_map(f32::Any::from_bits),
+      "every f32 class combination generates matching values",
+      |strategy| float_generation_test_body!(strategy, f32),
+    )
+  }
+
+  #[test]
+  fn f32_any_sanity() -> Result<(), TestFailure> {
+    run_float_class_property(
+      &bits_u32::ANY.prop_map(f32::Any::from_bits),
+      "every f32 class combination upholds the shrink contract",
+      |strategy| {
+        ensure_ok(
+          check_strategy_sanity(
+            strategy,
+            Some(CheckStrategySanityOptions {
+              strict_complicate_after_simplify: false,
+              ..CheckStrategySanityOptions::default()
+            }),
+          ),
+          "f32 class strategy upholds the shrink contract",
         )
-    }
+      },
+    )
+  }
 
-    #[cfg(feature = "f16")]
-    #[test]
-    fn f16_any_sanity() -> Result<(), TestFailure> {
-        run_float_class_property(
-            &bits_u32::ANY.prop_map(f16::Any::from_bits),
-            "every f16 class combination upholds the shrink contract",
-            |strategy| {
-                ensure_ok(
-                    check_strategy_sanity(
-                        strategy,
-                        Some(CheckStrategySanityOptions {
-                            strict_complicate_after_simplify: false,
-                            ..CheckStrategySanityOptions::default()
-                        }),
-                    ),
-                    "f16 class strategy upholds the shrink contract",
-                )
-            },
+  #[test]
+  fn f64_any_generates_desired_values() -> Result<(), TestFailure> {
+    run_float_class_property(
+      &bits_u32::ANY.prop_map(f64::Any::from_bits),
+      "every f64 class combination generates matching values",
+      |strategy| float_generation_test_body!(strategy, f64),
+    )
+  }
+
+  #[test]
+  fn f64_any_sanity() -> Result<(), TestFailure> {
+    run_float_class_property(
+      &bits_u32::ANY.prop_map(f64::Any::from_bits),
+      "every f64 class combination upholds the shrink contract",
+      |strategy| {
+        ensure_ok(
+          check_strategy_sanity(
+            strategy,
+            Some(CheckStrategySanityOptions {
+              strict_complicate_after_simplify: false,
+              ..CheckStrategySanityOptions::default()
+            }),
+          ),
+          "f64 class strategy upholds the shrink contract",
         )
-    }
+      },
+    )
+  }
 
-    #[test]
-    fn f32_any_generates_desired_values() -> Result<(), TestFailure> {
-        run_float_class_property(
-            &bits_u32::ANY.prop_map(f32::Any::from_bits),
-            "every f32 class combination generates matching values",
-            |strategy| float_generation_test_body!(strategy, f32),
-        )
-    }
+  mod error_on_empty {
+    // These tests pin the strict generation-error contract of empty
+    // numeric ranges.
+    macro_rules! error_on_empty {
+      ($t:tt, $zero:expr, $one:expr) => {
+        mod $t {
+          use strict_test_support::TestFailure;
+          use strict_test_support::ensure;
 
-    #[test]
-    fn f32_any_sanity() -> Result<(), TestFailure> {
-        run_float_class_property(
-            &bits_u32::ANY.prop_map(f32::Any::from_bits),
-            "every f32 class combination upholds the shrink contract",
-            |strategy| {
-                ensure_ok(
-                    check_strategy_sanity(
-                        strategy,
-                        Some(CheckStrategySanityOptions {
-                            strict_complicate_after_simplify: false,
-                            ..CheckStrategySanityOptions::default()
-                        }),
-                    ),
-                    "f32 class strategy upholds the shrink contract",
-                )
-            },
-        )
-    }
+          use crate::strategy::Strategy;
+          use crate::test_runner::TestRunner;
 
-    #[test]
-    fn f64_any_generates_desired_values() -> Result<(), TestFailure> {
-        run_float_class_property(
-            &bits_u32::ANY.prop_map(f64::Any::from_bits),
-            "every f64 class combination generates matching values",
-            |strategy| float_generation_test_body!(strategy, f64),
-        )
-    }
+          const ZERO: $t = $zero;
+          const ONE: $t = $one;
 
-    #[test]
-    fn f64_any_sanity() -> Result<(), TestFailure> {
-        run_float_class_property(
-            &bits_u32::ANY.prop_map(f64::Any::from_bits),
-            "every f64 class combination upholds the shrink contract",
-            |strategy| {
-                ensure_ok(
-                    check_strategy_sanity(
-                        strategy,
-                        Some(CheckStrategySanityOptions {
-                            strict_complicate_after_simplify: false,
-                            ..CheckStrategySanityOptions::default()
-                        }),
-                    ),
-                    "f64 class strategy upholds the shrink contract",
-                )
-            },
-        )
-    }
+          #[test]
+          fn range() -> Result<(), TestFailure> {
+            let mut runner = TestRunner::deterministic();
+            let result = (ZERO..ZERO).new_tree(&mut runner);
+            ensure(
+              result
+                .err()
+                .is_some_and(|reason| reason.message() == "Invalid use of empty range."),
+              "an empty range returns a generation error",
+            )
+          }
 
-    mod error_on_empty {
-        // These tests pin the strict generation-error contract of empty
-        // numeric ranges.
-        macro_rules! error_on_empty {
-            ($t:tt, $zero:expr, $one:expr) => {
-                mod $t {
-                    use crate::strategy::Strategy;
-                    use crate::test_runner::TestRunner;
-                    use strict_test_support::{TestFailure, ensure};
-
-                    const ZERO: $t = $zero;
-                    const ONE: $t = $one;
-
-                    #[test]
-                    fn range() -> Result<(), TestFailure> {
-                        let mut runner = TestRunner::deterministic();
-                        let result = (ZERO..ZERO).new_tree(&mut runner);
-                        ensure(
-                            result.err().is_some_and(|reason| {
-                                reason.message()
-                                    == "Invalid use of empty range."
-                            }),
-                            "an empty range returns a generation error",
-                        )
-                    }
-
-                    #[test]
-                    fn range_inclusive() -> Result<(), TestFailure> {
-                        let mut runner = TestRunner::deterministic();
-                        let result = core::ops::RangeInclusive::new(ONE, ZERO)
-                            .new_tree(&mut runner);
-                        ensure(
-                            result.err().is_some_and(|reason| {
-                                reason.message()
-                                    == "Invalid use of empty inclusive range."
-                            }),
-                            "an empty inclusive range returns a generation \
-                             error",
-                        )
-                    }
-                }
-            };
+          #[test]
+          fn range_inclusive() -> Result<(), TestFailure> {
+            let mut runner = TestRunner::deterministic();
+            let result = core::ops::RangeInclusive::new(ONE, ZERO).new_tree(&mut runner);
+            ensure(
+              result
+                .err()
+                .is_some_and(|reason| reason.message() == "Invalid use of empty inclusive range."),
+              "an empty inclusive range returns a generation error",
+            )
+          }
         }
-        error_on_empty!(u8, 0, 1);
-        error_on_empty!(i8, 0, 1);
-        error_on_empty!(u16, 0, 1);
-        error_on_empty!(i16, 0, 1);
-        error_on_empty!(u32, 0, 1);
-        error_on_empty!(i32, 0, 1);
-        error_on_empty!(u64, 0, 1);
-        error_on_empty!(i64, 0, 1);
-        error_on_empty!(usize, 0, 1);
-        error_on_empty!(isize, 0, 1);
-        #[cfg(feature = "f16")]
-        error_on_empty!(f16, 0.0, 1.0);
-        error_on_empty!(f32, 0.0, 1.0);
-        error_on_empty!(f64, 0.0, 1.0);
+      };
     }
+    error_on_empty!(u8, 0, 1);
+    error_on_empty!(i8, 0, 1);
+    error_on_empty!(u16, 0, 1);
+    error_on_empty!(i16, 0, 1);
+    error_on_empty!(u32, 0, 1);
+    error_on_empty!(i32, 0, 1);
+    error_on_empty!(u64, 0, 1);
+    error_on_empty!(i64, 0, 1);
+    error_on_empty!(usize, 0, 1);
+    error_on_empty!(isize, 0, 1);
+    #[cfg(feature = "f16")]
+    error_on_empty!(f16, 0.0, 1.0);
+    error_on_empty!(f32, 0.0, 1.0);
+    error_on_empty!(f64, 0.0, 1.0);
+  }
 }

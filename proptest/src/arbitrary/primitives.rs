@@ -11,13 +11,22 @@
 
 use crate::bool;
 use crate::char;
-use crate::num::{
-    f32, f64, i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize,
-};
+use crate::num::f32;
+use crate::num::f64;
+use crate::num::i8;
+use crate::num::i16;
+use crate::num::i32;
+use crate::num::i64;
+use crate::num::i128;
+use crate::num::isize;
+use crate::num::u8;
+use crate::num::u16;
+use crate::num::u32;
+use crate::num::u64;
+use crate::num::u128;
+use crate::num::usize;
 
-arbitrary!(
-    bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, i128, u128
-);
+arbitrary!(bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, i128, u128);
 
 // Note that for floating point types we limit the space since a lot of code
 // isn't prepared for (and is not intended to be) things like NaN and infinity.
@@ -32,12 +41,12 @@ arbitrary!(char, char::CharStrategy<'static>; char::any());
 
 #[cfg(test)]
 mod test {
-    no_panic_test!(
-        bool => bool,
-        char => char,
-        f32 => f32, f64 => f64,
-        isize => isize, usize => usize,
-        i8 => i8, i16 => i16, i32 => i32, i64 => i64, i128 => i128,
-        u8 => u8, u16 => u16, u32 => u32, u64 => u64, u128 => u128
-    );
+  no_panic_test!(
+      bool => bool,
+      char => char,
+      f32 => f32, f64 => f64,
+      isize => isize, usize => usize,
+      i8 => i8, i16 => i16, i32 => i32, i64 => i64, i128 => i128,
+      u8 => u8, u16 => u16, u32 => u32, u64 => u64, u128 => u128
+  );
 }

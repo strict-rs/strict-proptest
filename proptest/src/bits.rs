@@ -16,54 +16,59 @@
 //! others). For integers treated as numeric values, see the corresponding
 //! modules of the `num` module instead.
 
-use crate::std_facade::{Vec, fmt, string::ToString as _, vec};
+use core::error::Error;
 use core::marker::PhantomData;
 
 #[cfg(feature = "bit-set")]
 use bit_set::BitSet;
 #[cfg(feature = "bit-set")]
 use bit_vec::BitVec;
-use rand::{RngExt as _, seq::IteratorRandom as _};
+use rand::RngExt as _;
+use rand::seq::IteratorRandom as _;
 
-use crate::collection::{
-    EmptySizeRange as CollectionEmptySizeRange, SizeRange,
-};
+use crate::collection::EmptySizeRange as CollectionEmptySizeRange;
+use crate::collection::SizeRange;
 use crate::num::sample_uniform_incl;
+use crate::std_facade::Vec;
+use crate::std_facade::fmt;
+use crate::std_facade::string::ToString as _;
+use crate::std_facade::vec;
+use crate::strategy::NewTree;
+use crate::strategy::Strategy;
+use crate::strategy::ValueTree;
 #[cfg(test)]
 use crate::strategy::check_strategy_sanity;
-use crate::strategy::{NewTree, Strategy, ValueTree};
 use crate::test_runner::TestRunner;
-use core::error::Error;
 
 /// Trait for types which can be handled with `BitSetStrategy`.
 pub trait BitSetLike: Clone + fmt::Debug {
-    /// Create a new value of `Self` with space for up to `max` bits, all
-    /// initialised to zero.
-    fn new_bitset(max: usize) -> Self;
-    /// Return an upper bound on the greatest bit set _plus one_.
-    fn len(&self) -> usize;
-    /// Return whether the bit set contains no set bits.
-    fn is_empty(&self) -> bool {
-        self.count() == 0
-    }
-    /// Test whether the given bit is set.
-    fn test(&self, ix: usize) -> bool;
-    /// Set the given bit.
-    fn set(&mut self, ix: usize);
-    /// Clear the given bit.
-    fn clear(&mut self, ix: usize);
-    /// Return the number of bits set.
-    ///
-    /// This has a default for backwards compatibility, which simply does a
-    /// linear scan through the bits. Implementations are strongly encouraged
-    /// to override this.
-    #[allow(
-        clippy::single_call_fn,
-        reason = "default bit-count implementation scanning every index via test() for BitSetLike"
-    )]
-    fn count(&self) -> usize {
-        (0..self.len()).filter(|&i| self.test(i)).count()
-    }
+  /// Create a new value of `Self` with space for up to `max` bits, all
+  /// initialised to zero.
+  fn new_bitset(max: usize) -> Self;
+  /// Return an upper bound on the greatest bit set _plus one_.
+  fn len(&self) -> usize;
+  /// Return whether the bit set contains no set bits.
+  fn is_empty(&self) -> bool {
+    self.count() == 0
+  }
+  /// Test whether the given bit is set.
+  fn test(&self, ix: usize) -> bool;
+  /// Set the given bit.
+  fn set(&mut self, ix: usize);
+  /// Clear the given bit.
+  fn clear(&mut self, ix: usize);
+  /// Return the number of bits set.
+  ///
+  /// This has a default for backwards compatibility, which simply does a
+  /// linear scan through the bits. Implementations are strongly encouraged
+  /// to override this.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "default bit-count implementation scanning every index via test() for BitSetLike"
+  )]
+  fn count(&self) -> usize {
+    (0..self.len()).filter(|&i| self.test(i)).count()
+  }
 }
 
 /// Implements `BitSetLike` for a primitive integer type used as bit flags.
@@ -71,28 +76,28 @@ pub trait BitSetLike: Clone + fmt::Debug {
 /// The integer stores its bits directly: `new_bitset` yields `0`, `len` is the
 /// type's bit width, and `count` uses `count_ones`.
 macro_rules! int_bitset {
-    ($typ:ty) => {
-        impl BitSetLike for $typ {
-            fn new_bitset(_: usize) -> Self {
-                0
-            }
-            fn len(&self) -> usize {
-                usize::try_from(<$typ>::BITS).unwrap_or(usize::MAX)
-            }
-            fn test(&self, ix: usize) -> bool {
-                0 != (*self & (1 << ix))
-            }
-            fn set(&mut self, ix: usize) {
-                *self |= 1 << ix;
-            }
-            fn clear(&mut self, ix: usize) {
-                *self &= !(1 << ix);
-            }
-            fn count(&self) -> usize {
-                usize::try_from(self.count_ones()).unwrap_or(usize::MAX)
-            }
-        }
-    };
+  ($typ:ty) => {
+    impl BitSetLike for $typ {
+      fn new_bitset(_: usize) -> Self {
+        0
+      }
+      fn len(&self) -> usize {
+        usize::try_from(<$typ>::BITS).unwrap_or(usize::MAX)
+      }
+      fn test(&self, ix: usize) -> bool {
+        0 != (*self & (1 << ix))
+      }
+      fn set(&mut self, ix: usize) {
+        *self |= 1 << ix;
+      }
+      fn clear(&mut self, ix: usize) {
+        *self &= !(1 << ix);
+      }
+      fn count(&self) -> usize {
+        usize::try_from(self.count_ones()).unwrap_or(usize::MAX)
+      }
+    }
+  };
 }
 int_bitset!(u8);
 int_bitset!(u16);
@@ -110,63 +115,63 @@ int_bitset!(isize);
 #[cfg(feature = "bit-set")]
 #[cfg_attr(docsrs, doc(cfg(feature = "bit-set")))]
 impl BitSetLike for BitSet {
-    fn new_bitset(max: usize) -> Self {
-        Self::with_capacity(max)
-    }
+  fn new_bitset(max: usize) -> Self {
+    Self::with_capacity(max)
+  }
 
-    fn len(&self) -> usize {
-        self.capacity()
-    }
+  fn len(&self) -> usize {
+    self.capacity()
+  }
 
-    fn test(&self, bit: usize) -> bool {
-        self.contains(bit)
-    }
+  fn test(&self, bit: usize) -> bool {
+    self.contains(bit)
+  }
 
-    fn set(&mut self, bit: usize) {
-        let _was_new = self.insert(bit);
-    }
+  fn set(&mut self, bit: usize) {
+    let _was_new = self.insert(bit);
+  }
 
-    fn clear(&mut self, bit: usize) {
-        let _was_present = self.remove(bit);
-    }
+  fn clear(&mut self, bit: usize) {
+    let _was_present = self.remove(bit);
+  }
 
-    fn count(&self) -> usize {
-        Self::count(self)
-    }
+  fn count(&self) -> usize {
+    Self::count(self)
+  }
 }
 
 impl BitSetLike for Vec<bool> {
-    fn new_bitset(max: usize) -> Self {
-        vec![false; max]
+  fn new_bitset(max: usize) -> Self {
+    vec![false; max]
+  }
+
+  fn len(&self) -> usize {
+    self.len()
+  }
+
+  fn test(&self, bit: usize) -> bool {
+    self.get(bit).copied().unwrap_or(false)
+  }
+
+  fn set(&mut self, bit: usize) {
+    if bit >= self.len() {
+      self.resize(bit.saturating_add(1), false);
     }
 
-    fn len(&self) -> usize {
-        self.len()
+    if let Some(slot) = self.get_mut(bit) {
+      *slot = true;
     }
+  }
 
-    fn test(&self, bit: usize) -> bool {
-        self.get(bit).copied().unwrap_or(false)
+  fn clear(&mut self, bit: usize) {
+    if let Some(slot) = self.get_mut(bit) {
+      *slot = false;
     }
+  }
 
-    fn set(&mut self, bit: usize) {
-        if bit >= self.len() {
-            self.resize(bit.saturating_add(1), false);
-        }
-
-        if let Some(slot) = self.get_mut(bit) {
-            *slot = true;
-        }
-    }
-
-    fn clear(&mut self, bit: usize) {
-        if let Some(slot) = self.get_mut(bit) {
-            *slot = false;
-        }
-    }
-
-    fn count(&self) -> usize {
-        self.iter().filter(|&&bit| bit).count()
-    }
+  fn count(&self) -> usize {
+    self.iter().filter(|&&bit| bit).count()
+  }
 }
 
 /// Generates values as a set of bits between the two bounds.
@@ -176,60 +181,58 @@ impl BitSetLike for Vec<bool> {
 #[must_use = "strategies do nothing unless used"]
 #[derive(Clone, Copy, Debug)]
 pub struct BitSetStrategy<T: BitSetLike> {
-    /// Lowest bit index (inclusive) that may be set.
-    min: usize,
-    /// One past the highest bit index (exclusive) that may be set.
-    max: usize,
-    /// When present, only bits also set in this mask may be set.
-    mask: Option<T>,
+  /// Lowest bit index (inclusive) that may be set.
+  min:  usize,
+  /// One past the highest bit index (exclusive) that may be set.
+  max:  usize,
+  /// When present, only bits also set in this mask may be set.
+  mask: Option<T>,
 }
 
 impl<T: BitSetLike> BitSetStrategy<T> {
-    /// Create a strategy which generates values where bits between `min`
-    /// (inclusive) and `max` (exclusive) may be set.
-    ///
-    /// Due to the generics, the functions in the typed submodules are usually
-    /// preferable to calling this directly.
-    pub const fn new(min: usize, max: usize) -> Self {
-        Self {
-            min,
-            max,
-            mask: None,
-        }
+  /// Create a strategy which generates values where bits between `min`
+  /// (inclusive) and `max` (exclusive) may be set.
+  ///
+  /// Due to the generics, the functions in the typed submodules are usually
+  /// preferable to calling this directly.
+  pub const fn new(min: usize, max: usize) -> Self {
+    Self {
+      min,
+      max,
+      mask: None,
     }
+  }
 
-    /// Create a strategy which generates values where any bits set (and only
-    /// those bits) in `mask` may be set.
-    pub fn masked(mask: T) -> Self {
-        Self {
-            min: 0,
-            max: mask.len(),
-            mask: Some(mask),
-        }
+  /// Create a strategy which generates values where any bits set (and only
+  /// those bits) in `mask` may be set.
+  pub fn masked(mask: T) -> Self {
+    Self {
+      min:  0,
+      max:  mask.len(),
+      mask: Some(mask),
     }
+  }
 }
 
 impl<T: BitSetLike> Strategy for BitSetStrategy<T> {
-    type Tree = BitSetValueTree<T>;
-    type Value = T;
+  type Tree = BitSetValueTree<T>;
+  type Value = T;
 
-    fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-        let mut inner = T::new_bitset(self.max);
-        for bit in self.min..self.max {
-            if self.mask.as_ref().is_none_or(|mask| mask.test(bit))
-                && runner.rng().random()
-            {
-                inner.set(bit);
-            }
-        }
-
-        Ok(BitSetValueTree {
-            inner,
-            shrink: self.min,
-            prev_shrink: None,
-            min_count: 0,
-        })
+  fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+    let mut inner = T::new_bitset(self.max);
+    for bit in self.min..self.max {
+      if self.mask.as_ref().is_none_or(|mask| mask.test(bit)) && runner.rng().random() {
+        inner.set(bit);
+      }
     }
+
+    Ok(BitSetValueTree {
+      inner,
+      shrink: self.min,
+      prev_shrink: None,
+      min_count: 0,
+    })
+  }
 }
 
 /// Generates bit sets with a particular number of bits set.
@@ -242,198 +245,185 @@ impl<T: BitSetLike> Strategy for BitSetStrategy<T> {
 #[derive(Clone, Debug)]
 #[must_use = "strategies do nothing unless used"]
 pub struct SampledBitSetStrategy<T: BitSetLike> {
-    /// Range for how many bits a generated value has set.
-    size: SizeRange,
-    /// Range of bit indices the set bits are drawn from.
-    bits: SizeRange,
-    /// Construction-time validation failure, reported when generation starts.
-    validation_error: Option<SampledBitsError>,
-    /// Ties the strategy to the concrete `BitSetLike` type `T`.
-    _marker: PhantomData<T>,
+  /// Range for how many bits a generated value has set.
+  size:             SizeRange,
+  /// Range of bit indices the set bits are drawn from.
+  bits:             SizeRange,
+  /// Construction-time validation failure, reported when generation starts.
+  validation_error: Option<SampledBitsError>,
+  /// Ties the strategy to the concrete `BitSetLike` type `T`.
+  _marker:          PhantomData<T>,
 }
 
 /// Error returned by [`SampledBitSetStrategy::try_new`] when the requested
 /// size and bit ranges cannot form a valid sampling strategy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SampledBitsError {
-    /// The requested size range is empty.
-    EmptySizeRange(CollectionEmptySizeRange),
-    /// The requested sample size exceeds the number of available bits.
-    NotEnoughBits {
-        /// Number of bits available in the bit range.
-        available: usize,
-        /// Start of the requested size range.
-        size_start: usize,
-        /// Exclusive end of the requested size range.
-        size_end_excl: usize,
-    },
+  /// The requested size range is empty.
+  EmptySizeRange(CollectionEmptySizeRange),
+  /// The requested sample size exceeds the number of available bits.
+  NotEnoughBits {
+    /// Number of bits available in the bit range.
+    available:     usize,
+    /// Start of the requested size range.
+    size_start:    usize,
+    /// Exclusive end of the requested size range.
+    size_end_excl: usize,
+  },
 }
 
 impl fmt::Display for SampledBitsError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Self::EmptySizeRange(inner) => inner.fmt(f),
-            Self::NotEnoughBits {
-                available,
-                size_start,
-                size_end_excl,
-            } => write!(
-                f,
-                "Illegal SampledBitSetStrategy: have {available} bits \
-                 available, but requested size is {size_start}..\
-                 {size_end_excl}"
-            ),
-        }
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match *self {
+      Self::EmptySizeRange(inner) => inner.fmt(f),
+      Self::NotEnoughBits {
+        available,
+        size_start,
+        size_end_excl,
+      } => write!(
+        f,
+        "Illegal SampledBitSetStrategy: have {available} bits available, but requested size is {size_start}..{size_end_excl}"
+      ),
     }
+  }
 }
 
 impl Error for SampledBitsError {}
 
 impl<T: BitSetLike> SampledBitSetStrategy<T> {
-    /// Create a strategy which generates values where bits within the bounds
-    /// given by `bits` may be set. The number of bits that are set is chosen
-    /// to be in the range given by `size`.
-    ///
-    /// Due to the generics, the functions in the typed submodules are usually
-    /// preferable to calling this directly.
-    ///
-    /// Invalid ranges are reported as a generation failure from
-    /// [`Strategy::new_tree`]. Use [`SampledBitSetStrategy::try_new`] when the
-    /// caller needs eager typed validation.
-    pub fn new(size: impl Into<SizeRange>, bits: impl Into<SizeRange>) -> Self {
-        let size_range = size.into();
-        let bit_range = bits.into();
-        let validation_error = if let Err(error) = size_range.ensure_nonempty()
-        {
-            Some(SampledBitsError::EmptySizeRange(error))
-        } else {
-            let available_bits =
-                bit_range.end_excl().saturating_sub(bit_range.start());
-            (size_range.end_excl() > available_bits.saturating_add(1)).then(
-                || SampledBitsError::NotEnoughBits {
-                    available: available_bits,
-                    size_start: size_range.start(),
-                    size_end_excl: size_range.end_excl(),
-                },
-            )
-        };
+  /// Create a strategy which generates values where bits within the bounds
+  /// given by `bits` may be set. The number of bits that are set is chosen
+  /// to be in the range given by `size`.
+  ///
+  /// Due to the generics, the functions in the typed submodules are usually
+  /// preferable to calling this directly.
+  ///
+  /// Invalid ranges are reported as a generation failure from
+  /// [`Strategy::new_tree`]. Use [`SampledBitSetStrategy::try_new`] when the
+  /// caller needs eager typed validation.
+  pub fn new(size: impl Into<SizeRange>, bits: impl Into<SizeRange>) -> Self {
+    let size_range = size.into();
+    let bit_range = bits.into();
+    let validation_error = if let Err(error) = size_range.ensure_nonempty() {
+      Some(SampledBitsError::EmptySizeRange(error))
+    } else {
+      let available_bits = bit_range.end_excl().saturating_sub(bit_range.start());
+      (size_range.end_excl() > available_bits.saturating_add(1)).then(|| SampledBitsError::NotEnoughBits {
+        available:     available_bits,
+        size_start:    size_range.start(),
+        size_end_excl: size_range.end_excl(),
+      })
+    };
 
-        Self {
-            size: size_range,
-            bits: bit_range,
-            validation_error,
-            _marker: PhantomData,
-        }
+    Self {
+      size: size_range,
+      bits: bit_range,
+      validation_error,
+      _marker: PhantomData,
     }
+  }
 
-    /// Fallible form of [`SampledBitSetStrategy::new`]: returns a typed
-    /// error instead of panicking when `size` is empty or requests more bits
-    /// than `bits` makes available.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`SampledBitsError::EmptySizeRange`] when `size` is an empty
-    /// range, or [`SampledBitsError::NotEnoughBits`] when `size` can demand
-    /// more bits than the `bits` range makes available.
-    #[allow(
-        clippy::single_call_fn,
-        reason = "validate size and bit ranges, then build the fallible sampled bit-set strategy"
-    )]
-    pub fn try_new(
-        size: impl Into<SizeRange>,
-        bits: impl Into<SizeRange>,
-    ) -> Result<Self, SampledBitsError> {
-        let strategy = Self::new(size, bits);
-        strategy.validation_error.map_or(Ok(strategy), Err)
-    }
+  /// Fallible form of [`SampledBitSetStrategy::new`]: returns a typed
+  /// error instead of panicking when `size` is empty or requests more bits
+  /// than `bits` makes available.
+  ///
+  /// ## Errors
+  ///
+  /// Returns [`SampledBitsError::EmptySizeRange`] when `size` is an empty
+  /// range, or [`SampledBitsError::NotEnoughBits`] when `size` can demand
+  /// more bits than the `bits` range makes available.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "validate size and bit ranges, then build the fallible sampled bit-set strategy"
+  )]
+  pub fn try_new(size: impl Into<SizeRange>, bits: impl Into<SizeRange>) -> Result<Self, SampledBitsError> {
+    let strategy = Self::new(size, bits);
+    strategy.validation_error.map_or(Ok(strategy), Err)
+  }
 }
 
 impl<T: BitSetLike> Strategy for SampledBitSetStrategy<T> {
-    type Tree = BitSetValueTree<T>;
-    type Value = T;
+  type Tree = BitSetValueTree<T>;
+  type Value = T;
 
-    fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-        if let Some(error) = self.validation_error {
-            return Err(error.to_string().into());
-        }
-
-        let mut bits = T::new_bitset(self.bits.end_excl());
-        let count = sample_uniform_incl(
-            runner,
-            self.size.start(),
-            self.size.end_incl(),
-        )?;
-        if bits.len() < count {
-            // Reachable only when the concrete `BitSetLike` cannot represent
-            // the requested bit range (e.g. sampling 20 bits from a `u8`);
-            // report a generation failure instead of panicking.
-            return Err("not enough bits to sample".into());
-        }
-
-        for bit in self.bits.iter().sample(runner.rng(), count) {
-            bits.set(bit);
-        }
-
-        Ok(BitSetValueTree {
-            inner: bits,
-            shrink: self.bits.start(),
-            prev_shrink: None,
-            min_count: self.size.start(),
-        })
+  fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+    if let Some(error) = self.validation_error {
+      return Err(error.to_string().into());
     }
+
+    let mut bits = T::new_bitset(self.bits.end_excl());
+    let count = sample_uniform_incl(runner, self.size.start(), self.size.end_incl())?;
+    if bits.len() < count {
+      // Reachable only when the concrete `BitSetLike` cannot represent
+      // the requested bit range (e.g. sampling 20 bits from a `u8`);
+      // report a generation failure instead of panicking.
+      return Err("not enough bits to sample".into());
+    }
+
+    for bit in self.bits.iter().sample(runner.rng(), count) {
+      bits.set(bit);
+    }
+
+    Ok(BitSetValueTree {
+      inner:       bits,
+      shrink:      self.bits.start(),
+      prev_shrink: None,
+      min_count:   self.size.start(),
+    })
+  }
 }
 
 /// Value tree produced by `BitSetStrategy` and `SampledBitSetStrategy`.
 #[derive(Clone, Copy, Debug)]
 pub struct BitSetValueTree<T: BitSetLike> {
-    /// The bitset holding the currently generated value.
-    inner: T,
-    /// Index of the next bit to try clearing when simplifying.
-    shrink: usize,
-    /// Index of the bit cleared by the most recent `simplify()`, so
-    /// `complicate()` can set it again; `None` when there is nothing to
-    /// undo.
-    prev_shrink: Option<usize>,
-    /// Lower bound on the number of set bits; shrinking never clears bits
-    /// below this count.
-    min_count: usize,
+  /// The bitset holding the currently generated value.
+  inner:       T,
+  /// Index of the next bit to try clearing when simplifying.
+  shrink:      usize,
+  /// Index of the bit cleared by the most recent `simplify()`, so
+  /// `complicate()` can set it again; `None` when there is nothing to
+  /// undo.
+  prev_shrink: Option<usize>,
+  /// Lower bound on the number of set bits; shrinking never clears bits
+  /// below this count.
+  min_count:   usize,
 }
 
 impl<T: BitSetLike> ValueTree for BitSetValueTree<T> {
-    type Value = T;
+  type Value = T;
 
-    fn current(&self) -> T {
-        self.inner.clone()
+  fn current(&self) -> T {
+    self.inner.clone()
+  }
+
+  fn simplify(&mut self) -> bool {
+    if self.inner.count() <= self.min_count {
+      return false;
     }
 
-    fn simplify(&mut self) -> bool {
-        if self.inner.count() <= self.min_count {
-            return false;
-        }
-
-        while self.shrink < self.inner.len() && !self.inner.test(self.shrink) {
-            self.shrink = self.shrink.saturating_add(1);
-        }
-
-        if self.shrink >= self.inner.len() {
-            self.prev_shrink = None;
-            false
-        } else {
-            self.prev_shrink = Some(self.shrink);
-            self.inner.clear(self.shrink);
-            self.shrink = self.shrink.saturating_add(1);
-            true
-        }
+    while self.shrink < self.inner.len() && !self.inner.test(self.shrink) {
+      self.shrink = self.shrink.saturating_add(1);
     }
 
-    fn complicate(&mut self) -> bool {
-        if let Some(bit) = self.prev_shrink.take() {
-            self.inner.set(bit);
-            true
-        } else {
-            false
-        }
+    if self.shrink >= self.inner.len() {
+      self.prev_shrink = None;
+      false
+    } else {
+      self.prev_shrink = Some(self.shrink);
+      self.inner.clear(self.shrink);
+      self.shrink = self.shrink.saturating_add(1);
+      true
     }
+  }
+
+  fn complicate(&mut self) -> bool {
+    if let Some(bit) = self.prev_shrink.take() {
+      self.inner.set(bit);
+      true
+    } else {
+      false
+    }
+  }
 }
 
 /// Defines a typed submodule of bit-set strategies for one integer type.
@@ -442,54 +432,51 @@ impl<T: BitSetLike> ValueTree for BitSetValueTree<T> {
 /// constant plus `between`/`masked`/`sampled` constructors specialised to that
 /// integer, sparing callers the turbofish the generic strategies would need.
 macro_rules! int_api {
-    ($typ:ident, $max:expr) => {
-        #[doc = concat!(
-            "Bit-set strategies for `",
-            stringify!($typ),
-            "` values, shrinking by clearing selected bits."
-        )]
-        pub mod $typ {
-            use super::*;
+  ($typ:ident, $max:expr) => {
+    #[doc = concat!(
+                        "Bit-set strategies for `",
+                        stringify!($typ),
+                        "` values, shrinking by clearing selected bits."
+                    )]
+    pub mod $typ {
+      use super::*;
 
-            /// Generates integers where all bits may be set.
-            pub const ANY: BitSetStrategy<$typ> = BitSetStrategy {
-                min: 0,
-                max: $max,
-                mask: None,
-            };
+      /// Generates integers where all bits may be set.
+      pub const ANY: BitSetStrategy<$typ> = BitSetStrategy {
+        min:  0,
+        max:  $max,
+        mask: None,
+      };
 
-            /// Generates values where bits between the given bounds may be
-            /// set.
-            pub const fn between(
-                min: usize,
-                max: usize,
-            ) -> BitSetStrategy<$typ> {
-                BitSetStrategy::new(min, max)
-            }
+      /// Generates values where bits between the given bounds may be
+      /// set.
+      pub const fn between(min: usize, max: usize) -> BitSetStrategy<$typ> {
+        BitSetStrategy::new(min, max)
+      }
 
-            /// Generates values where any bits set in `mask` (and no others)
-            /// may be set.
-            #[allow(clippy::single_call_fn, reason = "mask constructor mirrored per fixed-width integer type by the int_api bitset macro")]
-            pub fn masked(mask: $typ) -> BitSetStrategy<$typ> {
-                BitSetStrategy::masked(mask)
-            }
+      /// Generates values where any bits set in `mask` (and no others)
+      /// may be set.
+      #[allow(
+        clippy::single_call_fn,
+        reason = "mask constructor mirrored per fixed-width integer type by the int_api bitset macro"
+      )]
+      pub fn masked(mask: $typ) -> BitSetStrategy<$typ> {
+        BitSetStrategy::masked(mask)
+      }
 
-            /// Create a strategy which generates values where bits within the
-            /// bounds given by `bits` may be set. The number of bits that are
-            /// set is chosen to be in the range given by `size`.
-            ///
-            /// ## Panics
-            ///
-            /// Panics if `size` includes a value that is greater than the
-            /// number of bits in `bits`.
-            pub fn sampled(
-                size: impl Into<SizeRange>,
-                bits: impl Into<SizeRange>,
-            ) -> SampledBitSetStrategy<$typ> {
-                SampledBitSetStrategy::new(size, bits)
-            }
-        }
-    };
+      /// Create a strategy which generates values where bits within the
+      /// bounds given by `bits` may be set. The number of bits that are
+      /// set is chosen to be in the range given by `size`.
+      ///
+      /// ## Panics
+      ///
+      /// Panics if `size` includes a value that is greater than the
+      /// number of bits in `bits`.
+      pub fn sampled(size: impl Into<SizeRange>, bits: impl Into<SizeRange>) -> SampledBitSetStrategy<$typ> {
+        SampledBitSetStrategy::new(size, bits)
+      }
+    }
+  };
 }
 
 int_api!(u8, 8);
@@ -509,47 +496,44 @@ int_api!(i128, 128);
 /// constant (`usize`/`isize`, `Vec<bool>`, `BitSet`): it emits
 /// `between`/`masked`/`sampled` and omits `ANY`.
 macro_rules! minimal_api {
-    ($md:ident, $typ:ty) => {
-        #[doc = concat!(
-            "Bit-set strategies for `",
-            stringify!($typ),
-            "` values, shrinking by clearing selected bits."
-        )]
-        pub mod $md {
-            use super::*;
+  ($md:ident, $typ:ty) => {
+    #[doc = concat!(
+                        "Bit-set strategies for `",
+                        stringify!($typ),
+                        "` values, shrinking by clearing selected bits."
+                    )]
+    pub mod $md {
+      use super::*;
 
-            /// Generates values where bits between the given bounds may be
-            /// set.
-            pub const fn between(
-                min: usize,
-                max: usize,
-            ) -> BitSetStrategy<$typ> {
-                BitSetStrategy::new(min, max)
-            }
+      /// Generates values where bits between the given bounds may be
+      /// set.
+      pub const fn between(min: usize, max: usize) -> BitSetStrategy<$typ> {
+        BitSetStrategy::new(min, max)
+      }
 
-            /// Generates values where any bits set in `mask` (and no others)
-            /// may be set.
-            #[allow(clippy::single_call_fn, reason = "mask constructor mirrored per variable-width type by the minimal_api bitset macro")]
-            pub fn masked(mask: $typ) -> BitSetStrategy<$typ> {
-                BitSetStrategy::masked(mask)
-            }
+      /// Generates values where any bits set in `mask` (and no others)
+      /// may be set.
+      #[allow(
+        clippy::single_call_fn,
+        reason = "mask constructor mirrored per variable-width type by the minimal_api bitset macro"
+      )]
+      pub fn masked(mask: $typ) -> BitSetStrategy<$typ> {
+        BitSetStrategy::masked(mask)
+      }
 
-            /// Create a strategy which generates values where bits within the
-            /// bounds given by `bits` may be set. The number of bits that are
-            /// set is chosen to be in the range given by `size`.
-            ///
-            /// ## Panics
-            ///
-            /// Panics if `size` includes a value that is greater than the
-            /// number of bits in `bits`.
-            pub fn sampled(
-                size: impl Into<SizeRange>,
-                bits: impl Into<SizeRange>,
-            ) -> SampledBitSetStrategy<$typ> {
-                SampledBitSetStrategy::new(size, bits)
-            }
-        }
-    };
+      /// Create a strategy which generates values where bits within the
+      /// bounds given by `bits` may be set. The number of bits that are
+      /// set is chosen to be in the range given by `size`.
+      ///
+      /// ## Panics
+      ///
+      /// Panics if `size` includes a value that is greater than the
+      /// number of bits in `bits`.
+      pub fn sampled(size: impl Into<SizeRange>, bits: impl Into<SizeRange>) -> SampledBitSetStrategy<$typ> {
+        SampledBitSetStrategy::new(size, bits)
+      }
+    }
+  };
 }
 minimal_api!(usize, usize);
 minimal_api!(isize, isize);
@@ -564,95 +548,97 @@ minimal_api!(bool_vec, Vec<bool>);
 /// a `Vec<bool>` otherwise, giving `collection`/`sample` one bit-set type
 /// regardless of the enabled features.
 mod varsize {
-    use super::{BitSet, BitSetLike, BitVec, usize};
-    use core::iter::FromIterator;
+  use core::iter::FromIterator;
 
-    /// Backing bit-set type: `BitSet` when the `bit-set` feature is enabled.
-    #[cfg(feature = "bit-set")]
-    type Inner = BitSet;
-    /// Backing bit-set type: `Vec<bool>` without the `bit-set` feature.
+  use super::BitSet;
+  use super::BitSetLike;
+  use super::BitVec;
+  use super::usize;
+
+  /// Backing bit-set type: `BitSet` when the `bit-set` feature is enabled.
+  #[cfg(feature = "bit-set")]
+  type Inner = BitSet;
+  /// Backing bit-set type: `Vec<bool>` without the `bit-set` feature.
+  #[cfg(not(feature = "bit-set"))]
+  type Inner = Vec<bool>;
+
+  /// A bit set is a set of bit flags.
+  #[derive(Debug, Clone)]
+  pub struct VarBitSet(Inner);
+
+  impl VarBitSet {
+    /// Create a bit set of `len` set values.
     #[cfg(not(feature = "bit-set"))]
-    type Inner = Vec<bool>;
-
-    /// A bit set is a set of bit flags.
-    #[derive(Debug, Clone)]
-    pub struct VarBitSet(Inner);
-
-    impl VarBitSet {
-        /// Create a bit set of `len` set values.
-        #[cfg(not(feature = "bit-set"))]
-        #[must_use]
-        pub fn saturated(len: usize) -> Self {
-            Self(vec![true; len])
-        }
-
-        /// Create a bit set of `len` set values.
-        #[cfg(feature = "bit-set")]
-        #[must_use]
-        pub fn saturated(len: usize) -> Self {
-            Self(BitSet::from_bit_vec(BitVec::from_elem(len, true)))
-        }
-
-        /// Iterates the indices of the set bits in ascending order.
-        #[cfg(not(feature = "bit-set"))]
-        pub(crate) fn iter(&self) -> impl Iterator<Item = usize> + '_ {
-            (0..self.len()).into_iter().filter(move |&ix| self.test(ix))
-        }
-
-        /// Iterates the indices of the set bits in ascending order.
-        #[cfg(feature = "bit-set")]
-        pub(crate) fn iter(&self) -> impl Iterator<Item = usize> + '_ {
-            self.0.iter()
-        }
+    #[must_use]
+    pub fn saturated(len: usize) -> Self {
+      Self(vec![true; len])
     }
 
-    impl BitSetLike for VarBitSet {
-        fn new_bitset(max: usize) -> Self {
-            Self(Inner::new_bitset(max))
-        }
-
-        fn len(&self) -> usize {
-            BitSetLike::len(&self.0)
-        }
-
-        fn test(&self, bit: usize) -> bool {
-            BitSetLike::test(&self.0, bit)
-        }
-
-        fn set(&mut self, bit: usize) {
-            BitSetLike::set(&mut self.0, bit);
-        }
-
-        fn clear(&mut self, bit: usize) {
-            BitSetLike::clear(&mut self.0, bit);
-        }
-
-        fn count(&self) -> usize {
-            BitSetLike::count(&self.0)
-        }
+    /// Create a bit set of `len` set values.
+    #[cfg(feature = "bit-set")]
+    #[must_use]
+    pub fn saturated(len: usize) -> Self {
+      Self(BitSet::from_bit_vec(BitVec::from_elem(len, true)))
     }
 
-    impl FromIterator<usize> for VarBitSet {
-        fn from_iter<T: IntoIterator<Item = usize>>(into_iter: T) -> Self {
-            let iter = into_iter.into_iter();
-            let lower_bound = iter.size_hint().0;
-            let mut bits = Self::new_bitset(lower_bound);
-            for bit in iter {
-                bits.set(bit);
-            }
-            bits
-        }
+    /// Iterates the indices of the set bits in ascending order.
+    #[cfg(not(feature = "bit-set"))]
+    pub(crate) fn iter(&self) -> impl Iterator<Item = usize> + '_ {
+      (0..self.len()).into_iter().filter(move |&ix| self.test(ix))
     }
 
-    /*
-    pub(crate) fn between(min: usize, max: usize) -> BitSetStrategy<VarBitSet> {
-        BitSetStrategy::new(min, max)
+    /// Iterates the indices of the set bits in ascending order.
+    #[cfg(feature = "bit-set")]
+    pub(crate) fn iter(&self) -> impl Iterator<Item = usize> + '_ {
+      self.0.iter()
+    }
+  }
+
+  impl BitSetLike for VarBitSet {
+    fn new_bitset(max: usize) -> Self {
+      Self(Inner::new_bitset(max))
     }
 
-    pub(crate) fn masked(mask: VarBitSet) -> BitSetStrategy<VarBitSet> {
-        BitSetStrategy::masked(mask)
+    fn len(&self) -> usize {
+      BitSetLike::len(&self.0)
     }
-    */
+
+    fn test(&self, bit: usize) -> bool {
+      BitSetLike::test(&self.0, bit)
+    }
+
+    fn set(&mut self, bit: usize) {
+      BitSetLike::set(&mut self.0, bit);
+    }
+
+    fn clear(&mut self, bit: usize) {
+      BitSetLike::clear(&mut self.0, bit);
+    }
+
+    fn count(&self) -> usize {
+      BitSetLike::count(&self.0)
+    }
+  }
+
+  impl FromIterator<usize> for VarBitSet {
+    fn from_iter<T: IntoIterator<Item = usize>>(into_iter: T) -> Self {
+      let iter = into_iter.into_iter();
+      let lower_bound = iter.size_hint().0;
+      let mut bits = Self::new_bitset(lower_bound);
+      for bit in iter {
+        bits.set(bit);
+      }
+      bits
+    }
+  }
+
+  // pub(crate) fn between(min: usize, max: usize) -> BitSetStrategy<VarBitSet> {
+  // BitSetStrategy::new(min, max)
+  // }
+  //
+  // pub(crate) fn masked(mask: VarBitSet) -> BitSetStrategy<VarBitSet> {
+  // BitSetStrategy::masked(mask)
+  // }
 }
 
 pub use self::varsize::VarBitSet;
@@ -660,441 +646,317 @@ pub use self::varsize::VarBitSet;
 /// Creates a [`SampledBitSetStrategy`] over [`VarBitSet`] selecting `size`
 /// bits from within the `bits` index range.
 #[allow(
-    clippy::single_call_fn,
-    reason = "crate-level constructor hides the private varsize module from collection sampling strategies"
+  clippy::single_call_fn,
+  reason = "crate-level constructor hides the private varsize module from collection sampling strategies"
 )]
-pub(crate) fn sampled_var_bitset(
-    size: impl Into<SizeRange>,
-    bits: impl Into<SizeRange>,
-) -> SampledBitSetStrategy<VarBitSet> {
-    SampledBitSetStrategy::new(size, bits)
+pub(crate) fn sampled_var_bitset(size: impl Into<SizeRange>, bits: impl Into<SizeRange>) -> SampledBitSetStrategy<VarBitSet> {
+  SampledBitSetStrategy::new(size, bits)
 }
 
 #[cfg(test)]
 mod test {
-    use crate::test_runner::{Reason, test_runner_without_persistence};
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_eq;
+  use strict_test_support::ensure_some;
 
-    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
+  use super::*;
+  use crate::test_runner::Reason;
+  use crate::test_runner::test_runner_without_persistence;
 
-    use super::*;
+  #[test]
+  fn zero_capacity_bitset_is_empty() -> Result<(), TestFailure> {
+    let int_bits = u32::new_bitset(0);
+    ensure(int_bits.is_empty(), "new primitive bitsets report no set bits")?;
 
-    #[test]
-    fn zero_capacity_bitset_is_empty() -> Result<(), TestFailure> {
-        let int_bits = u32::new_bitset(0);
-        ensure(
-            int_bits.is_empty(),
-            "new primitive bitsets report no set bits",
-        )?;
+    let var_bits = VarBitSet::new_bitset(0);
+    ensure(var_bits.is_empty(), "zero-capacity bitsets report empty")
+  }
 
-        let var_bits = VarBitSet::new_bitset(0);
-        ensure(var_bits.is_empty(), "zero-capacity bitsets report empty")
+  #[test]
+  fn try_new_accepts_a_satisfiable_sample_request() -> Result<(), TestFailure> {
+    let strategy = ensure_some(
+      SampledBitSetStrategy::<u32>::try_new(2..=4, 0..8).ok(),
+      "try_new accepts a size range covered by the bit range",
+    )?;
+    let mut runner = TestRunner::deterministic();
+    let value = ensure_some(strategy.new_tree(&mut runner).ok(), "the fallibly constructed strategy generates")?.current();
+    let count = usize::try_from(value.count_ones()).unwrap_or(usize::MAX);
+    ensure((2..=4).contains(&count), "the sampled bit count honors the size range")
+  }
+
+  #[test]
+  fn try_new_rejects_unsatisfiable_sample_requests() -> Result<(), TestFailure> {
+    ensure(
+      matches!(
+        SampledBitSetStrategy::<u32>::try_new(4..4, 0..8),
+        Err(SampledBitsError::EmptySizeRange(_))
+      ),
+      "try_new rejects an empty size range with the typed error",
+    )?;
+    let error = ensure_some(
+      SampledBitSetStrategy::<u32>::try_new(0..=9, 0..8).err(),
+      "try_new rejects a size range exceeding the available bits",
+    )?;
+    ensure_eq(
+      &error,
+      &SampledBitsError::NotEnoughBits {
+        available:     8,
+        size_start:    0,
+        size_end_excl: 10,
+      },
+      "the typed error names the available and requested sizes",
+    )
+  }
+
+  #[test]
+  fn undersized_bitset_reports_generation_failure() -> Result<(), TestFailure> {
+    // `u8` can only represent 8 bits, but the bit range requests 20; the
+    // constructor cannot see the concrete capacity, so generation reports
+    // a typed failure instead of panicking.
+    let strategy = ensure_some(
+      SampledBitSetStrategy::<u8>::try_new(16..=16, 0..20).ok(),
+      "the constructor accepts a range the type cannot represent",
+    )?;
+    let mut runner = TestRunner::deterministic();
+    ensure(
+      strategy.new_tree(&mut runner).is_err(),
+      "generation reports the capacity shortfall as an error",
+    )
+  }
+
+  #[test]
+  fn generates_values_in_range() -> Result<(), TestFailure> {
+    let input = u32::between(4, 8);
+
+    let mut runner = test_runner_without_persistence();
+    for _ in 0..256 {
+      let value = ensure_some(input.new_tree(&mut runner).ok(), "bit strategy generates a value tree")?.current();
+      ensure(0 == value & !0xF0_u32, "generated bits stay within the requested range")?;
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn generates_values_in_mask() -> Result<(), TestFailure> {
+    let mut accum = 0;
+
+    let mut runner = TestRunner::deterministic();
+    let input = u32::masked(0xdead_beef);
+    for _ in 0..1024 {
+      accum |= ensure_some(input.new_tree(&mut runner).ok(), "masked bit strategy generates a value tree")?.current();
     }
 
-    #[test]
-    fn try_new_accepts_a_satisfiable_sample_request() -> Result<(), TestFailure>
-    {
-        let strategy = ensure_some(
-            SampledBitSetStrategy::<u32>::try_new(2..=4, 0..8).ok(),
-            "try_new accepts a size range covered by the bit range",
-        )?;
-        let mut runner = TestRunner::deterministic();
-        let value = ensure_some(
-            strategy.new_tree(&mut runner).ok(),
-            "the fallibly constructed strategy generates",
-        )?
-        .current();
-        let count = usize::try_from(value.count_ones()).unwrap_or(usize::MAX);
-        ensure(
-            (2..=4).contains(&count),
-            "the sampled bit count honors the size range",
-        )
+    ensure_eq(&0xdead_beef_u32, &accum, "every masked bit is eventually generated")
+  }
+
+  #[cfg(feature = "bit-set")]
+  #[test]
+  fn mask_bounds_for_bitset_correct() -> Result<(), TestFailure> {
+    let mut seen_0 = false;
+    let mut seen_2 = false;
+
+    let mut mask = BitSet::new();
+    ensure(mask.insert(0), "bit 0 starts absent")?;
+    ensure(mask.insert(2), "bit 2 starts absent")?;
+
+    let mut runner = TestRunner::deterministic();
+    let input = bitset::masked(mask);
+    for _ in 0..32 {
+      let bits = ensure_some(input.new_tree(&mut runner).ok(), "bitset strategy generates a value tree")?.current();
+      seen_0 |= bits.contains(0);
+      seen_2 |= bits.contains(2);
     }
 
-    #[test]
-    fn try_new_rejects_unsatisfiable_sample_requests() -> Result<(), TestFailure>
-    {
-        ensure(
-            matches!(
-                SampledBitSetStrategy::<u32>::try_new(4..4, 0..8),
-                Err(SampledBitsError::EmptySizeRange(_))
-            ),
-            "try_new rejects an empty size range with the typed error",
-        )?;
-        let error = ensure_some(
-            SampledBitSetStrategy::<u32>::try_new(0..=9, 0..8).err(),
-            "try_new rejects a size range exceeding the available bits",
-        )?;
-        ensure_eq(
-            &error,
-            &SampledBitsError::NotEnoughBits {
-                available: 8,
-                size_start: 0,
-                size_end_excl: 10,
-            },
-            "the typed error names the available and requested sizes",
-        )
+    ensure(seen_0, "bit 0 of the mask is generated")?;
+    ensure(seen_2, "bit 2 of the mask is generated")
+  }
+
+  #[cfg(feature = "bit-set")]
+  #[test]
+  fn bitset_set_and_clear_are_idempotent() -> Result<(), TestFailure> {
+    let mut bits = BitSet::new();
+
+    BitSetLike::set(&mut bits, 7);
+    BitSetLike::set(&mut bits, 7);
+    ensure_eq(&1, &BitSetLike::count(&bits), "setting the same bit twice stores it once")?;
+
+    BitSetLike::clear(&mut bits, 7);
+    BitSetLike::clear(&mut bits, 7);
+    ensure_eq(&0, &BitSetLike::count(&bits), "clearing the same bit twice leaves the set empty")
+  }
+
+  #[test]
+  fn mask_bounds_for_vecbool_correct() -> Result<(), TestFailure> {
+    let mut seen_0 = false;
+    let mut seen_2 = false;
+
+    let mask = vec![true, false, true, false];
+
+    let mut runner = TestRunner::deterministic();
+    let input = bool_vec::masked(mask);
+    for _ in 0..32 {
+      let bits = ensure_some(input.new_tree(&mut runner).ok(), "bool-vec strategy generates a value tree")?.current();
+      ensure_eq(&4, &bits.len(), "the bool vec keeps the mask length")?;
+      seen_0 |= ensure_some(bits.first().copied(), "the bool vec has bit 0")?;
+      seen_2 |= ensure_some(bits.get(2).copied(), "the bool vec has bit 2")?;
     }
 
-    #[test]
-    fn undersized_bitset_reports_generation_failure() -> Result<(), TestFailure>
-    {
-        // `u8` can only represent 8 bits, but the bit range requests 20; the
-        // constructor cannot see the concrete capacity, so generation reports
-        // a typed failure instead of panicking.
-        let strategy = ensure_some(
-            SampledBitSetStrategy::<u8>::try_new(16..=16, 0..20).ok(),
-            "the constructor accepts a range the type cannot represent",
-        )?;
-        let mut runner = TestRunner::deterministic();
-        ensure(
-            strategy.new_tree(&mut runner).is_err(),
-            "generation reports the capacity shortfall as an error",
-        )
+    ensure(seen_0, "bit 0 of the mask is generated")?;
+    ensure(seen_2, "bit 2 of the mask is generated")
+  }
+
+  #[test]
+  fn shrinks_to_zero() -> Result<(), TestFailure> {
+    let input = u32::between(4, 24);
+
+    let mut runner = test_runner_without_persistence();
+    for _ in 0..256 {
+      let mut value = ensure_some(input.new_tree(&mut runner).ok(), "bit strategy generates a value tree")?;
+      let mut prev = value.current();
+      while value.simplify() {
+        let current = value.current();
+        ensure((prev & !current).is_power_of_two(), "each simplify step clears exactly one bit")?;
+        prev = current;
+      }
+
+      ensure_eq(&0, &value.current(), "shrinking converges to zero")?;
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn complicates_to_previous() -> Result<(), TestFailure> {
+    let input = u32::between(4, 24);
+
+    let mut runner = test_runner_without_persistence();
+    for _ in 0..256 {
+      let mut value = ensure_some(input.new_tree(&mut runner).ok(), "bit strategy generates a value tree")?;
+      let orig = value.current();
+      if value.simplify() {
+        ensure(value.complicate(), "a simplified tree complicates back")?;
+        ensure_eq(&orig, &value.current(), "complicate restores the previous value")?;
+      }
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn sampled_selects_correct_sizes_and_bits() -> Result<(), TestFailure> {
+    let input = u32::sampled(4..8, 10..20);
+    let mut seen_counts = [0_usize; 32];
+    let mut seen_bits = [0_u32; 32];
+
+    let mut runner = TestRunner::deterministic();
+    for _ in 0..2048 {
+      let value = ensure_some(input.new_tree(&mut runner).ok(), "sampled bit strategy generates a value tree")?.current();
+      let count = usize::try_from(value.count_ones()).unwrap_or(usize::MAX);
+      ensure((4..8).contains(&count), "the sampled bit count stays in range")?;
+      let count_slot = ensure_some(seen_counts.get_mut(count), "the sampled bit count has a count slot")?;
+      *count_slot = count_slot.saturating_add(1);
+
+      for (bit, seen_bit) in seen_bits.iter_mut().enumerate().filter_map(|(bit, seen_bit)| {
+        let bit_mask = u32::try_from(bit).ok().and_then(|shift| 1_u32.checked_shl(shift)).unwrap_or(0);
+        (value & bit_mask != 0).then_some((bit, seen_bit))
+      }) {
+        ensure((10..20).contains(&bit), "only bits within the sampled range are set")?;
+        *seen_bit = seen_bit.saturating_add(value);
+      }
     }
 
-    #[test]
-    fn generates_values_in_range() -> Result<(), TestFailure> {
-        let input = u32::between(4, 8);
-
-        let mut runner = test_runner_without_persistence();
-        for _ in 0..256 {
-            let value = ensure_some(
-                input.new_tree(&mut runner).ok(),
-                "bit strategy generates a value tree",
-            )?
-            .current();
-            ensure(
-                0 == value & !0xF0_u32,
-                "generated bits stay within the requested range",
-            )?;
-        }
-        Ok(())
+    for count in seen_counts.iter().take(8).skip(4) {
+      ensure((256..1024).contains(count), "each bit count is chosen a plausible number of times")?;
     }
 
-    #[test]
-    fn generates_values_in_mask() -> Result<(), TestFailure> {
-        let mut accum = 0;
+    let least_seen_bit_count = ensure_some(seen_bits[10..20].iter().copied().min(), "the sampled range has a least-seen bit")?;
+    let most_seen_bit_count = ensure_some(seen_bits[10..20].iter().copied().max(), "the sampled range has a most-seen bit")?;
+    ensure_eq(
+      &1,
+      &most_seen_bit_count.div_euclid(least_seen_bit_count),
+      "bit selection is roughly uniform",
+    )
+  }
 
-        let mut runner = TestRunner::deterministic();
-        let input = u32::masked(0xdead_beef);
-        for _ in 0..1024 {
-            accum |= ensure_some(
-                input.new_tree(&mut runner).ok(),
-                "masked bit strategy generates a value tree",
-            )?
-            .current();
-        }
+  #[test]
+  fn sampled_doesnt_shrink_below_min_size() -> Result<(), TestFailure> {
+    let input = u32::sampled(4..8, 10..20);
 
-        ensure_eq(
-            &0xdead_beef_u32,
-            &accum,
-            "every masked bit is eventually generated",
-        )
+    let mut runner = test_runner_without_persistence();
+    for _ in 0..256 {
+      let mut value = ensure_some(input.new_tree(&mut runner).ok(), "sampled bit strategy generates a value tree")?;
+      while value.simplify() {}
+
+      ensure_eq(&4, &value.current().count_ones(), "shrinking stops at the minimum bit count")?;
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn test_sanity() -> Result<(), Reason> {
+    check_strategy_sanity(u32::masked(0xdead_beef), None)
+  }
+
+  #[test]
+  fn u128_generates_values_in_range() -> Result<(), TestFailure> {
+    let input = u128::between(64, 128);
+
+    let mut runner = test_runner_without_persistence();
+    for _ in 0..256 {
+      let value = ensure_some(input.new_tree(&mut runner).ok(), "u128 bit strategy generates a value tree")?.current();
+      // Only bits 64..128 should be set
+      ensure(0 == value & ((1_u128 << 64) - 1), "the generated value has no low bits set")?;
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn u128_shrinks_to_zero() -> Result<(), TestFailure> {
+    let input = u128::between(64, 128);
+
+    let mut runner = test_runner_without_persistence();
+    for _ in 0..256 {
+      let mut value = ensure_some(input.new_tree(&mut runner).ok(), "u128 bit strategy generates a value tree")?;
+      while value.simplify() {}
+      ensure_eq(&0, &value.current(), "shrinking converges to zero")?;
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn i128_generates_values_in_mask() -> Result<(), TestFailure> {
+    let mut accum: i128 = 0;
+    let mask: i128 = 0x0123_4567_89ab_cdef_0123_4567_89ab_cdef;
+
+    let mut runner = TestRunner::deterministic();
+    let input = i128::masked(mask);
+    for _ in 0..1024 {
+      accum |= ensure_some(input.new_tree(&mut runner).ok(), "i128 masked strategy generates a value tree")?.current();
     }
 
-    #[cfg(feature = "bit-set")]
-    #[test]
-    fn mask_bounds_for_bitset_correct() -> Result<(), TestFailure> {
-        let mut seen_0 = false;
-        let mut seen_2 = false;
+    ensure_eq(&mask, &accum, "every masked bit is eventually generated")
+  }
 
-        let mut mask = BitSet::new();
-        ensure(mask.insert(0), "bit 0 starts absent")?;
-        ensure(mask.insert(2), "bit 2 starts absent")?;
-
-        let mut runner = TestRunner::deterministic();
-        let input = bitset::masked(mask);
-        for _ in 0..32 {
-            let bits = ensure_some(
-                input.new_tree(&mut runner).ok(),
-                "bitset strategy generates a value tree",
-            )?
-            .current();
-            seen_0 |= bits.contains(0);
-            seen_2 |= bits.contains(2);
-        }
-
-        ensure(seen_0, "bit 0 of the mask is generated")?;
-        ensure(seen_2, "bit 2 of the mask is generated")
-    }
-
-    #[cfg(feature = "bit-set")]
-    #[test]
-    fn bitset_set_and_clear_are_idempotent() -> Result<(), TestFailure> {
-        let mut bits = BitSet::new();
-
-        BitSetLike::set(&mut bits, 7);
-        BitSetLike::set(&mut bits, 7);
-        ensure_eq(
-            &1,
-            &BitSetLike::count(&bits),
-            "setting the same bit twice stores it once",
-        )?;
-
-        BitSetLike::clear(&mut bits, 7);
-        BitSetLike::clear(&mut bits, 7);
-        ensure_eq(
-            &0,
-            &BitSetLike::count(&bits),
-            "clearing the same bit twice leaves the set empty",
-        )
-    }
-
-    #[test]
-    fn mask_bounds_for_vecbool_correct() -> Result<(), TestFailure> {
-        let mut seen_0 = false;
-        let mut seen_2 = false;
-
-        let mask = vec![true, false, true, false];
-
-        let mut runner = TestRunner::deterministic();
-        let input = bool_vec::masked(mask);
-        for _ in 0..32 {
-            let bits = ensure_some(
-                input.new_tree(&mut runner).ok(),
-                "bool-vec strategy generates a value tree",
-            )?
-            .current();
-            ensure_eq(&4, &bits.len(), "the bool vec keeps the mask length")?;
-            seen_0 |=
-                ensure_some(bits.first().copied(), "the bool vec has bit 0")?;
-            seen_2 |=
-                ensure_some(bits.get(2).copied(), "the bool vec has bit 2")?;
-        }
-
-        ensure(seen_0, "bit 0 of the mask is generated")?;
-        ensure(seen_2, "bit 2 of the mask is generated")
-    }
-
-    #[test]
-    fn shrinks_to_zero() -> Result<(), TestFailure> {
-        let input = u32::between(4, 24);
-
-        let mut runner = test_runner_without_persistence();
-        for _ in 0..256 {
-            let mut value = ensure_some(
-                input.new_tree(&mut runner).ok(),
-                "bit strategy generates a value tree",
-            )?;
-            let mut prev = value.current();
-            while value.simplify() {
-                let current = value.current();
-                ensure(
-                    (prev & !current).is_power_of_two(),
-                    "each simplify step clears exactly one bit",
-                )?;
-                prev = current;
-            }
-
-            ensure_eq(&0, &value.current(), "shrinking converges to zero")?;
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn complicates_to_previous() -> Result<(), TestFailure> {
-        let input = u32::between(4, 24);
-
-        let mut runner = test_runner_without_persistence();
-        for _ in 0..256 {
-            let mut value = ensure_some(
-                input.new_tree(&mut runner).ok(),
-                "bit strategy generates a value tree",
-            )?;
-            let orig = value.current();
-            if value.simplify() {
-                ensure(
-                    value.complicate(),
-                    "a simplified tree complicates back",
-                )?;
-                ensure_eq(
-                    &orig,
-                    &value.current(),
-                    "complicate restores the previous value",
-                )?;
-            }
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn sampled_selects_correct_sizes_and_bits() -> Result<(), TestFailure> {
-        let input = u32::sampled(4..8, 10..20);
-        let mut seen_counts = [0_usize; 32];
-        let mut seen_bits = [0_u32; 32];
-
-        let mut runner = TestRunner::deterministic();
-        for _ in 0..2048 {
-            let value = ensure_some(
-                input.new_tree(&mut runner).ok(),
-                "sampled bit strategy generates a value tree",
-            )?
-            .current();
-            let count =
-                usize::try_from(value.count_ones()).unwrap_or(usize::MAX);
-            ensure(
-                (4..8).contains(&count),
-                "the sampled bit count stays in range",
-            )?;
-            let count_slot = ensure_some(
-                seen_counts.get_mut(count),
-                "the sampled bit count has a count slot",
-            )?;
-            *count_slot = count_slot.saturating_add(1);
-
-            for (bit, seen_bit) in seen_bits.iter_mut().enumerate().filter_map(
-                |(bit, seen_bit)| {
-                    let bit_mask = u32::try_from(bit)
-                        .ok()
-                        .and_then(|shift| 1_u32.checked_shl(shift))
-                        .unwrap_or(0);
-                    (value & bit_mask != 0).then_some((bit, seen_bit))
-                },
-            ) {
-                ensure(
-                    (10..20).contains(&bit),
-                    "only bits within the sampled range are set",
-                )?;
-                *seen_bit = seen_bit.saturating_add(value);
-            }
-        }
-
-        for count in seen_counts.iter().take(8).skip(4) {
-            ensure(
-                (256..1024).contains(count),
-                "each bit count is chosen a plausible number of times",
-            )?;
-        }
-
-        let least_seen_bit_count = ensure_some(
-            seen_bits[10..20].iter().copied().min(),
-            "the sampled range has a least-seen bit",
-        )?;
-        let most_seen_bit_count = ensure_some(
-            seen_bits[10..20].iter().copied().max(),
-            "the sampled range has a most-seen bit",
-        )?;
-        ensure_eq(
-            &1,
-            &most_seen_bit_count.div_euclid(least_seen_bit_count),
-            "bit selection is roughly uniform",
-        )
-    }
-
-    #[test]
-    fn sampled_doesnt_shrink_below_min_size() -> Result<(), TestFailure> {
-        let input = u32::sampled(4..8, 10..20);
-
-        let mut runner = test_runner_without_persistence();
-        for _ in 0..256 {
-            let mut value = ensure_some(
-                input.new_tree(&mut runner).ok(),
-                "sampled bit strategy generates a value tree",
-            )?;
-            while value.simplify() {}
-
-            ensure_eq(
-                &4,
-                &value.current().count_ones(),
-                "shrinking stops at the minimum bit count",
-            )?;
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn test_sanity() -> Result<(), Reason> {
-        check_strategy_sanity(u32::masked(0xdead_beef), None)
-    }
-
-    #[test]
-    fn u128_generates_values_in_range() -> Result<(), TestFailure> {
-        let input = u128::between(64, 128);
-
-        let mut runner = test_runner_without_persistence();
-        for _ in 0..256 {
-            let value = ensure_some(
-                input.new_tree(&mut runner).ok(),
-                "u128 bit strategy generates a value tree",
-            )?
-            .current();
-            // Only bits 64..128 should be set
-            ensure(
-                0 == value & ((1_u128 << 64) - 1),
-                "the generated value has no low bits set",
-            )?;
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn u128_shrinks_to_zero() -> Result<(), TestFailure> {
-        let input = u128::between(64, 128);
-
-        let mut runner = test_runner_without_persistence();
-        for _ in 0..256 {
-            let mut value = ensure_some(
-                input.new_tree(&mut runner).ok(),
-                "u128 bit strategy generates a value tree",
-            )?;
-            while value.simplify() {}
-            ensure_eq(&0, &value.current(), "shrinking converges to zero")?;
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn i128_generates_values_in_mask() -> Result<(), TestFailure> {
-        let mut accum: i128 = 0;
-        let mask: i128 = 0x0123_4567_89ab_cdef_0123_4567_89ab_cdef;
-
-        let mut runner = TestRunner::deterministic();
-        let input = i128::masked(mask);
-        for _ in 0..1024 {
-            accum |= ensure_some(
-                input.new_tree(&mut runner).ok(),
-                "i128 masked strategy generates a value tree",
-            )?
-            .current();
-        }
-
-        ensure_eq(&mask, &accum, "every masked bit is eventually generated")
-    }
-
-    #[test]
-    fn u128_test_sanity() -> Result<(), Reason> {
-        check_strategy_sanity(
-            u128::masked(0xdead_beef_cafe_babe_1234_5678_9abc_def0),
-            None,
-        )
-    }
-    #[test]
-    fn vec_bool_bitset_ops_are_bounds_checked() -> Result<(), TestFailure> {
-        let mut bits = vec![false; 4];
-        BitSetLike::set(&mut bits, 2);
-        ensure(
-            BitSetLike::test(&bits, 2),
-            "an in-bounds set bit reads back",
-        )?;
-        BitSetLike::clear(&mut bits, 2);
-        ensure(
-            !BitSetLike::test(&bits, 2),
-            "an in-bounds cleared bit reads back cleared",
-        )?;
-        ensure(
-            !BitSetLike::test(&bits, 100),
-            "an out-of-bounds test reads as unset instead of panicking",
-        )?;
-        BitSetLike::clear(&mut bits, 100);
-        ensure_eq(
-            &4,
-            &BitSetLike::len(&bits),
-            "an out-of-bounds clear leaves the length unchanged",
-        )?;
-        BitSetLike::set(&mut bits, 6);
-        ensure(
-            BitSetLike::test(&bits, 6),
-            "an out-of-len set grows the vector, matching its resize contract",
-        )
-    }
+  #[test]
+  fn u128_test_sanity() -> Result<(), Reason> {
+    check_strategy_sanity(u128::masked(0xdead_beef_cafe_babe_1234_5678_9abc_def0), None)
+  }
+  #[test]
+  fn vec_bool_bitset_ops_are_bounds_checked() -> Result<(), TestFailure> {
+    let mut bits = vec![false; 4];
+    BitSetLike::set(&mut bits, 2);
+    ensure(BitSetLike::test(&bits, 2), "an in-bounds set bit reads back")?;
+    BitSetLike::clear(&mut bits, 2);
+    ensure(!BitSetLike::test(&bits, 2), "an in-bounds cleared bit reads back cleared")?;
+    ensure(
+      !BitSetLike::test(&bits, 100),
+      "an out-of-bounds test reads as unset instead of panicking",
+    )?;
+    BitSetLike::clear(&mut bits, 100);
+    ensure_eq(&4, &BitSetLike::len(&bits), "an out-of-bounds clear leaves the length unchanged")?;
+    BitSetLike::set(&mut bits, 6);
+    ensure(
+      BitSetLike::test(&bits, 6),
+      "an out-of-len set grows the vector, matching its resize contract",
+    )
+  }
 }

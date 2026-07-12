@@ -8,15 +8,26 @@
 // except according to those terms.
 
 use core::convert::TryFrom as _;
-use core::num::{
-    NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroIsize, NonZeroU8,
-    NonZeroU16, NonZeroU32, NonZeroU64, NonZeroUsize,
-};
+use core::num::NonZeroI8;
+use core::num::NonZeroI16;
+use core::num::NonZeroI32;
+use core::num::NonZeroI64;
 #[cfg(not(target_arch = "wasm32"))]
-use core::num::{NonZeroI128, NonZeroU128};
+use core::num::NonZeroI128;
+use core::num::NonZeroIsize;
+use core::num::NonZeroU8;
+use core::num::NonZeroU16;
+use core::num::NonZeroU32;
+use core::num::NonZeroU64;
+#[cfg(not(target_arch = "wasm32"))]
+use core::num::NonZeroU128;
+use core::num::NonZeroUsize;
 
-use crate::arbitrary::{Arbitrary, StrategyFor, any};
-use crate::strategy::{FilterMap, Strategy as _};
+use crate::arbitrary::Arbitrary;
+use crate::arbitrary::StrategyFor;
+use crate::arbitrary::any;
+use crate::strategy::FilterMap;
+use crate::strategy::Strategy as _;
 
 /// Implements `Arbitrary` for a `NonZero` integer type over its primitive.
 ///
@@ -25,19 +36,16 @@ use crate::strategy::{FilterMap, Strategy as _};
 /// `"must be non zero"` (`Strategy = FilterMap<StrategyFor<$prim>,
 /// fn($prim) -> Option<Self>>`).
 macro_rules! non_zero_impl {
-    ($nz:ty, $prim:ty) => {
-        impl Arbitrary for $nz {
-            type Parameters = ();
-            type Strategy =
-                FilterMap<StrategyFor<$prim>, fn($prim) -> Option<Self>>;
+  ($nz:ty, $prim:ty) => {
+    impl Arbitrary for $nz {
+      type Parameters = ();
+      type Strategy = FilterMap<StrategyFor<$prim>, fn($prim) -> Option<Self>>;
 
-            fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
-                any::<$prim>().prop_filter_map("must be non zero", |i| {
-                    Self::try_from(i).ok()
-                })
-            }
-        }
-    };
+      fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        any::<$prim>().prop_filter_map("must be non zero", |i| Self::try_from(i).ok())
+      }
+    }
+  };
 }
 
 non_zero_impl!(NonZeroU8, u8);
@@ -58,28 +66,36 @@ non_zero_impl!(NonZeroIsize, isize);
 
 #[cfg(test)]
 mod test {
-    use core::num::{
-        NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroIsize, NonZeroU8,
-        NonZeroU16, NonZeroU32, NonZeroU64, NonZeroUsize,
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    use core::num::{NonZeroI128, NonZeroU128};
+  use core::num::NonZeroI8;
+  use core::num::NonZeroI16;
+  use core::num::NonZeroI32;
+  use core::num::NonZeroI64;
+  #[cfg(not(target_arch = "wasm32"))]
+  use core::num::NonZeroI128;
+  use core::num::NonZeroIsize;
+  use core::num::NonZeroU8;
+  use core::num::NonZeroU16;
+  use core::num::NonZeroU32;
+  use core::num::NonZeroU64;
+  #[cfg(not(target_arch = "wasm32"))]
+  use core::num::NonZeroU128;
+  use core::num::NonZeroUsize;
 
-    no_panic_test!(
-        u8 => NonZeroU8,
-        u16 => NonZeroU16,
-        u32 => NonZeroU32,
-        u64 => NonZeroU64,
-        usize => NonZeroUsize,
-        i8 => NonZeroI8,
-        i16 => NonZeroI16,
-        i32 => NonZeroI32,
-        i64 => NonZeroI64,
-        isize => NonZeroIsize
-    );
-    #[cfg(not(target_arch = "wasm32"))]
-    no_panic_test!(
-        u128 => NonZeroU128,
-        i128 => NonZeroI128
-    );
+  no_panic_test!(
+      u8 => NonZeroU8,
+      u16 => NonZeroU16,
+      u32 => NonZeroU32,
+      u64 => NonZeroU64,
+      usize => NonZeroUsize,
+      i8 => NonZeroI8,
+      i16 => NonZeroI16,
+      i32 => NonZeroI32,
+      i64 => NonZeroI64,
+      isize => NonZeroIsize
+  );
+  #[cfg(not(target_arch = "wasm32"))]
+  no_panic_test!(
+      u128 => NonZeroU128,
+      i128 => NonZeroI128
+  );
 }

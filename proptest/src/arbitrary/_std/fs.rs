@@ -11,20 +11,21 @@
 
 use std::fs::DirBuilder;
 
-use crate::arbitrary::{SMapped, any};
+use crate::arbitrary::SMapped;
+use crate::arbitrary::any;
 use crate::strategy::statics::static_map;
 
 // TODO: other parts (figure out workable semantics).
 
 /// Construct a `DirBuilder` configured with the requested recursive flag.
 #[allow(
-    clippy::single_call_fn,
-    reason = "construct a DirBuilder from the generated recursive flag and share that runtime contract with tests"
+  clippy::single_call_fn,
+  reason = "construct a DirBuilder from the generated recursive flag and share that runtime contract with tests"
 )]
 fn configured_dir_builder(recursive: bool) -> DirBuilder {
-    let mut db = DirBuilder::new();
-    let _builder = db.recursive(recursive);
-    db
+  let mut db = DirBuilder::new();
+  let _builder = db.recursive(recursive);
+  db
 }
 
 arbitrary!(DirBuilder, SMapped<bool, Self>; {
@@ -33,34 +34,35 @@ arbitrary!(DirBuilder, SMapped<bool, Self>; {
 
 #[cfg(test)]
 mod test {
-    use strict_test_support::{TempDir, TestFailure, ensure, ensure_ok};
+  use strict_test_support::TempDir;
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_ok;
 
-    use super::*;
+  use super::*;
 
-    no_panic_test!(dir_builder => DirBuilder);
+  no_panic_test!(dir_builder => DirBuilder);
 
-    #[test]
-    fn recursive_dir_builder_creates_missing_parents() -> Result<(), TestFailure>
-    {
-        let dir = TempDir::new("dir-builder-recursive")?;
-        let nested = dir.child("parent").join("child");
+  #[test]
+  fn recursive_dir_builder_creates_missing_parents() -> Result<(), TestFailure> {
+    let dir = TempDir::new("dir-builder-recursive")?;
+    let nested = dir.child("parent").join("child");
 
-        ensure_ok(
-            configured_dir_builder(true).create(&nested),
-            "recursive DirBuilder creates missing parents",
-        )?;
-        ensure(nested.is_dir(), "the nested directory exists")
-    }
+    ensure_ok(
+      configured_dir_builder(true).create(&nested),
+      "recursive DirBuilder creates missing parents",
+    )?;
+    ensure(nested.is_dir(), "the nested directory exists")
+  }
 
-    #[test]
-    fn non_recursive_dir_builder_rejects_missing_parents()
-    -> Result<(), TestFailure> {
-        let dir = TempDir::new("dir-builder-non-recursive")?;
-        let nested = dir.child("other").join("child");
+  #[test]
+  fn non_recursive_dir_builder_rejects_missing_parents() -> Result<(), TestFailure> {
+    let dir = TempDir::new("dir-builder-non-recursive")?;
+    let nested = dir.child("other").join("child");
 
-        ensure(
-            configured_dir_builder(false).create(&nested).is_err(),
-            "non-recursive DirBuilder rejects a missing parent",
-        )
-    }
+    ensure(
+      configured_dir_builder(false).create(&nested).is_err(),
+      "non-recursive DirBuilder rejects a missing parent",
+    )
+  }
 }

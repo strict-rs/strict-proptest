@@ -9,9 +9,11 @@
 
 //! Arbitrary implementations for `std::ascii`.
 
-use core::ascii::{EscapeDefault, escape_default};
+use core::ascii::EscapeDefault;
+use core::ascii::escape_default;
 
-use crate::arbitrary::{SMapped, any};
+use crate::arbitrary::SMapped;
+use crate::arbitrary::any;
 use crate::strategy::statics::static_map;
 
 arbitrary!(EscapeDefault, SMapped<u8, Self>;
@@ -19,7 +21,7 @@ arbitrary!(EscapeDefault, SMapped<u8, Self>;
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(escape_default => EscapeDefault);
+  no_panic_test!(escape_default => EscapeDefault);
 }

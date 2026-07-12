@@ -19,9 +19,9 @@ macro_rules! std_arbitrary_with_params {
 /// Implements `Arbitrary` for a `std` wrapper built from its default
 /// constructor.
 macro_rules! std_wrap_ctor_default {
-    ($wrap: ident) => {
-        wrap_ctor!($wrap, $wrap::new);
-    };
+  ($wrap:ident) => {
+    wrap_ctor!($wrap, $wrap::new);
+  };
 }
 
 mod env;

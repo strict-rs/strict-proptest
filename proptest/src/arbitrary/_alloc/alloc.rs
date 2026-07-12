@@ -14,8 +14,11 @@ use core::ops::Range;
 
 multiplex_alloc!(::alloc::alloc, ::std::alloc);
 
-use crate::arbitrary::{StrategyFor, any};
-use crate::strategy::{FilterMap, Just, Strategy as _};
+use crate::arbitrary::StrategyFor;
+use crate::arbitrary::any;
+use crate::strategy::FilterMap;
+use crate::strategy::Just;
+use crate::strategy::Strategy as _;
 
 /// Candidate `(align_power, size)` pair used to build a checked `Layout`.
 type LayoutCandidate = (u8, usize);
@@ -25,7 +28,7 @@ type LayoutMapper = fn(LayoutCandidate) -> Option<alloc::Layout>;
 arbitrary!(alloc::Global; alloc::Global);
 
 // Not Debug.
-//lazy_just!(System, || System);
+// lazy_just!(System, || System);
 
 arbitrary!(
     alloc::Layout,
@@ -51,21 +54,21 @@ arbitrary!(
 );
 
 arbitrary!(alloc::AllocError, Just<Self>; Just(alloc::AllocError));
-/* 2018-07-28 CollectionAllocErr is not currently available outside of using
- * the `alloc` crate, which would require a different nightly feature. For now,
- * disable.
-arbitrary!(alloc::collections::CollectionAllocErr, TupleUnion<(WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>)>;
-           prop_oneof![Just(alloc::collections::CollectionAllocErr::AllocErr),
-                       Just(alloc::collections::CollectionAllocErr::CapacityOverflow)]);
- */
+// 2018-07-28 CollectionAllocErr is not currently available outside of using
+// the `alloc` crate, which would require a different nightly feature. For now,
+// disable.
+// arbitrary!(alloc::collections::CollectionAllocErr, TupleUnion<(WeightedStrategy<Just<Self>>,
+// WeightedStrategy<Just<Self>>)>; prop_oneof!
+// [Just(alloc::collections::CollectionAllocErr::AllocErr),
+// Just(alloc::collections::CollectionAllocErr::CapacityOverflow)]);
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        layout => alloc::Layout,
-        alloc_err => alloc::AllocError
-        //collection_alloc_err => alloc::collections::CollectionAllocErr
-    );
+  no_panic_test!(
+      layout => alloc::Layout,
+      alloc_err => alloc::AllocError
+      //collection_alloc_err => alloc::collections::CollectionAllocErr
+  );
 }

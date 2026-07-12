@@ -9,10 +9,14 @@
 //! This module provides integration tests that test the expansion
 //! of the derive macro.
 
+use strict_test_support::TestFailure;
+use strict_test_support::ensure;
+use strict_test_support::ensure_contains;
+use syn::ItemEnum;
+use syn::parse_quote;
+
 use crate::derive::impl_proptest_arbitrary;
 use crate::util::PayloadFields;
-use strict_test_support::{TestFailure, ensure, ensure_contains};
-use syn::{ItemEnum, parse_quote};
 
 //==============================================================================
 // Macros:
@@ -63,220 +67,211 @@ macro_rules! test {
 //==============================================================================
 
 #[test]
-fn unit_tuple_and_struct_zero_payload_variants_normalize_as_payloadless()
--> Result<(), TestFailure> {
-    let item: ItemEnum = parse_quote! {
-        enum ZeroPayloadVariants {
-            Unit,
-            Tuple(),
-            Struct {},
-            TuplePayload(u8),
-            StructPayload { value: u8 },
-        }
-    };
+fn unit_tuple_and_struct_zero_payload_variants_normalize_as_payloadless() -> Result<(), TestFailure> {
+  let item: ItemEnum = parse_quote! {
+      enum ZeroPayloadVariants {
+          Unit,
+          Tuple(),
+          Struct {},
+          TuplePayload(u8),
+          StructPayload { value: u8 },
+      }
+  };
 
-    let payload_counts: Vec<_> = item
-        .variants
-        .into_iter()
-        .map(|variant| PayloadFields::from(variant.fields).as_slice().len())
-        .collect();
+  let payload_counts: Vec<_> = item
+    .variants
+    .into_iter()
+    .map(|variant| PayloadFields::from(variant.fields).as_slice().len())
+    .collect();
 
-    ensure(
-        payload_counts.as_slice() == [0, 0, 0, 1, 1],
-        "unit, empty tuple, and empty struct variants normalize to zero payload fields",
-    )
+  ensure(
+    payload_counts.as_slice() == [0, 0, 0, 1, 1],
+    "unit, empty tuple, and empty struct variants normalize to zero payload fields",
+  )
 }
 
-fn ensure_e0029_unit_variant_diagnostic(
-    input: &str,
-    attribute_fragment: &str,
-) -> Result<(), TestFailure> {
-    let parsed = strict_test_support::ensure_ok(
-        syn::parse_str::<syn::DeriveInput>(input),
-        "zero-payload variant diagnostic input parses as a derive input",
-    )?;
-    let output = format!("{}", impl_proptest_arbitrary(parsed));
+fn ensure_e0029_unit_variant_diagnostic(input: &str, attribute_fragment: &str) -> Result<(), TestFailure> {
+  let parsed = strict_test_support::ensure_ok(
+    syn::parse_str::<syn::DeriveInput>(input),
+    "zero-payload variant diagnostic input parses as a derive input",
+  )?;
+  let output = format!("{}", impl_proptest_arbitrary(parsed));
 
-    ensure_contains(
-        &output,
-        "compile_error",
-        "the redundant unit-variant attribute emits compile_error tokens",
-    )?;
-    ensure_contains(
-        &output,
-        "[proptest_derive, E0029]",
-        "the redundant unit-variant attribute emits E0029",
-    )?;
-    ensure_contains(
-        &output,
-        attribute_fragment,
-        "the redundant unit-variant diagnostic names the attribute family",
-    )?;
-    ensure_contains(
-        &output,
-        "unit variant has no effect",
-        "the redundant unit-variant diagnostic describes the no-payload path",
-    )
+  ensure_contains(
+    &output,
+    "compile_error",
+    "the redundant unit-variant attribute emits compile_error tokens",
+  )?;
+  ensure_contains(
+    &output,
+    "[proptest_derive, E0029]",
+    "the redundant unit-variant attribute emits E0029",
+  )?;
+  ensure_contains(
+    &output,
+    attribute_fragment,
+    "the redundant unit-variant diagnostic names the attribute family",
+  )?;
+  ensure_contains(
+    &output,
+    "unit variant has no effect",
+    "the redundant unit-variant diagnostic describes the no-payload path",
+  )
 }
 
 #[test]
-fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_params()
--> Result<(), TestFailure> {
-    for input in [
-        "
+fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_params() -> Result<(), TestFailure> {
+  for input in [
+    "
             #[derive(Debug)]
             enum UnitVariant {
                 #[proptest(no_params)]
                 Unit,
             }
         ",
-        r#"
+    r#"
             #[derive(Debug)]
             enum EmptyTupleVariant {
                 #[proptest(params = "u8")]
                 Tuple(),
             }
         "#,
-        "
+    "
             #[derive(Debug)]
             enum EmptyStructVariant {
                 #[proptest(no_params)]
                 Struct {},
             }
         ",
-    ] {
-        ensure_e0029_unit_variant_diagnostic(input, "params")?;
-    }
+  ] {
+    ensure_e0029_unit_variant_diagnostic(input, "params")?;
+  }
 
-    Ok(())
+  Ok(())
 }
 
 #[test]
-fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_filter()
--> Result<(), TestFailure> {
-    for input in [
-        "
+fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_filter() -> Result<(), TestFailure> {
+  for input in [
+    "
             #[derive(Debug)]
             enum UnitVariant {
                 #[proptest(filter(foo))]
                 Unit,
             }
         ",
-        "
+    "
             #[derive(Debug)]
             enum EmptyTupleVariant {
                 #[proptest(filter(foo))]
                 Tuple(),
             }
         ",
-        "
+    "
             #[derive(Debug)]
             enum EmptyStructVariant {
                 #[proptest(filter(foo))]
                 Struct {},
             }
         ",
-    ] {
-        ensure_e0029_unit_variant_diagnostic(input, "filter")?;
-    }
+  ] {
+    ensure_e0029_unit_variant_diagnostic(input, "filter")?;
+  }
 
-    Ok(())
+  Ok(())
 }
 
 #[test]
-fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_strategy()
--> Result<(), TestFailure> {
-    for input in [
-        r#"
+fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_strategy() -> Result<(), TestFailure> {
+  for input in [
+    r#"
             #[derive(Debug)]
             enum UnitVariant {
                 #[proptest(strategy = "Just(UnitVariant::Unit)")]
                 Unit,
             }
         "#,
-        r#"
+    r#"
             #[derive(Debug)]
             enum EmptyTupleVariant {
                 #[proptest(strategy = "Just(EmptyTupleVariant::Tuple)")]
                 Tuple(),
             }
         "#,
-        r#"
+    r#"
             #[derive(Debug)]
             enum EmptyStructVariant {
                 #[proptest(strategy = "Just(EmptyStructVariant::Struct)")]
                 Struct {},
             }
         "#,
-    ] {
-        ensure_e0029_unit_variant_diagnostic(input, "strategy")?;
-    }
+  ] {
+    ensure_e0029_unit_variant_diagnostic(input, "strategy")?;
+  }
 
-    Ok(())
+  Ok(())
 }
 
 #[test]
-fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_value()
--> Result<(), TestFailure> {
-    for input in [
-        r#"
+fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_value() -> Result<(), TestFailure> {
+  for input in [
+    r#"
             #[derive(Debug)]
             enum UnitVariant {
                 #[proptest(value = "UnitVariant::Unit")]
                 Unit,
             }
         "#,
-        r#"
+    r#"
             #[derive(Debug)]
             enum EmptyTupleVariant {
                 #[proptest(value = "EmptyTupleVariant::Tuple")]
                 Tuple(),
             }
         "#,
-        r#"
+    r#"
             #[derive(Debug)]
             enum EmptyStructVariant {
                 #[proptest(value = "EmptyStructVariant::Struct")]
                 Struct {},
             }
         "#,
-    ] {
-        ensure_e0029_unit_variant_diagnostic(input, "value")?;
-    }
+  ] {
+    ensure_e0029_unit_variant_diagnostic(input, "value")?;
+  }
 
-    Ok(())
+  Ok(())
 }
 
 #[test]
-fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_regex()
--> Result<(), TestFailure> {
-    for input in [
-        r#"
+fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_regex() -> Result<(), TestFailure> {
+  for input in [
+    r#"
             #[derive(Debug)]
             enum UnitVariant {
                 #[proptest(regex = "a+")]
                 Unit,
             }
         "#,
-        r#"
+    r#"
             #[derive(Debug)]
             enum EmptyTupleVariant {
                 #[proptest(regex = "b*")]
                 Tuple(),
             }
         "#,
-        r#"
+    r#"
             #[derive(Debug)]
             enum EmptyStructVariant {
                 #[proptest(regex = "a|b")]
                 Struct {},
             }
         "#,
-    ] {
-        ensure_e0029_unit_variant_diagnostic(input, "regex")?;
-    }
+  ] {
+    ensure_e0029_unit_variant_diagnostic(input, "regex")?;
+  }
 
-    Ok(())
+  Ok(())
 }
 
 test! {

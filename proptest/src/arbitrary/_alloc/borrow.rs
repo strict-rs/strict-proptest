@@ -9,11 +9,14 @@
 
 //! Arbitrary implementations for `std::borrow`.
 
-use crate::std_facade::fmt;
-use crate::std_facade::{Cow, ToOwned};
 use core::borrow::Borrow;
 
-use crate::arbitrary::{Arbitrary, SMapped, any_with};
+use crate::arbitrary::Arbitrary;
+use crate::arbitrary::SMapped;
+use crate::arbitrary::any_with;
+use crate::std_facade::Cow;
+use crate::std_facade::ToOwned;
+use crate::std_facade::fmt;
 use crate::strategy::statics::static_map;
 
 arbitrary!(

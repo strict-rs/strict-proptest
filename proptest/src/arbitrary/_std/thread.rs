@@ -9,11 +9,12 @@
 
 //! Arbitrary implementations for `std::thread`.
 
-use crate::std_facade::String;
 use std::thread::Builder;
 
-use crate::arbitrary::{SMapped, arbitrary_with};
+use crate::arbitrary::SMapped;
+use crate::arbitrary::arbitrary_with;
 use crate::option::prob;
+use crate::std_facade::String;
 use crate::strategy::statics::static_map;
 use crate::string::StringParam;
 
@@ -30,55 +31,51 @@ arbitrary!(Builder, SMapped<(Option<usize>, Option<String>), Self>; {
     })
 });
 
-/*
- * The usefulness of this impl is debatable - as are its semantics.
- * Perhaps a CoArbitrary-based solution is preferable.
-
-arbitrary!([A: 'static + Send + Arbitrary<'a>] JoinHandle<A>,
-    SMapped<'a, (A, Option<()>, u8), Self>, A::Parameters;
-    args => {
-        let prob  = prob(0.1);
-        let args2 = product_pack![
-            args,
-            product_pack![prob, default()],
-            default()
-        ];
-        any_with_smap(args2, |(val, panic, sleep)| thread::spawn(move || {
-            // Sleep a random amount:
-            use std::time::Duration;
-            thread::sleep(Duration::from_millis(sleep as u64));
-
-            // Randomly panic:
-            if panic.is_some() {
-                panic!("Arbitrary for JoinHandle randomly paniced!");
-            }
-
-            // Move value into thread and then just return it:
-            val
-        }))
-    }
-);
-*/
+// The usefulness of this impl is debatable - as are its semantics.
+// Perhaps a CoArbitrary-based solution is preferable.
+//
+// arbitrary!([A: 'static + Send + Arbitrary<'a>] JoinHandle<A>,
+// SMapped<'a, (A, Option<()>, u8), Self>, A::Parameters;
+// args => {
+// let prob  = prob(0.1);
+// let args2 = product_pack![
+// args,
+// product_pack![prob, default()],
+// default()
+// ];
+// any_with_smap(args2, |(val, panic, sleep)| thread::spawn(move || {
+// Sleep a random amount:
+// use std::time::Duration;
+// thread::sleep(Duration::from_millis(sleep as u64));
+//
+// Randomly panic:
+// if panic.is_some() {
+// panic!("Arbitrary for JoinHandle randomly paniced!");
+// }
+//
+// Move value into thread and then just return it:
+// val
+// }))
+// }
+// );
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        builder => Builder
-    );
+  no_panic_test!(
+      builder => Builder
+  );
 
-    /*
-    use super::*;
-    proptest! {
-        #[test]
-        fn join_handle_works(ref jh in any::<JoinHandle<u8>>()) {
-            use std::panic::catch_unwind;
-            catch_unwind(|| {
-                jh.join();
-                ()
-            })
-        }
-    }
-    */
+  // use super::*;
+  // proptest! {
+  // #[test]
+  // fn join_handle_works(ref jh in any::<JoinHandle<u8>>()) {
+  // use std::panic::catch_unwind;
+  // catch_unwind(|| {
+  // jh.join();
+  // ()
+  // })
+  // }
+  // }
 }

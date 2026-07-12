@@ -5,6 +5,7 @@ members = [
     "proptest-derive-internal",
     "proptest-state-machine",
     "proptest-macro",
+    "xtask",
 ]
 
 resolver = "3"
@@ -12,17 +13,23 @@ exclude = ["proptest/test-persistence-location/*"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/proptest-rs/proptest"
+license-file = "LICENSE-APACHE or LICENSE-MIT"
+repository = "https://github.com/strict-rs/strict-proptest"
+homepage = "https://proptest-rs.github.io/proptest/proptest/"
+documentation = "https://docs.rs/proptest/latest/proptest/"
 categories = ["development-tools::testing"]
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.97"
+version = "1.2.0"
+authors = ["The Proptest Developers", "Takumi Shimada <hello@takumi.earth>"]
+publish = false
 
 [workspace.dependencies]
 
 # Internal deps
-proptest = { version = "1.11.0", path = "proptest" }
-proptest-macro = { version = "0.5.0", path = "proptest-macro" }
-proptest-derive-internal = { version = "0.8.0", path = "proptest-derive-internal" }
+proptest = { version = "1.2.0", path = "proptest" }
+proptest-macro = { version = "1.2.0", path = "proptest-macro" }
+proptest-derive-internal = { version = "1.2.0", path = "proptest-derive-internal" }
 
 # External deps
 bit-set = "0.11.0"
@@ -104,12 +111,12 @@ tracing-core = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", bran
 # patches (comment out if unused, do not remove)
 [patch."ssh://git@github.com/strict-rs/strict-proptest.git"]
 proptest = { version = "1", path = "proptest" }
-proptest-macro = { version = "0.5", path = "proptest-macro" }
+proptest-macro = { version = "1.2.0", path = "proptest-macro" }
 
 # patches (comment out if unused, do not remove)
 [patch."https://github.com/estrict-rs/strict-proptest.git"]
 proptest = { version = "1", path = "proptest" }
-proptest-macro = { version = "0.5", path = "proptest-macro" }
+proptest-macro = { version = "1.2.0", path = "proptest-macro" }
 
 [workspace.metadata.config.layout]
 schema-version = "0.1.0"

@@ -15,34 +15,34 @@
 
 #[cfg(test)]
 mod tests {
-    use proptest::prelude::Arbitrary;
-    use proptest_derive::Arbitrary;
+  use proptest::prelude::Arbitrary;
+  use proptest_derive::Arbitrary;
 
-    #[derive(Debug, Arbitrary)]
-    struct T0;
+  #[derive(Debug, Arbitrary)]
+  struct T0;
 
-    #[derive(Debug, Arbitrary)]
-    enum T3 {
-        V0,
-    }
+  #[derive(Debug, Arbitrary)]
+  enum T3 {
+    V0,
+  }
 
-    #[derive(Debug, Arbitrary)]
-    enum T4 {
-        V1,
-    }
+  #[derive(Debug, Arbitrary)]
+  enum T4 {
+    V1,
+  }
 
-    #[derive(Debug, Arbitrary)]
-    enum T5 {
-        V2,
-    }
+  #[derive(Debug, Arbitrary)]
+  enum T5 {
+    V2,
+  }
 
-    #[test]
-    fn asserting_arbitrary() {
-        fn assert_arbitrary<T: Arbitrary>() {}
+  #[test]
+  fn asserting_arbitrary() {
+    fn assert_arbitrary<T: Arbitrary>() {}
 
-        assert_arbitrary::<T0>();
-        assert_arbitrary::<T3>();
-        assert_arbitrary::<T4>();
-        assert_arbitrary::<T5>();
-    }
+    assert_arbitrary::<T0>();
+    assert_arbitrary::<T3>();
+    assert_arbitrary::<T4>();
+    assert_arbitrary::<T5>();
+  }
 }

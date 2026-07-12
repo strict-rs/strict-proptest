@@ -9,9 +9,13 @@
 
 //! Arbitrary implementations for `std::hash`.
 
+use core::hash::BuildHasherDefault;
+use core::hash::Hasher;
+
 #[cfg(feature = "std")]
-use crate::std_facade::hash_map::{DefaultHasher, RandomState};
-use core::hash::{BuildHasherDefault, Hasher};
+use crate::std_facade::hash_map::DefaultHasher;
+#[cfg(feature = "std")]
+use crate::std_facade::hash_map::RandomState;
 
 // NOTE: don't impl for std::hash::SipHasher.. since deprecated!
 
@@ -23,12 +27,12 @@ lazy_just!(DefaultHasher, Default::default; RandomState, Default::default);
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    #[cfg(feature = "std")]
-    no_panic_test!(
-        default_hasher => DefaultHasher,
-        random_state => RandomState,
-        build_hasher_default => BuildHasherDefault<DefaultHasher>
-    );
+  #[cfg(feature = "std")]
+  no_panic_test!(
+      default_hasher => DefaultHasher,
+      random_state => RandomState,
+      build_hasher_default => BuildHasherDefault<DefaultHasher>
+  );
 }

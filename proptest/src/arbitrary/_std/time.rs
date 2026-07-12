@@ -10,11 +10,18 @@
 //! Arbitrary implementations for `std::time`.
 
 use core::ops::Range;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+use std::time::Instant;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
-use crate::arbitrary::{SMapped, any};
+use crate::arbitrary::SMapped;
+use crate::arbitrary::any;
 use crate::num;
-use crate::strategy::statics::{self, static_map};
+use crate::strategy::statics::static_map;
+use crate::strategy::statics::{
+  self,
+};
 
 arbitrary!(Duration, SMapped<(u64, u32), Self>;
     static_map(any::<(u64, u32)>(), |(secs, nanos)| Duration::new(secs, nanos))
@@ -44,11 +51,11 @@ arbitrary!(
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        duration => Duration,
-        instant  => Instant,
-        system_time => SystemTime
-    );
+  no_panic_test!(
+      duration => Duration,
+      instant  => Instant,
+      system_time => SystemTime
+  );
 }

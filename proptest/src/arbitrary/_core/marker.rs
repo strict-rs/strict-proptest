@@ -15,7 +15,7 @@ arbitrary!([T: ?Sized] PhantomData<T>; PhantomData);
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(phantom_data => PhantomData<u8>);
+  no_panic_test!(phantom_data => PhantomData<u8>);
 }

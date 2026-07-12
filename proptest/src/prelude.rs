@@ -19,35 +19,46 @@
 //! is and will always be a direct reexport; using these in preference to using the
 //! `rand` crate directly will not provide insulation from rand API changes.
 
-pub use crate::arbitrary::{Arbitrary, any, any_with};
-pub use crate::strategy::{BoxedStrategy, Just, SBoxedStrategy, Strategy};
-pub use crate::test_runner::Config as ProptestConfig;
-pub use crate::test_runner::{ProptestResultExt, TestCaseError};
-pub use crate::{
-    prop_assert, prop_assert_eq, prop_assert_ne, prop_assume, prop_compose,
-    prop_compose_ffi, prop_oneof, proptest,
-};
+pub use rand::Rng;
+pub use rand::RngExt;
 
-pub use rand::{Rng, RngExt};
+pub use crate::arbitrary::Arbitrary;
+pub use crate::arbitrary::any;
+pub use crate::arbitrary::any_with;
+pub use crate::prop_assert;
+pub use crate::prop_assert_eq;
+pub use crate::prop_assert_ne;
+pub use crate::prop_assume;
+pub use crate::prop_compose;
+pub use crate::prop_compose_ffi;
+pub use crate::prop_oneof;
+pub use crate::proptest;
+pub use crate::strategy::BoxedStrategy;
+pub use crate::strategy::Just;
+pub use crate::strategy::SBoxedStrategy;
+pub use crate::strategy::Strategy;
+pub use crate::test_runner::Config as ProptestConfig;
+pub use crate::test_runner::ProptestResultExt;
+pub use crate::test_runner::TestCaseError;
 
 /// Re-exports the entire public API of proptest under the name `prop`.
 ///
 /// This lets an import of `prelude` write, for example, `prop::num::i32::ANY`
 /// rather than `proptest::num::i32::ANY` plus a separate `use proptest;`.
 pub mod prop {
-    pub use crate::arbitrary;
-    pub use crate::array;
-    pub use crate::bits;
-    pub use crate::bool;
-    pub use crate::char;
-    pub use crate::collection;
-    pub use crate::num;
-    pub use crate::option;
-    pub use crate::result;
-    pub use crate::sample;
-    pub use crate::strategy;
-    #[cfg(feature = "std")]
-    pub use crate::string;
-    pub use crate::test_runner;
-    pub use crate::tuple;
+  pub use crate::arbitrary;
+  pub use crate::array;
+  pub use crate::bits;
+  pub use crate::bool;
+  pub use crate::char;
+  pub use crate::collection;
+  pub use crate::num;
+  pub use crate::option;
+  pub use crate::result;
+  pub use crate::sample;
+  pub use crate::strategy;
+  #[cfg(feature = "std")]
+  pub use crate::string;
+  pub use crate::test_runner;
+  pub use crate::tuple;
 }

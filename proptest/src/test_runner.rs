@@ -39,9 +39,10 @@ mod scoped_panic_hook;
 use std::fmt::Arguments;
 
 pub use self::config::*;
-pub use self::errors::{
-    ProptestResultExt, TestCaseError, TestCaseResult, TestError,
-};
+pub use self::errors::ProptestResultExt;
+pub use self::errors::TestCaseError;
+pub use self::errors::TestCaseResult;
+pub use self::errors::TestError;
 pub use self::failure_persistence::*;
 pub use self::reason::*;
 pub use self::result_cache::*;
@@ -52,11 +53,11 @@ pub use self::runner::*;
 #[cfg(feature = "std")]
 #[doc(hidden)]
 #[allow(
-    clippy::single_call_fn,
-    reason = "bridge closure-style sugar into the runner's typed fork/timeout diagnostic"
+  clippy::single_call_fn,
+  reason = "bridge closure-style sugar into the runner's typed fork/timeout diagnostic"
 )]
 pub(crate) fn emit_closure_fork_unsupported() {
-    diagnostics::emit(&diagnostics::RunnerDiagnostic::ClosureForkUnsupported);
+  diagnostics::emit(&diagnostics::RunnerDiagnostic::ClosureForkUnsupported);
 }
 
 /// Emit one already-rendered diagnostic line through the runner's best-effort
@@ -64,5 +65,5 @@ pub(crate) fn emit_closure_fork_unsupported() {
 #[cfg(feature = "std")]
 #[doc(hidden)]
 pub fn emit_diagnostic_line(args: Arguments<'_>) {
-    diagnostics::emit_line(args);
+  diagnostics::emit_line(args);
 }

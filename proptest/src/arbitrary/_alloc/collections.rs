@@ -15,31 +15,69 @@
 // Imports:
 //==============================================================================
 
-use crate::std_facade::{
-    Arc, BTreeMap, BTreeSet, BinaryHeap, Box, LinkedList, Rc, Vec, VecDeque,
-    binary_heap, btree_map, btree_set, fmt, linked_list, vec, vec_deque,
-};
-use core::ops::{Bound, RangeInclusive};
-
 #[cfg(feature = "std")]
-use crate::std_facade::{HashMap, HashSet, hash_map, hash_set};
+use core::hash::BuildHasher;
 #[cfg(feature = "std")]
-use core::hash::{BuildHasher, Hash};
+use core::hash::Hash;
+use core::ops::Bound;
+use core::ops::RangeInclusive;
 
-use crate::arbitrary::{
-    Arbitrary, SFnPtrMap, SMapped, StrategyFor, any, any_with, functor,
-};
-use crate::collection::{
-    BTreeMapStrategy, BTreeSetStrategy, BinaryHeapStrategy, HashMapStrategy,
-    HashSetStrategy, LinkedListStrategy, SizeRange, VecDequeStrategy,
-    VecStrategy, binary_heap, btree_map, btree_set, hash_map, hash_set,
-    linked_list, vec, vec_deque,
-};
+use crate::arbitrary::Arbitrary;
+use crate::arbitrary::SFnPtrMap;
+use crate::arbitrary::SMapped;
+use crate::arbitrary::StrategyFor;
+use crate::arbitrary::any;
+use crate::arbitrary::any_with;
+use crate::arbitrary::functor;
+use crate::collection::BTreeMapStrategy;
+use crate::collection::BTreeSetStrategy;
+use crate::collection::BinaryHeapStrategy;
+use crate::collection::HashMapStrategy;
+use crate::collection::HashSetStrategy;
+use crate::collection::LinkedListStrategy;
+use crate::collection::SizeRange;
+use crate::collection::VecDequeStrategy;
+use crate::collection::VecStrategy;
+use crate::collection::binary_heap;
+use crate::collection::btree_map;
+use crate::collection::btree_set;
+use crate::collection::hash_map;
+use crate::collection::hash_set;
+use crate::collection::linked_list;
+use crate::collection::vec;
+use crate::collection::vec_deque;
+use crate::std_facade::Arc;
+use crate::std_facade::BTreeMap;
+use crate::std_facade::BTreeSet;
+use crate::std_facade::BinaryHeap;
+use crate::std_facade::Box;
+#[cfg(feature = "std")]
+use crate::std_facade::HashMap;
+#[cfg(feature = "std")]
+use crate::std_facade::HashSet;
+use crate::std_facade::LinkedList;
+use crate::std_facade::Rc;
+use crate::std_facade::Vec;
+use crate::std_facade::VecDeque;
+use crate::std_facade::binary_heap;
+use crate::std_facade::btree_map;
+use crate::std_facade::btree_set;
+use crate::std_facade::fmt;
+#[cfg(feature = "std")]
+use crate::std_facade::hash_map;
+#[cfg(feature = "std")]
+use crate::std_facade::hash_set;
+use crate::std_facade::linked_list;
+use crate::std_facade::vec;
+use crate::std_facade::vec_deque;
+use crate::strategy::BoxedStrategy;
+use crate::strategy::LazyJust;
+use crate::strategy::LazyJustFn;
+use crate::strategy::MapInto;
+use crate::strategy::Strategy;
+use crate::strategy::TupleUnion;
+use crate::strategy::WeightedStrategy;
 use crate::strategy::statics::static_map;
-use crate::strategy::{
-    BoxedStrategy, LazyJust, LazyJustFn, MapInto, Strategy, TupleUnion,
-    WeightedStrategy,
-};
 
 //==============================================================================
 // Macros:
@@ -144,10 +182,8 @@ into_iter_1!(hash_set, HashSet, Hash, Eq);
 
 #[cfg(feature = "std")]
 /// Rebuild a generated default-hasher map with the caller's hasher type.
-fn hash_map_with_hasher<K: Hash + Eq, V, S: BuildHasher + Default>(
-    map: HashMap<K, V>,
-) -> HashMap<K, V, S> {
-    map.into_iter().collect()
+fn hash_map_with_hasher<K: Hash + Eq, V, S: BuildHasher + Default>(map: HashMap<K, V>) -> HashMap<K, V, S> {
+  map.into_iter().collect()
 }
 
 #[cfg(feature = "std")]
@@ -190,45 +226,31 @@ lift1!(['static, K: Hash + Eq + Arbitrary + 'static] hash_map::IntoIter<K, A>,
 );
 
 #[cfg(feature = "std")]
-impl<
-    K: fmt::Debug + Eq + Hash + 'static,
-    V: fmt::Debug + 'static,
-    S: BuildHasher + Default + 'static,
-> functor::ArbitraryF2<K, V> for HashMap<K, V, S>
+impl<K: fmt::Debug + Eq + Hash + 'static, V: fmt::Debug + 'static, S: BuildHasher + Default + 'static> functor::ArbitraryF2<K, V>
+  for HashMap<K, V, S>
 {
-    type Parameters = SizeRange;
+  type Parameters = SizeRange;
 
-    fn lift2_with<AS, BS>(
-        fst: AS,
-        snd: BS,
-        args: Self::Parameters,
-    ) -> BoxedStrategy<Self>
-    where
-        AS: Strategy<Value = K> + 'static,
-        BS: Strategy<Value = V> + 'static,
-    {
-        static_map(hash_map(fst, snd, args), hash_map_with_hasher::<K, V, S>)
-            .boxed()
-    }
+  fn lift2_with<AS, BS>(fst: AS, snd: BS, args: Self::Parameters) -> BoxedStrategy<Self>
+  where
+    AS: Strategy<Value = K> + 'static,
+    BS: Strategy<Value = V> + 'static,
+  {
+    static_map(hash_map(fst, snd, args), hash_map_with_hasher::<K, V, S>).boxed()
+  }
 }
 
 #[cfg(feature = "std")]
-impl<K: fmt::Debug + Eq + Hash + 'static, V: fmt::Debug + 'static>
-    functor::ArbitraryF2<K, V> for hash_map::IntoIter<K, V>
-{
-    type Parameters = SizeRange;
+impl<K: fmt::Debug + Eq + Hash + 'static, V: fmt::Debug + 'static> functor::ArbitraryF2<K, V> for hash_map::IntoIter<K, V> {
+  type Parameters = SizeRange;
 
-    fn lift2_with<AS, BS>(
-        fst: AS,
-        snd: BS,
-        args: Self::Parameters,
-    ) -> BoxedStrategy<Self>
-    where
-        AS: Strategy<Value = K> + 'static,
-        BS: Strategy<Value = V> + 'static,
-    {
-        static_map(hash_map(fst, snd, args), HashMap::into_iter).boxed()
-    }
+  fn lift2_with<AS, BS>(fst: AS, snd: BS, args: Self::Parameters) -> BoxedStrategy<Self>
+  where
+    AS: Strategy<Value = K> + 'static,
+    BS: Strategy<Value = V> + 'static,
+  {
+    static_map(hash_map(fst, snd, args), HashMap::into_iter).boxed()
+  }
 }
 
 //==============================================================================
@@ -251,21 +273,15 @@ lift1!([, K: Ord + Arbitrary + 'static] BTreeMap<K, A>,
     }
 );
 
-impl<K: fmt::Debug + Ord, V: fmt::Debug> functor::ArbitraryF2<K, V>
-    for BTreeMap<K, V>
-{
-    type Parameters = SizeRange;
-    fn lift2_with<AS, BS>(
-        fst: AS,
-        snd: BS,
-        args: Self::Parameters,
-    ) -> BoxedStrategy<Self>
-    where
-        AS: Strategy<Value = K> + 'static,
-        BS: Strategy<Value = V> + 'static,
-    {
-        btree_map(fst, snd, args).boxed()
-    }
+impl<K: fmt::Debug + Ord, V: fmt::Debug> functor::ArbitraryF2<K, V> for BTreeMap<K, V> {
+  type Parameters = SizeRange;
+  fn lift2_with<AS, BS>(fst: AS, snd: BS, args: Self::Parameters) -> BoxedStrategy<Self>
+  where
+    AS: Strategy<Value = K> + 'static,
+    BS: Strategy<Value = V> + 'static,
+  {
+    btree_map(fst, snd, args).boxed()
+  }
 }
 
 arbitrary!([K: Arbitrary + Ord, V: Arbitrary] btree_map::IntoIter<K, V>,
@@ -273,22 +289,16 @@ arbitrary!([K: Arbitrary + Ord, V: Arbitrary] btree_map::IntoIter<K, V>,
     <BTreeMap<K, V> as Arbitrary>::Parameters;
     args => static_map(any_with::<BTreeMap<K, V>>(args), BTreeMap::into_iter));
 
-impl<K: fmt::Debug + Ord + 'static, V: fmt::Debug + 'static>
-    functor::ArbitraryF2<K, V> for btree_map::IntoIter<K, V>
-{
-    type Parameters = SizeRange;
+impl<K: fmt::Debug + Ord + 'static, V: fmt::Debug + 'static> functor::ArbitraryF2<K, V> for btree_map::IntoIter<K, V> {
+  type Parameters = SizeRange;
 
-    fn lift2_with<AS, BS>(
-        fst: AS,
-        snd: BS,
-        args: Self::Parameters,
-    ) -> BoxedStrategy<Self>
-    where
-        AS: Strategy<Value = K> + 'static,
-        BS: Strategy<Value = V> + 'static,
-    {
-        static_map(btree_map(fst, snd, args), BTreeMap::into_iter).boxed()
-    }
+  fn lift2_with<AS, BS>(fst: AS, snd: BS, args: Self::Parameters) -> BoxedStrategy<Self>
+  where
+    AS: Strategy<Value = K> + 'static,
+    BS: Strategy<Value = V> + 'static,
+  {
+    static_map(btree_map(fst, snd, args), BTreeMap::into_iter).boxed()
+  }
 }
 
 //==============================================================================
@@ -323,33 +333,33 @@ lift1!(['static] Bound<A>; base => {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        size_bounds => SizeRange,
-        vec => Vec<u8>,
-        box_slice => Box<[u8]>,
-        rc_slice  => Rc<[u8]>,
-        arc_slice  => Arc<[u8]>,
-        vec_deque => VecDeque<u8>,
-        linked_list => LinkedList<u8>,
-        btree_set => BTreeSet<u8>,
-        btree_map => BTreeMap<u8, u8>,
-        bound => Bound<u8>,
-        binary_heap => BinaryHeap<u8>,
-        into_iter_vec => vec::IntoIter<u8>,
-        into_iter_vec_deque => vec_deque::IntoIter<u8>,
-        into_iter_linked_list => linked_list::IntoIter<u8>,
-        into_iter_binary_heap => binary_heap::IntoIter<u8>,
-        into_iter_btree_set => btree_set::IntoIter<u8>,
-        into_iter_btree_map => btree_map::IntoIter<u8, u8>
-    );
+  no_panic_test!(
+      size_bounds => SizeRange,
+      vec => Vec<u8>,
+      box_slice => Box<[u8]>,
+      rc_slice  => Rc<[u8]>,
+      arc_slice  => Arc<[u8]>,
+      vec_deque => VecDeque<u8>,
+      linked_list => LinkedList<u8>,
+      btree_set => BTreeSet<u8>,
+      btree_map => BTreeMap<u8, u8>,
+      bound => Bound<u8>,
+      binary_heap => BinaryHeap<u8>,
+      into_iter_vec => vec::IntoIter<u8>,
+      into_iter_vec_deque => vec_deque::IntoIter<u8>,
+      into_iter_linked_list => linked_list::IntoIter<u8>,
+      into_iter_binary_heap => binary_heap::IntoIter<u8>,
+      into_iter_btree_set => btree_set::IntoIter<u8>,
+      into_iter_btree_map => btree_map::IntoIter<u8, u8>
+  );
 
-    #[cfg(feature = "std")]
-    no_panic_test!(
-        hash_set => HashSet<u8>,
-        hash_map => HashMap<u8, u8>,
-        into_iter_hash_set => hash_set::IntoIter<u8>,
-        into_iter_hash_map => hash_map::IntoIter<u8, u8>
-    );
+  #[cfg(feature = "std")]
+  no_panic_test!(
+      hash_set => HashSet<u8>,
+      hash_map => HashMap<u8, u8>,
+      into_iter_hash_set => hash_set::IntoIter<u8>,
+      into_iter_hash_map => hash_map::IntoIter<u8, u8>
+  );
 }

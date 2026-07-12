@@ -20,25 +20,27 @@
 // This is *not* how proptest is normally used; it is simply used to play
 // around with value generation.
 
-use std::io::{self, Write as _};
+use std::io::Write as _;
+use std::io::{
+  self,
+};
 
-use proptest::strategy::{Strategy as _, ValueTree as _};
+use proptest::strategy::Strategy as _;
+use proptest::strategy::ValueTree as _;
 use proptest::test_runner::TestRunner;
 
 fn main() -> io::Result<()> {
-    let mut runner = TestRunner::default();
-    let int_val = (0..100_i32).new_tree(&mut runner).map_err(|reason| {
-        io::Error::new(io::ErrorKind::InvalidInput, reason.to_string())
-    })?;
-    let str_val = "[a-z]{1,4}\\p{Cyrillic}{1,4}\\p{Greek}{1,4}"
-        .new_tree(&mut runner)
-        .map_err(|reason| {
-            io::Error::new(io::ErrorKind::InvalidInput, reason.to_string())
-        })?;
-    writeln!(
-        io::stdout().lock(),
-        "int_val = {}, str_val = {}",
-        int_val.current(),
-        str_val.current()
-    )
+  let mut runner = TestRunner::default();
+  let int_val = (0..100_i32)
+    .new_tree(&mut runner)
+    .map_err(|reason| io::Error::new(io::ErrorKind::InvalidInput, reason.to_string()))?;
+  let str_val = "[a-z]{1,4}\\p{Cyrillic}{1,4}\\p{Greek}{1,4}"
+    .new_tree(&mut runner)
+    .map_err(|reason| io::Error::new(io::ErrorKind::InvalidInput, reason.to_string()))?;
+  writeln!(
+    io::stdout().lock(),
+    "int_val = {}, str_val = {}",
+    int_val.current(),
+    str_val.current()
+  )
 }

@@ -1,13 +1,13 @@
 [package]
 name = "proptest-state-machine"
-version = "0.8.0"
-authors = ["Tomáš Zemanovič"]
+version.workspace = true
+authors = ["Tomáš Zemanovič", "Takumi Shimada <hello@takumi.earth>"]
 license.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
-homepage = "https://proptest-rs.github.io/proptest/proptest/state-machine.html"
-documentation = "https://docs.rs/proptest-state-machine/latest/proptest-state-machine/"
+homepage.workspace = true
+documentation.workspace = true
 keywords = ["property", "testing", "quickcheck", "fuzz", "state-machine"]
 categories.workspace = true
 description = """

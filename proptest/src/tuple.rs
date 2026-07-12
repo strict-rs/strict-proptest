@@ -12,36 +12,38 @@
 //! There is no explicit "tuple strategy"; simply make a tuple containing the
 //! strategy and that tuple is itself a strategy.
 
+use crate::strategy::NewTree;
+use crate::strategy::Strategy;
+use crate::strategy::ValueTree;
 #[cfg(test)]
 use crate::strategy::check_strategy_sanity;
-use crate::strategy::{NewTree, Strategy, ValueTree};
 use crate::test_runner::TestRunner;
 
 /// Common `ValueTree` implementation for all tuple strategies.
 #[derive(Clone, Copy, Debug)]
 pub struct TupleValueTree<T> {
-    /// The tuple of element `ValueTree`s being shrunk together.
-    tree: T,
-    /// Index of the element currently being simplified, advancing left to
-    /// right as earlier elements stop shrinking.
-    shrinker: u32,
-    /// Element touched by the last `simplify`, so `complicate` can revisit
-    /// it; `None` before any simplification.
-    prev_shrinker: Option<u32>,
+  /// The tuple of element `ValueTree`s being shrunk together.
+  tree:          T,
+  /// Index of the element currently being simplified, advancing left to
+  /// right as earlier elements stop shrinking.
+  shrinker:      u32,
+  /// Element touched by the last `simplify`, so `complicate` can revisit
+  /// it; `None` before any simplification.
+  prev_shrinker: Option<u32>,
 }
 
 impl<T> TupleValueTree<T> {
-    /// Create a new `TupleValueTree` wrapping `inner`.
-    ///
-    /// It only makes sense for `inner` to be a tuple of an arity for which the
-    /// type implements `ValueTree`.
-    pub const fn new(inner: T) -> Self {
-        Self {
-            tree: inner,
-            shrinker: 0,
-            prev_shrinker: None,
-        }
+  /// Create a new `TupleValueTree` wrapping `inner`.
+  ///
+  /// It only makes sense for `inner` to be a tuple of an arity for which the
+  /// type implements `ValueTree`.
+  pub const fn new(inner: T) -> Self {
+    Self {
+      tree:          inner,
+      shrinker:      0,
+      prev_shrinker: None,
     }
+  }
 }
 
 /// Implement `Strategy` and `ValueTree` for a tuple of a given arity.
@@ -139,77 +141,70 @@ tuple!(
 
 #[cfg(test)]
 mod test {
-    use crate::test_runner::{Reason, test_runner_without_persistence};
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_some;
 
-    use strict_test_support::{TestFailure, ensure, ensure_some};
+  use super::*;
+  use crate::test_runner::Reason;
+  use crate::test_runner::test_runner_without_persistence;
 
-    use super::*;
+  #[allow(
+    clippy::single_call_fn,
+    reason = "the tuple shrink test names the left-to-right minimal failing walk"
+  )]
+  fn shrink_to_minimal_failing_tuple<V, P>(case: &mut V, pass: P)
+  where
+    V: ValueTree<Value = (i32, i32)>,
+    P: Fn((i32, i32)) -> bool,
+  {
+    loop {
+      let advanced = if pass(case.current()) {
+        case.complicate()
+      } else {
+        case.simplify()
+      };
+      if advanced {
+        continue;
+      }
+      break;
+    }
+  }
 
-    #[allow(
-        clippy::single_call_fn,
-        reason = "the tuple shrink test names the left-to-right minimal failing walk"
-    )]
-    fn shrink_to_minimal_failing_tuple<V, P>(case: &mut V, pass: P)
-    where
-        V: ValueTree<Value = (i32, i32)>,
-        P: Fn((i32, i32)) -> bool,
-    {
-        loop {
-            let advanced = if pass(case.current()) {
-                case.complicate()
-            } else {
-                case.simplify()
-            };
-            if advanced {
-                continue;
-            }
-            break;
-        }
+  #[test]
+  fn shrinks_fully_ltr() -> Result<(), TestFailure> {
+    fn pass(pair: (i32, i32)) -> bool {
+      pair.0 * pair.1 <= 9
     }
 
-    #[test]
-    fn shrinks_fully_ltr() -> Result<(), TestFailure> {
-        fn pass(pair: (i32, i32)) -> bool {
-            pair.0 * pair.1 <= 9
-        }
+    let input = (0..32, 0..32);
+    let mut runner = test_runner_without_persistence();
 
-        let input = (0..32, 0..32);
-        let mut runner = test_runner_without_persistence();
+    let mut cases_tested = 0;
+    for _ in 0..256 {
+      // Find a failing test case
+      let mut case = ensure_some(input.new_tree(&mut runner).ok(), "tuple strategy generates a value tree")?;
+      if pass(case.current()) {
+        continue;
+      }
 
-        let mut cases_tested = 0;
-        for _ in 0..256 {
-            // Find a failing test case
-            let mut case = ensure_some(
-                input.new_tree(&mut runner).ok(),
-                "tuple strategy generates a value tree",
-            )?;
-            if pass(case.current()) {
-                continue;
-            }
+      shrink_to_minimal_failing_tuple(&mut case, pass);
 
-            shrink_to_minimal_failing_tuple(&mut case, pass);
+      let last = case.current();
+      ensure(!pass(last), "the shrunken case still fails")?;
+      // Maximally shrunken
+      ensure(pass((last.0 - 1, last.1)), "decrementing the first element passes")?;
+      ensure(pass((last.0, last.1 - 1)), "decrementing the second element passes")?;
 
-            let last = case.current();
-            ensure(!pass(last), "the shrunken case still fails")?;
-            // Maximally shrunken
-            ensure(
-                pass((last.0 - 1, last.1)),
-                "decrementing the first element passes",
-            )?;
-            ensure(
-                pass((last.0, last.1 - 1)),
-                "decrementing the second element passes",
-            )?;
-
-            cases_tested += 1;
-        }
-
-        ensure(cases_tested > 32, "didn't find enough test cases")?;
-        Ok(())
+      cases_tested += 1;
     }
 
-    #[test]
-    fn test_sanity() -> Result<(), Reason> {
-        check_strategy_sanity((0_i32..100, 0_i32..1000, 0_i32..10000), None)
-    }
+    ensure(cases_tested > 32, "didn't find enough test cases")?;
+    Ok(())
+  }
+
+  #[test]
+  fn test_sanity() -> Result<(), Reason> {
+    check_strategy_sanity((0_i32..100, 0_i32..1000, 0_i32..10000), None)
+  }
 }

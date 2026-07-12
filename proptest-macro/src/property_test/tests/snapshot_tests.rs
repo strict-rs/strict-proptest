@@ -1,7 +1,9 @@
-use strict_test_support::{TestFailure, ensure_ok};
+use strict_test_support::TestFailure;
+use strict_test_support::ensure_ok;
 use syn::parse_quote;
 
-use crate::property_test::{codegen, options::Options};
+use crate::property_test::codegen;
+use crate::property_test::options::Options;
 
 /// Helper macro to make snapshot tests
 ///

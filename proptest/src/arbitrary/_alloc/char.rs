@@ -9,13 +9,20 @@
 
 //! Arbitrary implementations for `std::char`.
 
-use crate::std_facade::Vec;
 #[cfg(feature = "unstable")]
-use core::char::{CharTryFromError, ToLowercase, ToUppercase};
-use core::char::{EscapeDebug, EscapeDefault, EscapeUnicode, ParseCharError};
+use core::char::CharTryFromError;
+use core::char::EscapeDebug;
+use core::char::EscapeDefault;
+use core::char::EscapeUnicode;
+use core::char::ParseCharError;
+#[cfg(feature = "unstable")]
+use core::char::ToLowercase;
+#[cfg(feature = "unstable")]
+use core::char::ToUppercase;
 use core::iter::once;
 
 use crate::collection::vec;
+use crate::std_facade::Vec;
 
 multiplex_alloc! {
     core::char::DecodeUtf16, std::char::DecodeUtf16,
@@ -27,11 +34,13 @@ multiplex_alloc! {
 /// generated `DecodeUtf16` inputs at `u16::MAX` code units.
 const VEC_MAX: usize = 65_535;
 
-use crate::arbitrary::{SMapped, any};
+use crate::arbitrary::SMapped;
+use crate::arbitrary::any;
+use crate::strategy::BoxedStrategy;
 #[cfg(feature = "unstable")]
 use crate::strategy::Just;
+use crate::strategy::Strategy as _;
 use crate::strategy::statics::static_map;
-use crate::strategy::{BoxedStrategy, Strategy as _};
 
 /// Implements `Arbitrary` for a `char`-iterator type produced by a `char`
 /// method.
@@ -89,24 +98,24 @@ arbitrary!(DecodeUtf16Error, BoxedStrategy<Self>;
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        escape_debug => EscapeDebug,
-        escape_default => EscapeDefault,
-        escape_unicode => EscapeUnicode,
-        parse_char_error => ParseCharError,
-        decode_utf16_error => DecodeUtf16Error
-    );
+  no_panic_test!(
+      escape_debug => EscapeDebug,
+      escape_default => EscapeDefault,
+      escape_unicode => EscapeUnicode,
+      parse_char_error => ParseCharError,
+      decode_utf16_error => DecodeUtf16Error
+  );
 
-    no_panic_test!(
-        decode_utf16 => DecodeUtf16<<Vec<u16> as IntoIterator>::IntoIter>
-    );
+  no_panic_test!(
+      decode_utf16 => DecodeUtf16<<Vec<u16> as IntoIterator>::IntoIter>
+  );
 
-    #[cfg(feature = "unstable")]
-    no_panic_test!(
-        to_lowercase => ToLowercase,
-        to_uppercase => ToUppercase,
-        char_try_from_error => CharTryFromError
-    );
+  #[cfg(feature = "unstable")]
+  no_panic_test!(
+      to_lowercase => ToLowercase,
+      to_uppercase => ToUppercase,
+      char_try_from_error => CharTryFromError
+  );
 }

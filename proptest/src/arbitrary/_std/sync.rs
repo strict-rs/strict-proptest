@@ -10,18 +10,33 @@
 //! Arbitrary implementations for `std::sync`.
 
 use std::fmt;
-use std::sync::mpsc::{
-    IntoIter, Receiver, RecvError, RecvTimeoutError, SendError, Sender,
-    SyncSender, TryRecvError, TrySendError, channel, sync_channel,
-};
-use std::sync::{Arc, Barrier, BarrierWaitResult, Once};
+use std::sync::Arc;
+use std::sync::Barrier;
+use std::sync::BarrierWaitResult;
+use std::sync::Once;
+use std::sync::mpsc::IntoIter;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::RecvError;
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::SendError;
+use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::TrySendError;
+use std::sync::mpsc::channel;
+use std::sync::mpsc::sync_channel;
 use std::thread;
 
-use crate::arbitrary::{Arbitrary, SMapped, any, any_with};
+use crate::arbitrary::Arbitrary;
+use crate::arbitrary::SMapped;
+use crate::arbitrary::any;
+use crate::arbitrary::any_with;
+use crate::strategy::Just;
+use crate::strategy::LazyJust;
+use crate::strategy::LazyJustFn;
+use crate::strategy::TupleUnion;
+use crate::strategy::WeightedStrategy;
 use crate::strategy::statics::static_map;
-use crate::strategy::{
-    Just, LazyJust, LazyJustFn, TupleUnion, WeightedStrategy,
-};
 
 // OnceState can not escape Once::call_once_force.
 // PoisonError depends implicitly on the lifetime on MutexGuard, etc.
@@ -49,7 +64,7 @@ lazy_just!(Once, Once::new);
 
 /// Produces the leader `BarrierWaitResult` from a single-participant barrier.
 fn bwr_true() -> BarrierWaitResult {
-    Barrier::new(1).wait()
+  Barrier::new(1).wait()
 }
 
 /// Produces a `BarrierWaitResult` from a two-participant barrier.
@@ -58,36 +73,36 @@ fn bwr_true() -> BarrierWaitResult {
 /// the two results into the non-leader outcome. If the thread cannot be
 /// spawned, it degrades to the single-participant leader result.
 #[allow(
-    clippy::single_call_fn,
-    reason = "spawn a second thread to produce the two-participant BarrierWaitResult case"
+  clippy::single_call_fn,
+  reason = "spawn a second thread to produce the two-participant BarrierWaitResult case"
 )]
 fn bwr_false() -> BarrierWaitResult {
-    let barrier = Arc::new(Barrier::new(2));
-    let b2 = Arc::clone(&barrier);
-    // `thread::Builder::spawn` reports spawn failure as a `Result` where
-    // `thread::spawn` would panic. The second participant must exist before
-    // this thread may call `wait` (a lone `wait` on a 2-barrier blocks
-    // forever), so on spawn failure degrade to the single-participant
-    // (leader) result instead.
-    thread::Builder::new().spawn(move || b2.wait()).map_or_else(
-        |_| bwr_true(),
-        |join_handle| {
-            let bwr1 = barrier.wait();
-            match join_handle.join() {
-                Ok(bwr2) => {
-                    if bwr1.is_leader() {
-                        bwr2
-                    } else {
-                        bwr1
-                    }
-                }
-                // `join` only fails if the child panicked, and
-                // `Barrier::wait` does not panic — keep this total by
-                // degrading to the already-held result.
-                Err(_) => bwr1,
-            }
-        },
-    )
+  let barrier = Arc::new(Barrier::new(2));
+  let b2 = Arc::clone(&barrier);
+  // `thread::Builder::spawn` reports spawn failure as a `Result` where
+  // `thread::spawn` would panic. The second participant must exist before
+  // this thread may call `wait` (a lone `wait` on a 2-barrier blocks
+  // forever), so on spawn failure degrade to the single-participant
+  // (leader) result instead.
+  thread::Builder::new().spawn(move || b2.wait()).map_or_else(
+    |_| bwr_true(),
+    |join_handle| {
+      let bwr1 = barrier.wait();
+      match join_handle.join() {
+        Ok(bwr2) => {
+          if bwr1.is_leader() {
+            bwr2
+          } else {
+            bwr1
+          }
+        }
+        // `join` only fails if the child panicked, and
+        // `Barrier::wait` does not panic — keep this total by
+        // degrading to the already-held result.
+        Err(_) => bwr1,
+      }
+    },
+  )
 }
 
 arbitrary!(RecvError; RecvError);
@@ -145,20 +160,20 @@ arbitrary!([A: fmt::Debug] (SyncSender<A>, IntoIter<A>), SMapped<u16, Self>;
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        barrier => Barrier,
-        barrier_wait_result => BarrierWaitResult,
-        once => Once,
-        recv_error => RecvError,
-        send_error => SendError<u8>,
-        recv_timeout_error => RecvTimeoutError,
-        try_recv_error => TryRecvError,
-        try_send_error => TrySendError<u8>,
-        rx_tx => (Sender<u8>, Receiver<u8>),
-        rx_txiter => (Sender<u8>, IntoIter<u8>),
-        syncrx_tx => (SyncSender<u8>, Receiver<u8>),
-        syncrx_txiter => (SyncSender<u8>, IntoIter<u8>)
-    );
+  no_panic_test!(
+      barrier => Barrier,
+      barrier_wait_result => BarrierWaitResult,
+      once => Once,
+      recv_error => RecvError,
+      send_error => SendError<u8>,
+      recv_timeout_error => RecvTimeoutError,
+      try_recv_error => TryRecvError,
+      try_send_error => TrySendError<u8>,
+      rx_tx => (Sender<u8>, Receiver<u8>),
+      rx_txiter => (Sender<u8>, IntoIter<u8>),
+      syncrx_tx => (SyncSender<u8>, Receiver<u8>),
+      syncrx_txiter => (SyncSender<u8>, IntoIter<u8>)
+  );
 }

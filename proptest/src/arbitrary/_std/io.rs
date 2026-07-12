@@ -9,24 +9,63 @@
 
 //! Arbitrary implementations for `std::io`.
 
-use crate::std_facade::String;
-use std::io::{
-    BufRead, BufReader, BufWriter, Chain, Cursor, Empty, Error, ErrorKind,
-    ErrorKind::{
-        AddrInUse, AddrNotAvailable, AlreadyExists, BrokenPipe,
-        ConnectionAborted, ConnectionRefused, ConnectionReset, Interrupted,
-        InvalidData, InvalidInput, NotConnected, NotFound, Other,
-        PermissionDenied, TimedOut, UnexpectedEof, WouldBlock, WriteZero,
-    },
-    LineWriter, Lines, Read, Repeat, SeekFrom, Sink, Split, Stderr, Stdin,
-    Stdout, Take, Write, empty, repeat, sink, stderr, stdin, stdout,
-};
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::BufWriter;
+use std::io::Chain;
+use std::io::Cursor;
+use std::io::Empty;
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::ErrorKind::AddrInUse;
+use std::io::ErrorKind::AddrNotAvailable;
+use std::io::ErrorKind::AlreadyExists;
+use std::io::ErrorKind::BrokenPipe;
+use std::io::ErrorKind::ConnectionAborted;
+use std::io::ErrorKind::ConnectionRefused;
+use std::io::ErrorKind::ConnectionReset;
+use std::io::ErrorKind::Interrupted;
+use std::io::ErrorKind::InvalidData;
+use std::io::ErrorKind::InvalidInput;
+use std::io::ErrorKind::NotConnected;
+use std::io::ErrorKind::NotFound;
+use std::io::ErrorKind::Other;
+use std::io::ErrorKind::PermissionDenied;
+use std::io::ErrorKind::TimedOut;
+use std::io::ErrorKind::UnexpectedEof;
+use std::io::ErrorKind::WouldBlock;
+use std::io::ErrorKind::WriteZero;
+use std::io::LineWriter;
+use std::io::Lines;
+use std::io::Read;
+use std::io::Repeat;
+use std::io::SeekFrom;
+use std::io::Sink;
+use std::io::Split;
+use std::io::Stderr;
+use std::io::Stdin;
+use std::io::Stdout;
+use std::io::Take;
+use std::io::Write;
+use std::io::empty;
+use std::io::repeat;
+use std::io::sink;
+use std::io::stderr;
+use std::io::stdin;
+use std::io::stdout;
 
-use crate::arbitrary::{Arbitrary, SMapped, any, arbitrary, arbitrary_with};
+use crate::arbitrary::Arbitrary;
+use crate::arbitrary::SMapped;
+use crate::arbitrary::any;
+use crate::arbitrary::arbitrary;
+use crate::arbitrary::arbitrary_with;
+use crate::std_facade::String;
+use crate::strategy::Just;
+use crate::strategy::Strategy as _;
+use crate::strategy::TupleUnion;
+use crate::strategy::Union;
+use crate::strategy::WeightedStrategy;
 use crate::strategy::statics::static_map;
-use crate::strategy::{
-    Just, Strategy as _, TupleUnion, Union, WeightedStrategy,
-};
 
 // TODO: IntoInnerError
 // Consider: std::io::Initializer
@@ -156,27 +195,26 @@ arbitrary!(Error, SMapped<(ErrorKind, Option<String>), Self>;
 
 #[cfg(test)]
 mod test {
-    use crate::std_facade::Vec;
+  use super::*;
+  use crate::std_facade::Vec;
 
-    use super::*;
-
-    no_panic_test!(
-        buf_reader  => BufReader<Repeat>,
-        buf_writer  => BufWriter<Sink>,
-        line_writer => LineWriter<Sink>,
-        chain       => Chain<Empty, BufReader<Repeat>>,
-        cursor      => Cursor<Empty>,
-        empty       => Empty,
-        sink        => Sink,
-        stderr      => Stderr,
-        stdin       => Stdin,
-        stdout      => Stdout,
-        lines       => Lines<Empty>,
-        repeat      => Repeat,
-        split       => Split<Cursor<Vec<u8>>>,
-        take        => Take<Repeat>,
-        error_kind  => ErrorKind,
-        seek_from   => SeekFrom,
-        error       => Error
-    );
+  no_panic_test!(
+      buf_reader  => BufReader<Repeat>,
+      buf_writer  => BufWriter<Sink>,
+      line_writer => LineWriter<Sink>,
+      chain       => Chain<Empty, BufReader<Repeat>>,
+      cursor      => Cursor<Empty>,
+      empty       => Empty,
+      sink        => Sink,
+      stderr      => Stderr,
+      stdin       => Stdin,
+      stdout      => Stdout,
+      lines       => Lines<Empty>,
+      repeat      => Repeat,
+      split       => Split<Cursor<Vec<u8>>>,
+      take        => Take<Repeat>,
+      error_kind  => ErrorKind,
+      seek_from   => SeekFrom,
+      error       => Error
+  );
 }

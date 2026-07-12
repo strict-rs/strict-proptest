@@ -10,17 +10,35 @@
 //! Arbitrary implementations for `std::iter`.
 
 use core::fmt;
+use core::iter::Chain;
+use core::iter::Cloned;
+use core::iter::Cycle;
+use core::iter::DoubleEndedIterator;
+use core::iter::Empty;
+use core::iter::Enumerate;
 use core::iter::Fuse;
+use core::iter::Iterator;
+use core::iter::Once;
+use core::iter::Peekable;
+use core::iter::Repeat;
+use core::iter::Rev;
+use core::iter::Skip;
 #[cfg(feature = "unstable")]
 use core::iter::StepBy;
-use core::iter::{
-    Chain, Cloned, Cycle, DoubleEndedIterator, Empty, Enumerate, Iterator,
-    Once, Peekable, Repeat, Rev, Skip, Take, Zip, empty, once, repeat,
-};
+use core::iter::Take;
+use core::iter::Zip;
+use core::iter::empty;
+use core::iter::once;
+use core::iter::repeat;
 
-use crate::arbitrary::{Arbitrary, SMapped, any, any_with, functor};
+use crate::arbitrary::Arbitrary;
+use crate::arbitrary::SMapped;
+use crate::arbitrary::any;
+use crate::arbitrary::any_with;
+use crate::arbitrary::functor;
+use crate::strategy::BoxedStrategy;
+use crate::strategy::Strategy;
 use crate::strategy::statics::static_map;
-use crate::strategy::{BoxedStrategy, Strategy};
 
 // TODO: Filter, FilterMap, FlatMap, Map, Inspect, Scan, SkipWhile
 // Might be possible with CoArbitrary
@@ -37,17 +55,15 @@ arbitrary!(['a, T: 'a + Clone, A: Arbitrary + Iterator<Item = &'a T>]
     Cloned<A>, SMapped<A, Self>, A::Parameters;
     args => static_map(any_with::<A>(args), Iterator::cloned));
 
-impl<T: 'static + Clone, A: fmt::Debug + 'static + Iterator<Item = &'static T>>
-    functor::ArbitraryF1<A> for Cloned<A>
-{
-    type Parameters = ();
+impl<T: 'static + Clone, A: fmt::Debug + 'static + Iterator<Item = &'static T>> functor::ArbitraryF1<A> for Cloned<A> {
+  type Parameters = ();
 
-    fn lift1_with<S>(base: S, _args: Self::Parameters) -> BoxedStrategy<Self>
-    where
-        S: Strategy<Value = A> + 'static,
-    {
-        base.prop_map(Iterator::cloned).boxed()
-    }
+  fn lift1_with<S>(base: S, _args: Self::Parameters) -> BoxedStrategy<Self>
+  where
+    S: Strategy<Value = A> + 'static,
+  {
+    base.prop_map(Iterator::cloned).boxed()
+  }
 }
 
 arbitrary!([A] Empty<A>; empty());
@@ -67,24 +83,16 @@ lift1!(
         (any_with::<B>(args), base).prop_map(|(first, second)| first.zip(second)).boxed()
 );
 
-impl<A: fmt::Debug + Iterator, B: fmt::Debug + Iterator>
-    functor::ArbitraryF2<A, B> for Zip<A, B>
-{
-    type Parameters = ();
+impl<A: fmt::Debug + Iterator, B: fmt::Debug + Iterator> functor::ArbitraryF2<A, B> for Zip<A, B> {
+  type Parameters = ();
 
-    fn lift2_with<AS, BS>(
-        fst: AS,
-        snd: BS,
-        _args: Self::Parameters,
-    ) -> BoxedStrategy<Self>
-    where
-        AS: Strategy<Value = A> + 'static,
-        BS: Strategy<Value = B> + 'static,
-    {
-        (fst, snd)
-            .prop_map(|(first, second)| first.zip(second))
-            .boxed()
-    }
+  fn lift2_with<AS, BS>(fst: AS, snd: BS, _args: Self::Parameters) -> BoxedStrategy<Self>
+  where
+    AS: Strategy<Value = A> + 'static,
+    BS: Strategy<Value = B> + 'static,
+  {
+    (fst, snd).prop_map(|(first, second)| first.zip(second)).boxed()
+  }
 }
 
 arbitrary!(
@@ -105,24 +113,16 @@ lift1!([fmt::Debug + 'static + Iterator<Item = T>,
         (any_with::<B>(args), base).prop_map(|(first, second)| first.chain(second)).boxed()
 );
 
-impl<T, A: fmt::Debug + Iterator<Item = T>, B: fmt::Debug + Iterator<Item = T>>
-    functor::ArbitraryF2<A, B> for Chain<A, B>
-{
-    type Parameters = ();
+impl<T, A: fmt::Debug + Iterator<Item = T>, B: fmt::Debug + Iterator<Item = T>> functor::ArbitraryF2<A, B> for Chain<A, B> {
+  type Parameters = ();
 
-    fn lift2_with<AS, BS>(
-        fst: AS,
-        snd: BS,
-        _args: Self::Parameters,
-    ) -> BoxedStrategy<Self>
-    where
-        AS: Strategy<Value = A> + 'static,
-        BS: Strategy<Value = B> + 'static,
-    {
-        (fst, snd)
-            .prop_map(|(first, second)| first.chain(second))
-            .boxed()
-    }
+  fn lift2_with<AS, BS>(fst: AS, snd: BS, _args: Self::Parameters) -> BoxedStrategy<Self>
+  where
+    AS: Strategy<Value = A> + 'static,
+    BS: Strategy<Value = B> + 'static,
+  {
+    (fst, snd).prop_map(|(first, second)| first.chain(second)).boxed()
+  }
 }
 
 /// Implements `Arbitrary` (and the matching `lift1!`) for an iterator adapter
@@ -155,42 +155,42 @@ usize_mod!(StepBy, step_by);
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use std::ops::Range;
+  use std::vec::IntoIter;
 
-    use crate::arbitrary::SFnPtrMap;
-    use std::ops::Range;
-    use std::vec::IntoIter;
-    const DUMMY: &[u8] = &[0, 1, 2, 3, 4];
-    #[derive(Debug)]
-    struct Dummy(u8);
-    arbitrary!(Dummy, SFnPtrMap<Range<u8>, Self>; static_map(0..5, Dummy));
-    impl Iterator for Dummy {
-        type Item = &'static u8;
-        fn next(&mut self) -> Option<Self::Item> {
-            let byte = DUMMY.get(usize::from(self.0))?;
-            self.0 = self.0.saturating_add(1);
-            Some(byte)
-        }
+  use super::*;
+  use crate::arbitrary::SFnPtrMap;
+  const DUMMY: &[u8] = &[0, 1, 2, 3, 4];
+  #[derive(Debug)]
+  struct Dummy(u8);
+  arbitrary!(Dummy, SFnPtrMap<Range<u8>, Self>; static_map(0..5, Dummy));
+  impl Iterator for Dummy {
+    type Item = &'static u8;
+    fn next(&mut self) -> Option<Self::Item> {
+      let byte = DUMMY.get(usize::from(self.0))?;
+      self.0 = self.0.saturating_add(1);
+      Some(byte)
     }
+  }
 
-    no_panic_test!(
-        empty     => Empty<u8>,
-        once      => Once<u8>,
-        repeat    => Repeat<u8>,
-        cloned    => Cloned<Dummy>,
-        cycle     => Cycle<Once<u8>>,
-        enumerate => Enumerate<Repeat<u8>>,
-        fuse      => Fuse<Once<u8>>,
-        peekable  => Peekable<Repeat<u8>>,
-        rev       => Rev<IntoIter<u8>>,
-        zip       => Zip<Repeat<u8>, Repeat<u16>>,
-        chain     => Chain<Once<u8>, Once<u8>>,
-        skip      => Skip<Repeat<u8>>,
-        take      => Take<Repeat<u8>>
-    );
+  no_panic_test!(
+      empty     => Empty<u8>,
+      once      => Once<u8>,
+      repeat    => Repeat<u8>,
+      cloned    => Cloned<Dummy>,
+      cycle     => Cycle<Once<u8>>,
+      enumerate => Enumerate<Repeat<u8>>,
+      fuse      => Fuse<Once<u8>>,
+      peekable  => Peekable<Repeat<u8>>,
+      rev       => Rev<IntoIter<u8>>,
+      zip       => Zip<Repeat<u8>, Repeat<u16>>,
+      chain     => Chain<Once<u8>, Once<u8>>,
+      skip      => Skip<Repeat<u8>>,
+      take      => Take<Repeat<u8>>
+  );
 
-    #[cfg(feature = "unstable")]
-    no_panic_test!(
-        step_by   => StepBy<Repeat<u8>>
-    );
+  #[cfg(feature = "unstable")]
+  no_panic_test!(
+      step_by   => StepBy<Repeat<u8>>
+  );
 }

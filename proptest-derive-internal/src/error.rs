@@ -11,9 +11,11 @@
 use std::fmt::Display;
 
 use proc_macro2::TokenStream;
-use quote::{ToTokens as _, quote};
+use quote::ToTokens as _;
+use quote::quote;
 
-use crate::attr::{ParsedAttributes, StratMode};
+use crate::attr::ParsedAttributes;
+use crate::attr::StratMode;
 
 //==============================================================================
 // Item descriptions
@@ -43,150 +45,116 @@ pub(crate) const TY_VAR: &str = "a type variable";
 
 /// Ensures that the type is not parametric over lifetimes.
 #[allow(
-    clippy::single_call_fn,
-    reason = "reject derive inputs parametric over lifetimes with diagnostic E0001"
+  clippy::single_call_fn,
+  reason = "reject derive inputs parametric over lifetimes with diagnostic E0001"
 )]
 pub(crate) fn if_has_lifetimes(ctx: Ctx<'_>, ast: &syn::DeriveInput) {
-    if ast.generics.lifetimes().count() > 0 {
-        has_lifetimes(ctx);
-    }
+  if ast.generics.lifetimes().count() > 0 {
+    has_lifetimes(ctx);
+  }
 }
 
 /// Ensures that no attributes were specified on `item_kind`.
-pub(crate) fn if_anything_specified(
-    ctx: Ctx<'_>,
-    attrs: &ParsedAttributes,
-    item_kind: &str,
-) {
-    if_enum_attrs_present(ctx, attrs, item_kind);
-    if_strategy_present(ctx, attrs, item_kind);
-    if_specified_params(ctx, attrs, item_kind);
-    if_specified_filter(ctx, attrs, item_kind);
+pub(crate) fn if_anything_specified(ctx: Ctx<'_>, attrs: &ParsedAttributes, item_kind: &str) {
+  if_enum_attrs_present(ctx, attrs, item_kind);
+  if_strategy_present(ctx, attrs, item_kind);
+  if_specified_params(ctx, attrs, item_kind);
+  if_specified_filter(ctx, attrs, item_kind);
 }
 
 /// Ensures that things only allowed on an enum variant is not present on
 /// `item_kind` which is not an enum variant.
-pub(crate) fn if_enum_attrs_present(
-    ctx: Ctx<'_>,
-    attrs: &ParsedAttributes,
-    item_kind: &str,
-) {
-    if_skip_present(ctx, attrs, item_kind);
-    if_weight_present(ctx, attrs, item_kind);
+pub(crate) fn if_enum_attrs_present(ctx: Ctx<'_>, attrs: &ParsedAttributes, item_kind: &str) {
+  if_skip_present(ctx, attrs, item_kind);
+  if_weight_present(ctx, attrs, item_kind);
 }
 
 /// Ensures that parameters is not present on `item_kind`.
 #[allow(
-    clippy::single_call_fn,
-    reason = "reject a filter attribute that is meaningless on this item_kind"
+  clippy::single_call_fn,
+  reason = "reject a filter attribute that is meaningless on this item_kind"
 )]
-pub(crate) fn if_specified_filter(
-    ctx: Ctx<'_>,
-    attrs: &ParsedAttributes,
-    item_kind: &str,
-) {
-    if !attrs.filter.is_empty() {
-        meaningless_filter(ctx, item_kind);
-    }
+pub(crate) fn if_specified_filter(ctx: Ctx<'_>, attrs: &ParsedAttributes, item_kind: &str) {
+  if !attrs.filter.is_empty() {
+    meaningless_filter(ctx, item_kind);
+  }
 }
 
 /// Ensures that parameters is not present on `item_kind`.
-pub(crate) fn if_specified_params(
-    ctx: Ctx<'_>,
-    attrs: &ParsedAttributes,
-    item_kind: &str,
-) {
-    if attrs.params.is_set() {
-        parent_has_param(ctx, item_kind);
-    }
+pub(crate) fn if_specified_params(ctx: Ctx<'_>, attrs: &ParsedAttributes, item_kind: &str) {
+  if attrs.params.is_set() {
+    parent_has_param(ctx, item_kind);
+  }
 }
 
 /// Ensures that an explicit strategy or value is not present on `item_kind`.
-pub(crate) fn if_strategy_present(
-    ctx: Ctx<'_>,
-    attrs: &ParsedAttributes,
-    item_kind: &str,
-) {
-    match attrs.strategy {
-        StratMode::Arbitrary => {}
-        StratMode::Strategy(_) => {
-            illegal_strategy(ctx, "strategy", item_kind);
-        }
-        StratMode::Value(_) => {
-            illegal_strategy(ctx, "value", item_kind);
-        }
-        StratMode::Regex(_) => illegal_regex(ctx, item_kind),
+pub(crate) fn if_strategy_present(ctx: Ctx<'_>, attrs: &ParsedAttributes, item_kind: &str) {
+  match attrs.strategy {
+    StratMode::Arbitrary => {}
+    StratMode::Strategy(_) => {
+      illegal_strategy(ctx, "strategy", item_kind);
     }
+    StratMode::Value(_) => {
+      illegal_strategy(ctx, "value", item_kind);
+    }
+    StratMode::Regex(_) => illegal_regex(ctx, item_kind),
+  }
 }
 
 /// Ensures that a strategy, value, params, filter is not present on a unit variant.
 #[allow(
-    clippy::single_call_fn,
-    reason = "reject strategy, value, regex, params, or filter set on a unit variant"
+  clippy::single_call_fn,
+  reason = "reject strategy, value, regex, params, or filter set on a unit variant"
 )]
-pub(crate) fn if_present_on_unit_variant(
-    ctx: Ctx<'_>,
-    attrs: &ParsedAttributes,
-) {
-    // Ensures that an explicit strategy or value is not present on a unit variant.
-    match attrs.strategy {
-        StratMode::Arbitrary => {}
-        StratMode::Strategy(_) => {
-            strategy_on_unit_variant(ctx, "strategy");
-        }
-        StratMode::Value(_) => {
-            strategy_on_unit_variant(ctx, "value");
-        }
-        StratMode::Regex(_) => regex_on_unit_variant(ctx),
+pub(crate) fn if_present_on_unit_variant(ctx: Ctx<'_>, attrs: &ParsedAttributes) {
+  // Ensures that an explicit strategy or value is not present on a unit variant.
+  match attrs.strategy {
+    StratMode::Arbitrary => {}
+    StratMode::Strategy(_) => {
+      strategy_on_unit_variant(ctx, "strategy");
     }
+    StratMode::Value(_) => {
+      strategy_on_unit_variant(ctx, "value");
+    }
+    StratMode::Regex(_) => regex_on_unit_variant(ctx),
+  }
 
-    if attrs.params.is_set() {
-        params_on_unit_variant(ctx);
-    }
+  if attrs.params.is_set() {
+    params_on_unit_variant(ctx);
+  }
 
-    if !attrs.filter.is_empty() {
-        filter_on_unit_variant(ctx);
-    }
+  if !attrs.filter.is_empty() {
+    filter_on_unit_variant(ctx);
+  }
 }
 
 /// Ensures that parameters or filter is not present on a unit struct.
 #[allow(
-    clippy::single_call_fn,
-    reason = "reject params or filter attributes set on a unit struct"
+  clippy::single_call_fn,
+  reason = "reject params or filter attributes set on a unit struct"
 )]
-pub(crate) fn if_present_on_unit_struct(
-    ctx: Ctx<'_>,
-    attrs: &ParsedAttributes,
-) {
-    if attrs.params.is_set() {
-        params_on_unit_struct(ctx);
-    }
+pub(crate) fn if_present_on_unit_struct(ctx: Ctx<'_>, attrs: &ParsedAttributes) {
+  if attrs.params.is_set() {
+    params_on_unit_struct(ctx);
+  }
 
-    if !attrs.filter.is_empty() {
-        filter_on_unit_struct(ctx);
-    }
+  if !attrs.filter.is_empty() {
+    filter_on_unit_struct(ctx);
+  }
 }
 
 /// Ensures that skip is not present on `item_kind`.
-pub(crate) fn if_skip_present(
-    ctx: Ctx<'_>,
-    attrs: &ParsedAttributes,
-    item_kind: &str,
-) {
-    if attrs.skip {
-        illegal_skip(ctx, item_kind);
-    }
+pub(crate) fn if_skip_present(ctx: Ctx<'_>, attrs: &ParsedAttributes, item_kind: &str) {
+  if attrs.skip {
+    illegal_skip(ctx, item_kind);
+  }
 }
 
 /// Ensures that a weight is not present on `item_kind`.
-pub(crate) fn if_weight_present(
-    ctx: Ctx<'_>,
-    attrs: &ParsedAttributes,
-    item_kind: &str,
-) {
-    if attrs.weight.is_some() {
-        illegal_weight(ctx, item_kind);
-    }
+pub(crate) fn if_weight_present(ctx: Ctx<'_>, attrs: &ParsedAttributes, item_kind: &str) {
+  if attrs.weight.is_some() {
+    illegal_weight(ctx, item_kind);
+  }
 }
 
 //==============================================================================
@@ -212,50 +180,47 @@ pub(crate) type Ctx<'ctx> = &'ctx mut Context;
 /// the running of the macro.
 #[derive(Default)]
 pub(crate) struct Context {
-    /// The messages collected during the derive; each becomes part of the
-    /// emitted `compile_error!` so multiple problems surface at once.
-    errors: Vec<String>,
+  /// The messages collected during the derive; each becomes part of the
+  /// emitted `compile_error!` so multiple problems surface at once.
+  errors: Vec<String>,
 }
 
 impl Context {
-    /// Add a non-fatal error to the context.
-    pub(crate) fn error<T: Display>(&mut self, msg: T) {
-        self.errors.push(msg.to_string());
+  /// Add a non-fatal error to the context.
+  pub(crate) fn error<T: Display>(&mut self, msg: T) {
+    self.errors.push(msg.to_string());
+  }
+
+  /// Add an error to the context and produce an erroring
+  /// computation that will halt the macro.
+  pub(crate) fn fatal<T: Display, A>(&mut self, msg: T) -> DeriveResult<A> {
+    self.error(msg);
+    Err(Fatal)
+  }
+
+  /// Consume the context and if there were any errors,
+  /// emit `compile_error!(..)` such that the crate using
+  /// `#[derive(Arbitrary)]` will fail to compile.
+  pub(crate) fn check(mut self) -> Result<(), TokenStream> {
+    fn compile_error(msg: &str) -> TokenStream {
+      quote! {
+          compile_error!(#msg);
+      }
     }
 
-    /// Add an error to the context and produce an erroring
-    /// computation that will halt the macro.
-    pub(crate) fn fatal<T: Display, A>(&mut self, msg: T) -> DeriveResult<A> {
-        self.error(msg);
-        Err(Fatal)
-    }
-
-    /// Consume the context and if there were any errors,
-    /// emit `compile_error!(..)` such that the crate using
-    /// `#[derive(Arbitrary)]` will fail to compile.
-    pub(crate) fn check(mut self) -> Result<(), TokenStream> {
-        fn compile_error(msg: &str) -> TokenStream {
-            quote! {
-                compile_error!(#msg);
-            }
+    match self.errors.len() {
+      0 => Ok(()),
+      1 => self.errors.pop().map_or(Ok(()), |error| Err(compile_error(&error))),
+      n => {
+        let mut msg = format!("{n} errors:");
+        for err in self.errors {
+          msg.push_str("\n\t# ");
+          msg.push_str(&err);
         }
-
-        match self.errors.len() {
-            0 => Ok(()),
-            1 => self
-                .errors
-                .pop()
-                .map_or(Ok(()), |error| Err(compile_error(&error))),
-            n => {
-                let mut msg = format!("{n} errors:");
-                for err in self.errors {
-                    msg.push_str("\n\t# ");
-                    msg.push_str(&err);
-                }
-                Err(compile_error(&msg))
-            }
-        }
+        Err(compile_error(&msg))
+      }
     }
+  }
 }
 
 //==============================================================================
@@ -344,31 +309,28 @@ error!(
 // that is neither an enum nor a struct. Most likely, we've been given
 // a union type. This might be supported in the future, but not yet.
 fatal!(
-    not_struct_or_enum,
-    E0002,
-    "Deriving is only possible for structs and enums. \
-     It is currently not defined unions."
+  not_struct_or_enum,
+  E0002,
+  "Deriving is only possible for structs and enums. It is currently not defined unions."
 );
 
 // Happens when a struct has at least one field that is uninhabited.
 // There must at least exist one variant that we can construct.
 error!(
-    uninhabited_struct,
-    E0003,
-    "The struct you are deriving `Arbitrary` for is uninhabited since one of \
-    its fields is uninhabited. An uninhabited type is by definition impossible \
-    to generate."
+  uninhabited_struct,
+  E0003,
+  "The struct you are deriving `Arbitrary` for is uninhabited since one of its fields is uninhabited. An uninhabited type is by \
+   definition impossible to generate."
 );
 
 // Happens when an enum has zero variants. Such an enum is obviously
 // uninhabited and can not be constructed. There must at least exist
 // one variant that we can construct.
 fatal!(
-    uninhabited_enum_with_no_variants,
-    E0004,
-    "The enum you are deriving `Arbitrary` for is uninhabited since it has no \
-     variants. An example of such an `enum` is: `enum Void {}`. \
-     An uninhabited type is by definition impossible to generate."
+  uninhabited_enum_with_no_variants,
+  E0004,
+  "The enum you are deriving `Arbitrary` for is uninhabited since it has no variants. An example of such an `enum` is: `enum Void {}`. An \
+   uninhabited type is by definition impossible to generate."
 );
 
 // Happens when an enum is uninhabited due all its variants being
@@ -376,22 +338,20 @@ fatal!(
 // Nonetheless, we do our best to ensure soundness).
 // There must at least exist one variant that we can construct.
 fatal!(
-    uninhabited_enum_variants_uninhabited,
-    E0005,
-    "The enum you are deriving `Arbitrary` for is uninhabited since all its \
-     variants are uninhabited. \
-     An uninhabited type is by definition impossible to generate."
+  uninhabited_enum_variants_uninhabited,
+  E0005,
+  "The enum you are deriving `Arbitrary` for is uninhabited since all its variants are uninhabited. An uninhabited type is by definition \
+   impossible to generate."
 );
 
 // Happens when an enum becomes effectively uninhabited due
 // to all inhabited variants having been skipped. There must
 // at least exist one variant that we can construct.
 error!(
-    uninhabited_enum_because_of_skipped_variants,
-    E0006,
-    "The enum you are deriving `Arbitrary` for is uninhabited for all intents \
-     and purposes since you have `#[proptest(skip)]`ed all inhabited variants. \
-     An uninhabited type is by definition impossible to generate."
+  uninhabited_enum_because_of_skipped_variants,
+  E0006,
+  "The enum you are deriving `Arbitrary` for is uninhabited for all intents and purposes since you have `#[proptest(skip)]`ed all \
+   inhabited variants. An uninhabited type is by definition impossible to generate."
 );
 
 // Happens when `#[proptest(strategy = "<expr>")]` or
@@ -475,31 +435,26 @@ error!(
 // Happens when the form `#![proptest<..>]` is used. This will probably never
 // happen - but just in case it does, we catch it and emit an error.
 error!(
-    inner_attr,
-    E0013, "Inner attributes `#![proptest(..)]` are not currently supported."
+  inner_attr,
+  E0013, "Inner attributes `#![proptest(..)]` are not currently supported."
 );
 
 // Happens when the form `#[proptest]` is used. The form contains no
 // information for us to process, so we disallow it.
-error!(
-    bare_proptest_attr,
-    E0014, "Bare `#[proptest]` attributes are not allowed."
-);
+error!(bare_proptest_attr, E0014, "Bare `#[proptest]` attributes are not allowed.");
 
 // Happens when the form `#[proptest = <literal>)]` is used.
 // Only the form `#[proptest(<contents>)]` is supported.
 error!(
-    literal_set_proptest,
-    E0015, "The attribute form `#[proptest = <literal>]` is not allowed."
+  literal_set_proptest,
+  E0015, "The attribute form `#[proptest = <literal>]` is not allowed."
 );
 
 // Happens when `<modifier>` in `#[proptest(<modifier>)]` is a literal and
 // not a real modifier.
 error!(
-    immediate_literals,
-    E0016,
-    "Literals immediately inside `#[proptest(..)]` as in \
-     `#[proptest(<lit>, ..)]` are not allowed."
+  immediate_literals,
+  E0016, "Literals immediately inside `#[proptest(..)]` as in `#[proptest(<lit>, ..)]` are not allowed."
 );
 
 // Happens when `<modifier>` in `#[proptest(<modifier>)]` is set more than
@@ -534,20 +489,18 @@ error!(
 
 // Happens when `#[proptest(no_params)]` is malformed.
 error!(
-    no_params_malformed,
-    E0019,
-    "The attribute modifier `no_params` inside `#[proptest(..)]` does not \
-     support any further configuration and must be a plain modifier as in \
-     `#[proptest(no_params)]`."
+  no_params_malformed,
+  E0019,
+  "The attribute modifier `no_params` inside `#[proptest(..)]` does not support any further configuration and must be a plain modifier as \
+   in `#[proptest(no_params)]`."
 );
 
 // Happens when `#[proptest(skip)]` is malformed.
 error!(
-    skip_malformed,
-    E0020,
-    "The attribute modifier `skip` inside `#[proptest(..)]` does not support \
-     any further configuration and must be a plain modifier as in \
-     `#[proptest(skip)]`."
+  skip_malformed,
+  E0020,
+  "The attribute modifier `skip` inside `#[proptest(..)]` does not support any further configuration and must be a plain modifier as in \
+   `#[proptest(skip)]`."
 );
 
 // Happens when `#[proptest(weight..)]` is malformed.
@@ -565,11 +518,9 @@ error!(
 // `#[proptest(no_params)]` were specified. They are mutually
 // exclusive choices. The user can resolve this by picking one.
 fatal!(
-    overspecified_param,
-    E0022,
-    "Cannot set `#[proptest(no_params)]` as well as \
-     `#[proptest(params(<type>))]` simultaneously. \
-     Please pick one of these attributes."
+  overspecified_param,
+  E0022,
+  "Cannot set `#[proptest(no_params)]` as well as `#[proptest(params(<type>))]` simultaneously. Please pick one of these attributes."
 );
 
 // This happens when `#[proptest(params..)]` is malformed.
@@ -578,11 +529,10 @@ fatal!(
 // `#[proptest(params("<type>"))]` is malformed. In other words, `<type>` is
 // not a valid Rust type. Note that `syn` may not cover all valid Rust types.
 error!(
-    param_malformed,
-    E0023,
-    "The attribute modifier `params` inside #[proptest(..)] must have the \
-     format `#[proptest(params = \"<type>\")]` where `<type>` is a valid type \
-     in Rust. An example: `#[proptest(params = \"ComplexType<Foo>\")]`."
+  param_malformed,
+  E0023,
+  "The attribute modifier `params` inside #[proptest(..)] must have the format `#[proptest(params = \"<type>\")]` where `<type>` is a \
+   valid type in Rust. An example: `#[proptest(params = \"ComplexType<Foo>\")]`."
 );
 
 // Happens when more than one of `#[proptest(strategy..)]`,
@@ -590,11 +540,10 @@ error!(
 // They are mutually exclusive choices.
 // The user can resolve this by picking one.
 fatal!(
-    overspecified_strat,
-    E0025,
-    "Cannot set more than one of `#[proptest(value = \"<expr>\")]`,
-    `#[proptest(strategy = \"<expr>\")]`, `#[proptest(regex = \"<string>\")]` \
-    simultaneously. Please pick one of these attributes."
+  overspecified_strat,
+  E0025,
+  "Cannot set more than one of `#[proptest(value = \"<expr>\")]`,
+    `#[proptest(strategy = \"<expr>\")]`, `#[proptest(regex = \"<string>\")]` simultaneously. Please pick one of these attributes."
 );
 
 // Happens when `#[proptest(strategy..)]` or `#[proptest(value..)]` is
@@ -721,36 +670,32 @@ error!(
 // Occurs when `#[proptest(no_bound)]` is specified
 // on something that is not a type variable.
 error!(
-    no_bound_set_on_non_tyvar,
-    E0031,
-    "Setting `#[proptest(no_bound)]` on something that is not a type variable \
-     has no effect and is redundant. Therefore it is not allowed."
+  no_bound_set_on_non_tyvar,
+  E0031,
+  "Setting `#[proptest(no_bound)]` on something that is not a type variable has no effect and is redundant. Therefore it is not allowed."
 );
 
 // Happens when `#[proptest(no_bound)]` is malformed.
 error!(
-    no_bound_malformed,
-    E0032,
-    "The attribute modifier `no_bound` inside `#[proptest(..)]` does not \
-     support any further configuration and must be a plain modifier as in \
-     `#[proptest(no_bound)]`."
+  no_bound_malformed,
+  E0032,
+  "The attribute modifier `no_bound` inside `#[proptest(..)]` does not support any further configuration and must be a plain modifier as \
+   in `#[proptest(no_bound)]`."
 );
 
 // Happens when the sum of weights on enum variants overflowing an u32.
 error!(
-    weight_overflowing,
-    E0033,
-    "The sum of the weights specified on variants of the enum you are \
-     deriving `Arbitrary` for overflows an `u32` which it can't do."
+  weight_overflowing,
+  E0033, "The sum of the weights specified on variants of the enum you are deriving `Arbitrary` for overflows an `u32` which it can't do."
 );
 
 // Happens when `#[proptest(regex..)]` is malformed.
 // For example, `#[proptest(regex = 1)]` is not a valid form.
 error!(
-    regex_malformed,
-    E0034,
-    "The attribute modifier `regex` inside `#[proptest(..)]` must have the \
-    format `#[proptest(regex = \"<string>\")]` where `<string>` is a valid
+  regex_malformed,
+  E0034,
+  "The attribute modifier `regex` inside `#[proptest(..)]` must have the format `#[proptest(regex = \"<string>\")]` where `<string>` is a \
+   valid
     regular expression embedded in a Rust string slice."
 );
 
@@ -769,13 +714,12 @@ error!(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn test_mk_err_msg_format() -> Result<(), ::strict_test_support::TestFailure>
-    {
-        ::strict_test_support::ensure_eq(
+  #[test]
+  fn test_mk_err_msg_format() -> Result<(), ::strict_test_support::TestFailure> {
+    ::strict_test_support::ensure_eq(
             &mk_err_msg!(E0001, "This is a sample error message."),
             &"[proptest_derive, E0001] during #[derive(Arbitrary)]:\nThis is a sample error message. Please see: https://proptest-rs.github.io/proptest/proptest-derive/errors.html#e0001 for more information.".to_owned(),
             "the composed error message carries the code, banner, and doc link",
         )
-    }
+  }
 }

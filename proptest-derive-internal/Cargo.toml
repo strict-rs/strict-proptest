@@ -1,19 +1,19 @@
 [package]
 name = "proptest-derive-internal"
-version = "0.8.0"
-authors = ["Mazdak Farrokhzad <twingoow@gmail.com>"]
+version.workspace = true
+authors = ["Takumi Shimada <hello@takumi.earth>", "Mazdak Farrokhzad <twingoow@gmail.com>"]
 license.workspace = true
 readme = "README.md"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
-documentation = "https://proptest-rs.github.io/proptest/proptest-derive/index.html"
+documentation.workspace = true
 keywords = ["derive", "arbitrary", "proptest", "testing", "quickcheck"]
 categories.workspace = true
 description = """
 Implementation detail of proptest-derive; do not depend on this crate directly.
 """
-homepage = "https://proptest-rs.github.io/proptest/proptest-derive/index.html"
+homepage.workspace = true
 
 [lints]
 workspace = true

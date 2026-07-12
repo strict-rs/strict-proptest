@@ -9,9 +9,12 @@
 
 //! Arbitrary implementations for `std::mem`.
 
-use core::mem::{Discriminant, discriminant};
+use core::mem::Discriminant;
+use core::mem::discriminant;
 
-use crate::arbitrary::{Arbitrary, SMapped, any_with};
+use crate::arbitrary::Arbitrary;
+use crate::arbitrary::SMapped;
+use crate::arbitrary::any_with;
 use crate::strategy::statics::static_map;
 
 arbitrary!([A: Arbitrary] Discriminant<A>,
@@ -29,16 +32,17 @@ lift1!(['static] Discriminant<A>;
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use std::num::FpCategory;
+  use std::num::FpCategory;
 
-    #[derive(Copy, Clone, Debug)]
-    struct DummyStruct;
-    arbitrary!(DummyStruct; DummyStruct);
+  use super::*;
 
-    no_panic_test!(
-        //manually_drop       => ManuallyDrop<u8>, // Trivial destructor.
-        discriminant_struct => Discriminant<DummyStruct>,
-        discriminant_enum   => Discriminant<FpCategory>
-    );
+  #[derive(Copy, Clone, Debug)]
+  struct DummyStruct;
+  arbitrary!(DummyStruct; DummyStruct);
+
+  no_panic_test!(
+      //manually_drop       => ManuallyDrop<u8>, // Trivial destructor.
+      discriminant_struct => Discriminant<DummyStruct>,
+      discriminant_enum   => Discriminant<FpCategory>
+  );
 }

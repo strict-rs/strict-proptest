@@ -9,18 +9,26 @@
 
 //! Arbitrary implementations for `std::net`.
 
+use std::net::AddrParseError;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 #[cfg(feature = "unstable")]
 use std::net::Ipv6MulticastScope;
-use std::net::{
-    AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr,
-    SocketAddrV4, SocketAddrV6,
-};
+use std::net::Shutdown;
+use std::net::SocketAddr;
+use std::net::SocketAddrV4;
+use std::net::SocketAddrV6;
 
-use crate::arbitrary::{SMapped, StrategyFor, any};
+use crate::arbitrary::SMapped;
+use crate::arbitrary::StrategyFor;
+use crate::arbitrary::any;
+use crate::strategy::Just;
+use crate::strategy::MapInto;
+use crate::strategy::Strategy as _;
+use crate::strategy::TupleUnion;
+use crate::strategy::WeightedStrategy;
 use crate::strategy::statics::static_map;
-use crate::strategy::{
-    Just, MapInto, Strategy as _, TupleUnion, WeightedStrategy,
-};
 
 // TODO: Can we design a workable semantic for PBT wrt. actual networking
 // connections?
@@ -115,21 +123,21 @@ arbitrary!(Ipv6MulticastScope,
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        addr_parse_error => AddrParseError,
-        ipv4_addr => Ipv4Addr,
-        ipv6_addr => Ipv6Addr,
-        socket_addr_v4 => SocketAddrV4,
-        socket_addr_v6 => SocketAddrV6,
-        ip_addr => IpAddr,
-        shutdown => Shutdown,
-        socket_addr => SocketAddr
-    );
+  no_panic_test!(
+      addr_parse_error => AddrParseError,
+      ipv4_addr => Ipv4Addr,
+      ipv6_addr => Ipv6Addr,
+      socket_addr_v4 => SocketAddrV4,
+      socket_addr_v6 => SocketAddrV6,
+      ip_addr => IpAddr,
+      shutdown => Shutdown,
+      socket_addr => SocketAddr
+  );
 
-    #[cfg(feature = "unstable")]
-    no_panic_test!(
-        ipv6_multicast_scope => Ipv6MulticastScope
-    );
+  #[cfg(feature = "unstable")]
+  no_panic_test!(
+      ipv6_multicast_scope => Ipv6MulticastScope
+  );
 }

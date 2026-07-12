@@ -9,18 +9,34 @@
 
 //! Arbitrary implementations for `std::sync`.
 
-use crate::std_facade::Arc;
-use core::sync::atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering};
+use core::sync::atomic::AtomicBool;
 #[cfg(feature = "unstable")]
-use core::sync::atomic::{
-    AtomicI8, AtomicI16, AtomicI32, AtomicU8, AtomicU16, AtomicU32,
-};
+use core::sync::atomic::AtomicI8;
+#[cfg(feature = "unstable")]
+use core::sync::atomic::AtomicI16;
+#[cfg(feature = "unstable")]
+use core::sync::atomic::AtomicI32;
 #[cfg(all(feature = "unstable", feature = "atomic64bit"))]
-use core::sync::atomic::{AtomicI64, AtomicU64};
+use core::sync::atomic::AtomicI64;
+use core::sync::atomic::AtomicIsize;
+#[cfg(feature = "unstable")]
+use core::sync::atomic::AtomicU8;
+#[cfg(feature = "unstable")]
+use core::sync::atomic::AtomicU16;
+#[cfg(feature = "unstable")]
+use core::sync::atomic::AtomicU32;
+#[cfg(all(feature = "unstable", feature = "atomic64bit"))]
+use core::sync::atomic::AtomicU64;
+use core::sync::atomic::AtomicUsize;
+use core::sync::atomic::Ordering;
 
-use crate::arbitrary::{SMapped, any};
+use crate::arbitrary::SMapped;
+use crate::arbitrary::any;
+use crate::std_facade::Arc;
+use crate::strategy::Just;
+use crate::strategy::TupleUnion;
+use crate::strategy::WeightedStrategy;
 use crate::strategy::statics::static_map;
-use crate::strategy::{Just, TupleUnion, WeightedStrategy};
 
 wrap_from!(Arc);
 
@@ -61,29 +77,29 @@ arbitrary!(Ordering,
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        arc => Arc<u8>,
-        atomic_bool => AtomicBool,
-        atomic_isize => AtomicIsize,
-        atomic_usize => AtomicUsize,
-        ordering => Ordering
-    );
+  no_panic_test!(
+      arc => Arc<u8>,
+      atomic_bool => AtomicBool,
+      atomic_isize => AtomicIsize,
+      atomic_usize => AtomicUsize,
+      ordering => Ordering
+  );
 
-    #[cfg(feature = "unstable")]
-    no_panic_test!(
-        atomic_i8  => AtomicI8,
-        atomic_i16 => AtomicI16,
-        atomic_i32 => AtomicI32,
-        atomic_u8  => AtomicU8,
-        atomic_u16 => AtomicU16,
-        atomic_u32 => AtomicU32
-    );
+  #[cfg(feature = "unstable")]
+  no_panic_test!(
+      atomic_i8  => AtomicI8,
+      atomic_i16 => AtomicI16,
+      atomic_i32 => AtomicI32,
+      atomic_u8  => AtomicU8,
+      atomic_u16 => AtomicU16,
+      atomic_u32 => AtomicU32
+  );
 
-    #[cfg(all(feature = "unstable", feature = "atomic64bit"))]
-    no_panic_test!(
-        atomic_i64 => AtomicI64,
-        atomic_u64 => AtomicU64
-    );
+  #[cfg(all(feature = "unstable", feature = "atomic64bit"))]
+  no_panic_test!(
+      atomic_i64 => AtomicI64,
+      atomic_u64 => AtomicU64
+  );
 }

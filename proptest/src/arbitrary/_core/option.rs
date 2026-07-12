@@ -9,14 +9,19 @@
 
 //! Arbitrary implementations for `std::option`.
 
-use crate::std_facade::string;
 use core::ops::RangeInclusive;
 use core::option as opt;
 
-use crate::arbitrary::{Arbitrary, SMapped, any_with};
-use crate::option::{OptionStrategy, Probability, weighted};
+use crate::arbitrary::Arbitrary;
+use crate::arbitrary::SMapped;
+use crate::arbitrary::any_with;
+use crate::option::OptionStrategy;
+use crate::option::Probability;
+use crate::option::weighted;
+use crate::std_facade::string;
+use crate::strategy::MapInto;
+use crate::strategy::Strategy as _;
 use crate::strategy::statics::static_map;
-use crate::strategy::{MapInto, Strategy as _};
 
 arbitrary!(Probability, MapInto<RangeInclusive<f64>, Self>;
     (0.0..=1.0).prop_map_into()
@@ -48,12 +53,12 @@ lift1!(['static] opt::IntoIter<A>, Probability;
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        probability => Probability,
-        option      => Option<u8>,
-        option_iter => opt::IntoIter<u8>,
-        option_parse_error => Option<string::ParseError>
-    );
+  no_panic_test!(
+      probability => Probability,
+      option      => Option<u8>,
+      option_iter => opt::IntoIter<u8>,
+      option_parse_error => Option<string::ParseError>
+  );
 }

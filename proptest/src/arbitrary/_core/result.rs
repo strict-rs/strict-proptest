@@ -9,14 +9,21 @@
 
 //! Arbitrary implementations for `std::result`.
 
-use crate::std_facade::string;
 use core::fmt;
 use core::result::IntoIter;
 
-use crate::arbitrary::{Arbitrary, SMapped, any_with, functor};
-use crate::result::{MaybeOk, Probability, maybe_ok_weighted};
+use crate::arbitrary::Arbitrary;
+use crate::arbitrary::SMapped;
+use crate::arbitrary::any_with;
+use crate::arbitrary::functor;
+use crate::result::MaybeOk;
+use crate::result::Probability;
+use crate::result::maybe_ok_weighted;
+use crate::std_facade::string;
+use crate::strategy::BoxedStrategy;
+use crate::strategy::Just;
+use crate::strategy::Strategy;
 use crate::strategy::statics::static_map;
-use crate::strategy::{BoxedStrategy, Just, Strategy};
 
 // These are Result with uninhabited type in some variant:
 arbitrary!([A: Arbitrary] Result<A, string::ParseError>,
@@ -58,35 +65,30 @@ arbitrary!([A: Arbitrary, B: Arbitrary] Result<A, B>,
 
 impl<A: fmt::Debug, E: Arbitrary> functor::ArbitraryF1<A> for Result<A, E>
 where
-    E::Strategy: 'static,
+  E::Strategy: 'static,
 {
-    type Parameters = product_type![Probability, E::Parameters];
+  type Parameters = product_type![Probability, E::Parameters];
 
-    fn lift1_with<AS>(base: AS, args: Self::Parameters) -> BoxedStrategy<Self>
-    where
-        AS: Strategy<Value = A> + 'static,
-    {
-        let product_unpack![prob, err_params] = args;
-        let (probability, ok_strategy, err_strategy) =
-            (prob, base, any_with::<E>(err_params));
-        maybe_ok_weighted(probability, ok_strategy, err_strategy).boxed()
-    }
+  fn lift1_with<AS>(base: AS, args: Self::Parameters) -> BoxedStrategy<Self>
+  where
+    AS: Strategy<Value = A> + 'static,
+  {
+    let product_unpack![prob, err_params] = args;
+    let (probability, ok_strategy, err_strategy) = (prob, base, any_with::<E>(err_params));
+    maybe_ok_weighted(probability, ok_strategy, err_strategy).boxed()
+  }
 }
 
 impl<A: fmt::Debug, B: fmt::Debug> functor::ArbitraryF2<A, B> for Result<A, B> {
-    type Parameters = Probability;
+  type Parameters = Probability;
 
-    fn lift2_with<AS, BS>(
-        fst: AS,
-        snd: BS,
-        args: Self::Parameters,
-    ) -> BoxedStrategy<Self>
-    where
-        AS: Strategy<Value = A> + 'static,
-        BS: Strategy<Value = B> + 'static,
-    {
-        maybe_ok_weighted(args, fst, snd).boxed()
-    }
+  fn lift2_with<AS, BS>(fst: AS, snd: BS, args: Self::Parameters) -> BoxedStrategy<Self>
+  where
+    AS: Strategy<Value = A> + 'static,
+    BS: Strategy<Value = B> + 'static,
+  {
+    maybe_ok_weighted(args, fst, snd).boxed()
+  }
 }
 
 arbitrary!([A: Arbitrary] IntoIter<A>,
@@ -101,13 +103,14 @@ lift1!(['static] IntoIter<A>, Probability; base, args => {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use std::string::ParseError;
+  use std::string::ParseError;
 
-    no_panic_test!(
-        result    => Result<u8, u16>,
-        into_iter => IntoIter<u8>,
-        result_a_parse_error => Result<u8, ParseError>,
-        result_parse_error_a => Result<ParseError, u8>
-    );
+  use super::*;
+
+  no_panic_test!(
+      result    => Result<u8, u16>,
+      into_iter => IntoIter<u8>,
+      result_a_parse_error => Result<u8, ParseError>,
+      result_parse_error_a => Result<ParseError, u8>
+  );
 }

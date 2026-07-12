@@ -7,13 +7,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{fmt, format};
-
 #[cfg(feature = "std")]
 use std::error::Error as StdError;
 #[cfg(feature = "std")]
 use std::string::ToString as _;
 
+use crate::std_facade::fmt;
+use crate::std_facade::format;
 use crate::test_runner::Reason;
 
 /// Display adapter for values whose public failure message is their `Debug`
@@ -21,9 +21,9 @@ use crate::test_runner::Reason;
 struct DebugDisplay<'a, T: fmt::Debug + ?Sized>(&'a T);
 
 impl<T: fmt::Debug + ?Sized> fmt::Display for DebugDisplay<'_, T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self.0, f)
-    }
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fmt::Debug::fmt(self.0, f)
+  }
 }
 
 /// Errors which can be returned from test cases to indicate non-successful
@@ -37,12 +37,12 @@ impl<T: fmt::Debug + ?Sized> fmt::Display for DebugDisplay<'_, T> {
 /// `Error::display()` into the `Fail` case.
 #[derive(Debug, Clone)]
 pub enum TestCaseError {
-    /// The input was not valid for the test case. This does not count as a
-    /// test failure (nor a success); rather, it simply signals to generate
-    /// a new input and try again.
-    Reject(Reason),
-    /// The code under test failed the test.
-    Fail(Reason),
+  /// The input was not valid for the test case. This does not count as a
+  /// test failure (nor a success); rather, it simply signals to generate
+  /// a new input and try again.
+  Reject(Reason),
+  /// The code under test failed the test.
+  Fail(Reason),
 }
 
 /// Indicates the type of test that ran successfully.
@@ -55,16 +55,16 @@ pub enum TestCaseError {
 /// `TestCaseResult` is public.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum TestCaseOk {
-    /// A freshly generated input passed the test.
-    NewCaseSuccess,
-    /// A replayed persisted-failure seed passed the test.
-    PersistedCaseSuccess,
-    /// A step replayed from a fork child's log recorded a pass.
-    ReplayFromForkSuccess,
-    /// The input's outcome was served from the result cache.
-    CacheHitSuccess,
-    /// The input was rejected as invalid (neither pass nor fail).
-    Reject,
+  /// A freshly generated input passed the test.
+  NewCaseSuccess,
+  /// A replayed persisted-failure seed passed the test.
+  PersistedCaseSuccess,
+  /// A step replayed from a fork child's log recorded a pass.
+  ReplayFromForkSuccess,
+  /// The input's outcome was served from the result cache.
+  CacheHitSuccess,
+  /// The input was rejected as invalid (neither pass nor fail).
+  Reject,
 }
 
 /// Convenience for the type returned by test cases.
@@ -78,65 +78,65 @@ pub type TestCaseResult = Result<(), TestCaseError>;
 pub(super) type TestCaseResultV2 = Result<TestCaseOk, TestCaseError>;
 
 impl TestCaseError {
-    /// Rejects the generated test input as invalid for this test case. This
-    /// does not count as a test failure (nor a success); rather, it simply
-    /// signals to generate a new input and try again.
-    ///
-    /// The string gives the location and context of the rejection, and
-    /// should be suitable for formatting like `Foo did X at {whence}`.
-    pub fn reject(reason: impl Into<Reason>) -> Self {
-        Self::Reject(reason.into())
-    }
+  /// Rejects the generated test input as invalid for this test case. This
+  /// does not count as a test failure (nor a success); rather, it simply
+  /// signals to generate a new input and try again.
+  ///
+  /// The string gives the location and context of the rejection, and
+  /// should be suitable for formatting like `Foo did X at {whence}`.
+  pub fn reject(reason: impl Into<Reason>) -> Self {
+    Self::Reject(reason.into())
+  }
 
-    /// The code under test failed the test.
-    ///
-    /// The string should indicate the location of the failure, but may
-    /// generally be any string.
-    pub fn fail(reason: impl Into<Reason>) -> Self {
-        Self::Fail(reason.into())
-    }
+  /// The code under test failed the test.
+  ///
+  /// The string should indicate the location of the failure, but may
+  /// generally be any string.
+  pub fn fail(reason: impl Into<Reason>) -> Self {
+    Self::Fail(reason.into())
+  }
 }
 
 impl fmt::Display for TestCaseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Self::Reject(ref whence) => {
-                write!(f, "Input rejected at {whence}")
-            }
-            Self::Fail(ref why) => write!(f, "Case failed: {why}"),
-        }
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match *self {
+      Self::Reject(ref whence) => {
+        write!(f, "Input rejected at {whence}")
+      }
+      Self::Fail(ref why) => write!(f, "Case failed: {why}"),
     }
+  }
 }
 
 #[cfg(feature = "std")]
 impl<E: StdError> From<E> for TestCaseError {
-    fn from(cause: E) -> Self {
-        Self::fail(cause.to_string())
-    }
+  fn from(cause: E) -> Self {
+    Self::fail(cause.to_string())
+  }
 }
 
 /// A failure state from running test cases for a single test.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TestError<T> {
-    /// The test was aborted for the given reason, for example, due to too many
-    /// inputs having been rejected.
-    Abort(Reason),
-    /// A failing test case was found. The string indicates where and/or why
-    /// the test failed. The `T` is the minimal input found to reproduce the
-    /// failure.
-    Fail(Reason, T),
+  /// The test was aborted for the given reason, for example, due to too many
+  /// inputs having been rejected.
+  Abort(Reason),
+  /// A failing test case was found. The string indicates where and/or why
+  /// the test failed. The `T` is the minimal input found to reproduce the
+  /// failure.
+  Fail(Reason, T),
 }
 
 impl<T: fmt::Debug> fmt::Display for TestError<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Self::Abort(ref why) => write!(f, "Test aborted: {why}"),
-            Self::Fail(ref why, ref what) => {
-                writeln!(f, "Test failed: {why}.")?;
-                write!(f, "minimal failing input: {:#}", DebugDisplay(what))
-            }
-        }
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match *self {
+      Self::Abort(ref why) => write!(f, "Test aborted: {why}"),
+      Self::Fail(ref why, ref what) => {
+        writeln!(f, "Test failed: {why}.")?;
+        write!(f, "minimal failing input: {:#}", DebugDisplay(what))
+      }
     }
+  }
 }
 
 #[cfg(feature = "std")]
@@ -144,64 +144,62 @@ impl<T: fmt::Debug> StdError for TestError<T> {}
 
 /// Sealed-trait guard for `ProptestResultExt`.
 mod private {
-    /// Marker implemented only for `Result`, sealing `ProptestResultExt`
-    /// so no downstream type can implement it.
-    pub trait Sealed {}
+  /// Marker implemented only for `Result`, sealing `ProptestResultExt`
+  /// so no downstream type can implement it.
+  pub trait Sealed {}
 
-    impl<T, E> Sealed for Result<T, E> {}
+  impl<T, E> Sealed for Result<T, E> {}
 }
 
 /// Extension trait for `Result<T, E>` to provide additional functionality
 /// specifically for prop test cases.
 pub trait ProptestResultExt<T, E>: private::Sealed {
-    /// Converts a `Result<T, E>` into a `Result<T, TestCaseError>`, where the
-    /// `Err` case is transformed into a `TestCaseError::Reject`.
-    ///
-    /// This is intended to be used like the [`prop_assume!`] macro, but for
-    /// fallible computations. If the result is `Err`, the test input is rejected
-    /// and a new input will be generated.
-    ///
-    /// ## Example
-    ///
-    /// ```rust,ignore
-    /// use proptest::prelude::*;
-    ///
-    /// fn test_conversion(a: i32) -> Result<(), TestCaseError> {
-    ///     // Reject the case if `a` cannot be converted to u8 (e.g., negative values)
-    ///     let _unsigned: u8 = a.try_into().prop_assume_ok()?;
-    ///     // ...rest of test...
-    ///     Ok(())
-    /// }
-    ///
-    /// proptest! {
-    ///   #[test]
-    ///   fn test_that_only_works_with_positive_integers(a in -10i32..10i32) {
-    ///     test_conversion(a)?;
-    ///   }
-    /// }
-    /// ```
-    ///
-    /// ## Errors
-    ///
-    /// Returns `Err(TestCaseError::Reject)` when `self` is `Err`, tagging
-    /// the rejection with the caller location and the error's `Debug`
-    /// rendering; an `Ok` is passed through unchanged.
-    ///
-    /// [`prop_assume!`]: crate::prop_assume
-    fn prop_assume_ok(self) -> Result<T, TestCaseError>
-    where
-        E: fmt::Debug;
+  /// Converts a `Result<T, E>` into a `Result<T, TestCaseError>`, where the
+  /// `Err` case is transformed into a `TestCaseError::Reject`.
+  ///
+  /// This is intended to be used like the [`prop_assume!`] macro, but for
+  /// fallible computations. If the result is `Err`, the test input is rejected
+  /// and a new input will be generated.
+  ///
+  /// ## Example
+  ///
+  /// ```rust,ignore
+  /// use proptest::prelude::*;
+  ///
+  /// fn test_conversion(a: i32) -> Result<(), TestCaseError> {
+  ///     // Reject the case if `a` cannot be converted to u8 (e.g., negative values)
+  ///     let _unsigned: u8 = a.try_into().prop_assume_ok()?;
+  ///     // ...rest of test...
+  ///     Ok(())
+  /// }
+  ///
+  /// proptest! {
+  ///   #[test]
+  ///   fn test_that_only_works_with_positive_integers(a in -10i32..10i32) {
+  ///     test_conversion(a)?;
+  ///   }
+  /// }
+  /// ```
+  ///
+  /// ## Errors
+  ///
+  /// Returns `Err(TestCaseError::Reject)` when `self` is `Err`, tagging
+  /// the rejection with the caller location and the error's `Debug`
+  /// rendering; an `Ok` is passed through unchanged.
+  ///
+  /// [`prop_assume!`]: crate::prop_assume
+  fn prop_assume_ok(self) -> Result<T, TestCaseError>
+  where
+    E: fmt::Debug;
 }
 
 impl<T, E> ProptestResultExt<T, E> for Result<T, E> {
-    #[track_caller]
-    fn prop_assume_ok(self) -> Result<T, TestCaseError>
-    where
-        E: fmt::Debug,
-    {
-        let location = core::panic::Location::caller();
-        self.map_err(|err| {
-            TestCaseError::reject(format!("{location}: {err:?}"))
-        })
-    }
+  #[track_caller]
+  fn prop_assume_ok(self) -> Result<T, TestCaseError>
+  where
+    E: fmt::Debug,
+  {
+    let location = core::panic::Location::caller();
+    self.map_err(|err| TestCaseError::reject(format!("{location}: {err:?}")))
+  }
 }

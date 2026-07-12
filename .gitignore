@@ -1,13 +1,42 @@
-*~
-target
+# Cargo / rust
+/target/
+**/*.rs.bk
+**/*.rmeta
+**/target/
+*.rlib
+
+# Coverage reports (written by `cargo xtask coverage`)
+/cov/html/
+/report/
+
+# Code metrics (written by `cargo xtask cq`)
+/metrics/
+
+# Mutation testing output (written by `cargo xtask mutants`)
+/mutants.out/
+/mutants.out.old/
+
+# Rustfmt backup
+**/*.bk
+
+# Intentionally do not lock
 Cargo.lock
+
+# Artifacts
 *.core
-
-# VSCode:
-.vscode/
 persistence-test-*.txt
+*~
 
-# IntelliJ
-.idea
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
-/.direnv
+# OS
+.DS_Store
+Thumbs.db
+
+# Env overrides
+.envrc
+.direnv/

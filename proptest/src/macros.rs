@@ -39,19 +39,19 @@ macro_rules! mapfn {
 /// Used by newtype `ValueTree` wrappers whose only field is the inner tree, so
 /// `current`/`simplify`/`complicate` simply delegate to it.
 macro_rules! delegate_vt_0 {
-    () => {
-        fn current(&self) -> Self::Value {
-            self.0.current()
-        }
+  () => {
+    fn current(&self) -> Self::Value {
+      self.0.current()
+    }
 
-        fn simplify(&mut self) -> bool {
-            self.0.simplify()
-        }
+    fn simplify(&mut self) -> bool {
+      self.0.simplify()
+    }
 
-        fn complicate(&mut self) -> bool {
-            self.0.complicate()
-        }
-    };
+    fn complicate(&mut self) -> bool {
+      self.0.complicate()
+    }
+  };
 }
 
 /// Generates the `Strategy` + `ValueTree` newtype boilerplate for an opaque
@@ -105,10 +105,10 @@ macro_rules! opaque_strategy_wrapper {
 /// `unwrap_or!(result, err => handle_err(err))`. Unlike `Result::unwrap_or`
 /// the fallback can reference the error and may diverge (`return`/`continue`).
 macro_rules! unwrap_or {
-    ($unwrap: expr, $err: ident => $on_err: expr) => {
-        match $unwrap {
-            Ok(ok) => ok,
-            Err($err) => $on_err,
-        }
-    };
+  ($unwrap:expr, $err:ident => $on_err:expr) => {
+    match $unwrap {
+      Ok(ok) => ok,
+      Err($err) => $on_err,
+    }
+  };
 }

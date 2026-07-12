@@ -7,9 +7,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::std_facade::{BTreeMap, BTreeSet, Box, Vec, fmt};
 use core::any::Any;
 
+use crate::std_facade::BTreeMap;
+use crate::std_facade::BTreeSet;
+use crate::std_facade::Box;
+use crate::std_facade::Vec;
+use crate::std_facade::fmt;
 use crate::test_runner::failure_persistence::FailurePersistence;
 use crate::test_runner::failure_persistence::PersistedSeed;
 
@@ -20,92 +24,82 @@ use crate::test_runner::failure_persistence::PersistedSeed;
 /// instances for external reporting or batched persistence.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MapFailurePersistence {
-    /// Backing map, keyed by `source_file`.
-    pub map: BTreeMap<&'static str, BTreeSet<PersistedSeed>>,
+  /// Backing map, keyed by `source_file`.
+  pub map: BTreeMap<&'static str, BTreeSet<PersistedSeed>>,
 }
 
 impl FailurePersistence for MapFailurePersistence {
-    fn load_persisted_failures2(
-        &self,
-        source_file: Option<&'static str>,
-    ) -> Vec<PersistedSeed> {
-        source_file
-            .and_then(|source| self.map.get(source))
-            .map(|seeds| seeds.iter().cloned().collect::<Vec<_>>())
-            .unwrap_or_default()
-    }
+  fn load_persisted_failures2(&self, source_file: Option<&'static str>) -> Vec<PersistedSeed> {
+    source_file
+      .and_then(|source| self.map.get(source))
+      .map(|seeds| seeds.iter().cloned().collect::<Vec<_>>())
+      .unwrap_or_default()
+  }
 
-    fn save_persisted_failure2(
-        &mut self,
-        source_file: Option<&'static str>,
-        seed: PersistedSeed,
-        _shrunken_value: &dyn fmt::Debug,
-    ) {
-        let Some(source) = source_file else {
-            return;
-        };
-        let set = self.map.entry(source).or_default();
-        let _inserted = set.insert(seed);
-    }
+  fn save_persisted_failure2(&mut self, source_file: Option<&'static str>, seed: PersistedSeed, _shrunken_value: &dyn fmt::Debug) {
+    let Some(source) = source_file else {
+      return;
+    };
+    let set = self.map.entry(source).or_default();
+    let _inserted = set.insert(seed);
+  }
 
-    fn box_clone(&self) -> Box<dyn FailurePersistence> {
-        Box::new(self.clone())
-    }
+  fn box_clone(&self) -> Box<dyn FailurePersistence> {
+    Box::new(self.clone())
+  }
 
-    fn eq(&self, other: &dyn FailurePersistence) -> bool {
-        other
-            .as_any()
-            .downcast_ref::<Self>()
-            .is_some_and(|x| x == self)
-    }
+  fn eq(&self, other: &dyn FailurePersistence) -> bool {
+    other.as_any().downcast_ref::<Self>().is_some_and(|x| x == self)
+  }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
+  fn as_any(&self) -> &dyn Any {
+    self
+  }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::test_runner::failure_persistence::tests::*;
-    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_eq;
+  use strict_test_support::ensure_some;
 
-    #[test]
-    fn initial_map_is_empty() -> Result<(), TestFailure> {
-        ensure(
-            MapFailurePersistence::default()
-                .load_persisted_failures2(HI_PATH)
-                .is_empty(),
-            "a fresh map has no persisted failures",
-        )
-    }
+  use super::*;
+  use crate::test_runner::failure_persistence::tests::*;
 
-    #[test]
-    fn seeds_recoverable() -> Result<(), TestFailure> {
-        let mut persistence = MapFailurePersistence::default();
-        persistence.save_persisted_failure2(HI_PATH, INC_SEED, &"");
-        let restored = persistence.load_persisted_failures2(HI_PATH);
-        ensure_eq(&1, &restored.len(), "one saved seed is restored")?;
-        let first =
-            ensure_some(restored.first(), "the restored list has a head")?;
-        ensure(INC_SEED == *first, "the restored seed equals the saved one")?;
+  #[test]
+  fn initial_map_is_empty() -> Result<(), TestFailure> {
+    ensure(
+      MapFailurePersistence::default().load_persisted_failures2(HI_PATH).is_empty(),
+      "a fresh map has no persisted failures",
+    )
+  }
 
-        ensure(
-            persistence.load_persisted_failures2(None).is_empty(),
-            "a missing source restores nothing",
-        )?;
-        ensure(
-            persistence.load_persisted_failures2(UNREL_PATH).is_empty(),
-            "an unrelated source restores nothing",
-        )
-    }
+  #[test]
+  fn seeds_recoverable() -> Result<(), TestFailure> {
+    let mut persistence = MapFailurePersistence::default();
+    persistence.save_persisted_failure2(HI_PATH, INC_SEED, &"");
+    let restored = persistence.load_persisted_failures2(HI_PATH);
+    ensure_eq(&1, &restored.len(), "one saved seed is restored")?;
+    let first = ensure_some(restored.first(), "the restored list has a head")?;
+    ensure(INC_SEED == *first, "the restored seed equals the saved one")?;
 
-    #[test]
-    fn seeds_deduplicated() -> Result<(), TestFailure> {
-        let mut persistence = MapFailurePersistence::default();
-        persistence.save_persisted_failure2(HI_PATH, INC_SEED, &"");
-        persistence.save_persisted_failure2(HI_PATH, INC_SEED, &"");
-        let restored = persistence.load_persisted_failures2(HI_PATH);
-        ensure_eq(&1, &restored.len(), "identical seeds are deduplicated")
-    }
+    ensure(
+      persistence.load_persisted_failures2(None).is_empty(),
+      "a missing source restores nothing",
+    )?;
+    ensure(
+      persistence.load_persisted_failures2(UNREL_PATH).is_empty(),
+      "an unrelated source restores nothing",
+    )
+  }
+
+  #[test]
+  fn seeds_deduplicated() -> Result<(), TestFailure> {
+    let mut persistence = MapFailurePersistence::default();
+    persistence.save_persisted_failure2(HI_PATH, INC_SEED, &"");
+    persistence.save_persisted_failure2(HI_PATH, INC_SEED, &"");
+    let restored = persistence.load_persisted_failures2(HI_PATH);
+    ensure_eq(&1, &restored.len(), "identical seeds are deduplicated")
+  }
 }

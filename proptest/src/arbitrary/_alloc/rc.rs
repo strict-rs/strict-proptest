@@ -17,7 +17,7 @@ wrap_from!(Rc);
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(rc => Rc<u8>);
+  no_panic_test!(rc => Rc<u8>);
 }

@@ -20,22 +20,24 @@
 // This is *not* how proptest is normally used; it is simply used to play
 // around with value generation.
 
-use std::io::{self, Write as _};
+use std::io::Write as _;
+use std::io::{
+  self,
+};
 
-use proptest::strategy::{Strategy as _, ValueTree as _};
+use proptest::strategy::Strategy as _;
+use proptest::strategy::ValueTree as _;
 use proptest::test_runner::TestRunner;
 
 fn main() -> io::Result<()> {
-    let mut runner = TestRunner::default();
-    let mut str_val = "[a-z]{1,4}\\p{Cyrillic}{1,4}\\p{Greek}{1,4}"
-        .new_tree(&mut runner)
-        .map_err(|reason| {
-            io::Error::new(io::ErrorKind::InvalidInput, reason.to_string())
-        })?;
-    let mut output = io::stdout().lock();
-    writeln!(output, "str_val = {}", str_val.current())?;
-    while str_val.simplify() {
-        writeln!(output, "        = {}", str_val.current())?;
-    }
-    Ok(())
+  let mut runner = TestRunner::default();
+  let mut str_val = "[a-z]{1,4}\\p{Cyrillic}{1,4}\\p{Greek}{1,4}"
+    .new_tree(&mut runner)
+    .map_err(|reason| io::Error::new(io::ErrorKind::InvalidInput, reason.to_string()))?;
+  let mut output = io::stdout().lock();
+  writeln!(output, "str_val = {}", str_val.current())?;
+  while str_val.simplify() {
+    writeln!(output, "        = {}", str_val.current())?;
+  }
+  Ok(())
 }

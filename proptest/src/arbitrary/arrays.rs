@@ -9,26 +9,27 @@
 
 //! Arbitrary implementations for arrays.
 
-use crate::arbitrary::{Arbitrary, any_with};
+use crate::arbitrary::Arbitrary;
+use crate::arbitrary::any_with;
 use crate::array::UniformArrayStrategy;
 
 impl<A: Arbitrary, const N: usize> Arbitrary for [A; N] {
-    type Parameters = A::Parameters;
-    type Strategy = UniformArrayStrategy<A::Strategy, [A; N]>;
+  type Parameters = A::Parameters;
+  type Strategy = UniformArrayStrategy<A::Strategy, [A; N]>;
 
-    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-        let base = any_with::<A>(args);
-        UniformArrayStrategy::new(base)
-    }
+  fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+    let base = any_with::<A>(args);
+    UniformArrayStrategy::new(base)
+  }
 }
 
 #[cfg(test)]
 mod test {
-    no_panic_test!(
-        array_16 => [u8; 16]
-    );
+  no_panic_test!(
+      array_16 => [u8; 16]
+  );
 
-    no_panic_test!(
-        array_1024 => [u8; 1024]
-    );
+  no_panic_test!(
+      array_1024 => [u8; 1024]
+  );
 }

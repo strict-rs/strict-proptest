@@ -9,7 +9,11 @@
 
 //! Arbitrary implementations for `std::cell`.
 
-use core::cell::{BorrowError, BorrowMutError, Cell, RefCell, UnsafeCell};
+use core::cell::BorrowError;
+use core::cell::BorrowMutError;
+use core::cell::Cell;
+use core::cell::RefCell;
+use core::cell::UnsafeCell;
 
 wrap_from!([Copy] Cell);
 wrap_from!(RefCell);
@@ -46,11 +50,11 @@ lazy_just!(
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        cell => Cell<u8>,
-        ref_cell => RefCell<u8>,
-        unsafe_cell => UnsafeCell<u8>
-    );
+  no_panic_test!(
+      cell => Cell<u8>,
+      ref_cell => RefCell<u8>,
+      unsafe_cell => UnsafeCell<u8>
+  );
 }

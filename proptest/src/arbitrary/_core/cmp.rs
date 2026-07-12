@@ -9,9 +9,12 @@
 
 //! Arbitrary implementations for `std::cmp`.
 
-use core::cmp::{Ordering, Reverse};
+use core::cmp::Ordering;
+use core::cmp::Reverse;
 
-use crate::strategy::{Just, TupleUnion, WeightedStrategy};
+use crate::strategy::Just;
+use crate::strategy::TupleUnion;
+use crate::strategy::WeightedStrategy;
 
 wrap_ctor!(Reverse, Reverse);
 
@@ -27,10 +30,10 @@ arbitrary!(Ordering, TupleUnion<(WeightedOrdering, WeightedOrdering, WeightedOrd
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        reverse => Reverse<u8>,
-        ordering => Ordering
-    );
+  no_panic_test!(
+      reverse => Reverse<u8>,
+      ordering => Ordering
+  );
 }

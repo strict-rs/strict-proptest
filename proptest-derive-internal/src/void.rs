@@ -17,7 +17,11 @@
 //! That is, if we state that a type is uninhabited, it is so for sure.
 //! But we can't state that all uninhabited types are uninhabited.
 
-use syn::{self, punctuated::Punctuated, visit};
+use syn::punctuated::Punctuated;
+use syn::visit;
+use syn::{
+  self,
+};
 
 use crate::interp;
 use crate::util;
@@ -31,10 +35,10 @@ use crate::util;
 /// tell for sure that the thing is uninhabited, not that we are 100%
 /// certain that it is inhabited.
 pub(crate) trait IsUninhabited {
-    /// Returns true if the given type is known to be uninhabited.
-    /// There may be more scenarios under which the type is uninhabited.
-    /// Thus, this is not a complete and exhaustive check.
-    fn is_uninhabited(&self) -> bool;
+  /// Returns true if the given type is known to be uninhabited.
+  /// There may be more scenarios under which the type is uninhabited.
+  /// Thus, this is not a complete and exhaustive check.
+  fn is_uninhabited(&self) -> bool;
 }
 
 //==============================================================================
@@ -42,27 +46,27 @@ pub(crate) trait IsUninhabited {
 //==============================================================================
 
 impl IsUninhabited for syn::DataEnum {
-    fn is_uninhabited(&self) -> bool {
-        self.variants.is_uninhabited()
-    }
+  fn is_uninhabited(&self) -> bool {
+    self.variants.is_uninhabited()
+  }
 }
 
 impl<P> IsUninhabited for Punctuated<syn::Variant, P> {
-    fn is_uninhabited(&self) -> bool {
-        self.iter().all(IsUninhabited::is_uninhabited)
-    }
+  fn is_uninhabited(&self) -> bool {
+    self.iter().all(IsUninhabited::is_uninhabited)
+  }
 }
 
 impl IsUninhabited for &[syn::Variant] {
-    fn is_uninhabited(&self) -> bool {
-        self.iter().all(IsUninhabited::is_uninhabited)
-    }
+  fn is_uninhabited(&self) -> bool {
+    self.iter().all(IsUninhabited::is_uninhabited)
+  }
 }
 
 impl IsUninhabited for syn::Variant {
-    fn is_uninhabited(&self) -> bool {
-        self.fields.is_uninhabited()
-    }
+  fn is_uninhabited(&self) -> bool {
+    self.fields.is_uninhabited()
+  }
 }
 
 //==============================================================================
@@ -70,21 +74,21 @@ impl IsUninhabited for syn::Variant {
 //==============================================================================
 
 impl IsUninhabited for syn::Fields {
-    fn is_uninhabited(&self) -> bool {
-        self.iter().any(syn::Field::is_uninhabited)
-    }
+  fn is_uninhabited(&self) -> bool {
+    self.iter().any(syn::Field::is_uninhabited)
+  }
 }
 
 impl IsUninhabited for &[syn::Field] {
-    fn is_uninhabited(&self) -> bool {
-        self.iter().any(syn::Field::is_uninhabited)
-    }
+  fn is_uninhabited(&self) -> bool {
+    self.iter().any(syn::Field::is_uninhabited)
+  }
 }
 
 impl IsUninhabited for syn::Field {
-    fn is_uninhabited(&self) -> bool {
-        self.ty.is_uninhabited()
-    }
+  fn is_uninhabited(&self) -> bool {
+    self.ty.is_uninhabited()
+  }
 }
 
 //==============================================================================
@@ -92,21 +96,21 @@ impl IsUninhabited for syn::Field {
 //==============================================================================
 
 impl IsUninhabited for syn::Type {
-    fn is_uninhabited(&self) -> bool {
-        let mut uninhabited = Uninhabited(false);
-        visit::visit_type(&mut uninhabited, self);
-        uninhabited.0
-    }
+  fn is_uninhabited(&self) -> bool {
+    let mut uninhabited = Uninhabited(false);
+    visit::visit_type(&mut uninhabited, self);
+    uninhabited.0
+  }
 }
 
 /// Tracks uninhabitedness.
 struct Uninhabited(bool);
 
 impl Uninhabited {
-    /// Set to uninhabited.
-    const fn set(&mut self) {
-        self.0 = true;
-    }
+  /// Set to uninhabited.
+  const fn set(&mut self) {
+    self.0 = true;
+  }
 }
 
 // We are more strict than Rust is.
@@ -114,50 +118,47 @@ impl Uninhabited {
 // The second a type like *const ! is dereferenced you have UB.
 
 impl<'ast> visit::Visit<'ast> for Uninhabited {
-    //------------------------------------------------------------------
-    // If we get to one of these we have a knowably uninhabited type:
-    //------------------------------------------------------------------
+  //------------------------------------------------------------------
+  // If we get to one of these we have a knowably uninhabited type:
+  //------------------------------------------------------------------
 
-    // The ! (never) type is obviously uninhabited:
-    fn visit_type_never(&mut self, _: &'ast syn::TypeNever) {
-        self.set();
+  // The ! (never) type is obviously uninhabited:
+  fn visit_type_never(&mut self, _: &'ast syn::TypeNever) {
+    self.set();
+  }
+
+  // A path is uninhabited if we get one we know is uninhabited.
+  // Even if `T` in `<T as Trait>::Item` is uninhabited, the associated item
+  // may be inhabited, so we can't say for sure that it is uninhabited.
+  fn visit_type_path(&mut self, type_path: &'ast syn::TypePath) {
+    const KNOWN_UNINHABITED: &[&str] = &["std::string::ParseError", "::std::string::ParseError"];
+
+    if type_path.qself.is_none() && util::match_pathsegs(&type_path.path, KNOWN_UNINHABITED) {
+      self.set();
     }
+  }
 
-    // A path is uninhabited if we get one we know is uninhabited.
-    // Even if `T` in `<T as Trait>::Item` is uninhabited, the associated item
-    // may be inhabited, so we can't say for sure that it is uninhabited.
-    fn visit_type_path(&mut self, type_path: &'ast syn::TypePath) {
-        const KNOWN_UNINHABITED: &[&str] =
-            &["std::string::ParseError", "::std::string::ParseError"];
-
-        if type_path.qself.is_none()
-            && util::match_pathsegs(&type_path.path, KNOWN_UNINHABITED)
-        {
-            self.set();
-        }
+  // An array is uninhabited iff: `[T; N]` where uninhabited(T) && N != 0
+  // We want to block decent if N == 0.
+  fn visit_type_array(&mut self, arr: &'ast syn::TypeArray) {
+    if let Some(len) = interp::eval_expr(&arr.len)
+      && len > 0
+    {
+      self.visit_type(&arr.elem);
     }
+  }
 
-    // An array is uninhabited iff: `[T; N]` where uninhabited(T) && N != 0
-    // We want to block decent if N == 0.
-    fn visit_type_array(&mut self, arr: &'ast syn::TypeArray) {
-        if let Some(len) = interp::eval_expr(&arr.len)
-            && len > 0
-        {
-            self.visit_type(&arr.elem);
-        }
-    }
+  //------------------------------------------------------------------
+  // These are here to block decent:
+  //------------------------------------------------------------------
 
-    //------------------------------------------------------------------
-    // These are here to block decent:
-    //------------------------------------------------------------------
+  // An fn(I) -> O is never uninhabited even if I or O are:
+  fn visit_type_bare_fn(&mut self, _: &'ast syn::TypeBareFn) {}
 
-    // An fn(I) -> O is never uninhabited even if I or O are:
-    fn visit_type_bare_fn(&mut self, _: &'ast syn::TypeBareFn) {}
+  // A macro may transform the inner type in ways we can't predict:
+  fn visit_macro(&mut self, _: &'ast syn::Macro) {}
 
-    // A macro may transform the inner type in ways we can't predict:
-    fn visit_macro(&mut self, _: &'ast syn::Macro) {}
-
-    // Both of these could be, but type is anonymous:
-    fn visit_type_impl_trait(&mut self, _: &'ast syn::TypeImplTrait) {}
-    fn visit_type_trait_object(&mut self, _: &'ast syn::TypeTraitObject) {}
+  // Both of these could be, but type is anonymous:
+  fn visit_type_impl_trait(&mut self, _: &'ast syn::TypeImplTrait) {}
+  fn visit_type_trait_object(&mut self, _: &'ast syn::TypeTraitObject) {}
 }

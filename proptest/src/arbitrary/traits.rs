@@ -48,53 +48,53 @@ use crate::strategy::Strategy;
 /// [HaskellQC]:
 /// https://hackage.haskell.org/package/QuickCheck/docs/Test-QuickCheck-Arbitrary.html
 pub trait Arbitrary: Sized + fmt::Debug {
-    /// The type of parameters that [`arbitrary_with`] accepts for configuration
-    /// of the generated [`Strategy`]. Parameters must implement [`Default`].
-    ///
-    /// [`arbitrary_with`]: trait.Arbitrary.html#tymethod.arbitrary_with
-    ///
-    /// [`Strategy`]: ../strategy/trait.Strategy.html
-    /// [`Default`]:
-    ///     https://doc.rust-lang.org/nightly/std/default/trait.Default.html
-    type Parameters: Default;
+  /// The type of parameters that [`arbitrary_with`] accepts for configuration
+  /// of the generated [`Strategy`]. Parameters must implement [`Default`].
+  ///
+  /// [`arbitrary_with`]: trait.Arbitrary.html#tymethod.arbitrary_with
+  ///
+  /// [`Strategy`]: ../strategy/trait.Strategy.html
+  /// [`Default`]:
+  ///     https://doc.rust-lang.org/nightly/std/default/trait.Default.html
+  type Parameters: Default;
 
-    /// Generates a [`Strategy`] for producing arbitrary values
-    /// of type the implementing type (`Self`).
-    ///
-    /// Calling this for the type `X` is the equivalent of using
-    /// [`X::arbitrary_with(Default::default())`].
-    ///
-    /// This method is defined in the trait for optimization for the
-    /// default if you want to do that. It is a logic error to not
-    /// preserve the semantics when overriding.
-    ///
-    /// [`Strategy`]: ../strategy/trait.Strategy.html
-    /// [`X::arbitrary_with(Default::default())`]:
-    ///     trait.Arbitrary.html#tymethod.arbitrary_with
-    #[must_use]
-    fn arbitrary() -> Self::Strategy {
-        Self::arbitrary_with(Default::default())
-    }
+  /// Generates a [`Strategy`] for producing arbitrary values
+  /// of type the implementing type (`Self`).
+  ///
+  /// Calling this for the type `X` is the equivalent of using
+  /// [`X::arbitrary_with(Default::default())`].
+  ///
+  /// This method is defined in the trait for optimization for the
+  /// default if you want to do that. It is a logic error to not
+  /// preserve the semantics when overriding.
+  ///
+  /// [`Strategy`]: ../strategy/trait.Strategy.html
+  /// [`X::arbitrary_with(Default::default())`]:
+  ///     trait.Arbitrary.html#tymethod.arbitrary_with
+  #[must_use]
+  fn arbitrary() -> Self::Strategy {
+    Self::arbitrary_with(Default::default())
+  }
 
-    /// Generates a [`Strategy`] for producing arbitrary values of type the
-    /// implementing type (`Self`). The strategy is passed the arguments given
-    /// in args.
-    ///
-    /// If you wish to use the [`default()`] arguments,
-    /// use [`arbitrary`] instead.
-    ///
-    /// [`Strategy`]: ../strategy/trait.Strategy.html
-    ///
-    /// [`arbitrary`]: trait.Arbitrary.html#method.arbitrary
-    ///
-    /// [`default()`]:
-    ///     https://doc.rust-lang.org/nightly/std/default/trait.Default.html
-    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy;
+  /// Generates a [`Strategy`] for producing arbitrary values of type the
+  /// implementing type (`Self`). The strategy is passed the arguments given
+  /// in args.
+  ///
+  /// If you wish to use the [`default()`] arguments,
+  /// use [`arbitrary`] instead.
+  ///
+  /// [`Strategy`]: ../strategy/trait.Strategy.html
+  ///
+  /// [`arbitrary`]: trait.Arbitrary.html#method.arbitrary
+  ///
+  /// [`default()`]:
+  ///     https://doc.rust-lang.org/nightly/std/default/trait.Default.html
+  fn arbitrary_with(args: Self::Parameters) -> Self::Strategy;
 
-    /// The type of [`Strategy`] used to generate values of type `Self`.
-    ///
-    /// [`Strategy`]: ../strategy/trait.Strategy.html
-    type Strategy: Strategy<Value = Self>;
+  /// The type of [`Strategy`] used to generate values of type `Self`.
+  ///
+  /// [`Strategy`]: ../strategy/trait.Strategy.html
+  type Strategy: Strategy<Value = Self>;
 }
 
 //==============================================================================
@@ -157,7 +157,7 @@ pub type ParamsFor<A> = <A as Arbitrary>::Parameters;
 /// }
 ///
 /// fn main() {
-///     reverse_reverse_is_identity();
+///   reverse_reverse_is_identity();
 /// }
 /// ```
 ///
@@ -167,8 +167,8 @@ pub type ParamsFor<A> = <A as Arbitrary>::Parameters;
 /// [`Strategy`]: ../strategy/trait.Strategy.html
 #[must_use = "strategies do nothing unless used"]
 pub fn any<A: Arbitrary>() -> StrategyFor<A> {
-    // ^-- We use a shorter name so that turbofish becomes more ergonomic.
-    A::arbitrary()
+  // ^-- We use a shorter name so that turbofish becomes more ergonomic.
+  A::arbitrary()
 }
 
 /// Generates a [`Strategy`] producing [`Arbitrary`] values of `A` with the
@@ -189,8 +189,8 @@ pub fn any<A: Arbitrary>() -> StrategyFor<A> {
 /// The function can be used as:
 ///
 /// ```rust
-/// use proptest::prelude::*;
 /// use proptest::collection::size_range;
+/// use proptest::prelude::*;
 ///
 /// proptest! {
 ///     fn reverse_reverse_is_identity
@@ -202,7 +202,7 @@ pub fn any<A: Arbitrary>() -> StrategyFor<A> {
 /// }
 ///
 /// fn main() {
-///     reverse_reverse_is_identity();
+///   reverse_reverse_is_identity();
 /// }
 /// ```
 ///
@@ -212,8 +212,8 @@ pub fn any<A: Arbitrary>() -> StrategyFor<A> {
 /// [`Strategy`]: ../strategy/trait.Strategy.html
 #[must_use = "strategies do nothing unless used"]
 pub fn any_with<A: Arbitrary>(args: ParamsFor<A>) -> StrategyFor<A> {
-    // ^-- We use a shorter name so that turbofish becomes more ergonomic.
-    A::arbitrary_with(args)
+  // ^-- We use a shorter name so that turbofish becomes more ergonomic.
+  A::arbitrary_with(args)
 }
 
 /// Generates a [`Strategy`] producing [`Arbitrary`] values of `A`.
@@ -236,10 +236,11 @@ pub fn any_with<A: Arbitrary>(args: ParamsFor<A>) -> StrategyFor<A> {
 ///
 /// ```rust
 /// extern crate proptest;
-/// use proptest::arbitrary::{arbitrary, StrategyFor};
+/// use proptest::arbitrary::StrategyFor;
+/// use proptest::arbitrary::arbitrary;
 ///
 /// fn gen_vec_usize() -> StrategyFor<Vec<usize>> {
-///     arbitrary()
+///   arbitrary()
 /// }
 ///
 /// # fn main() {}
@@ -251,16 +252,16 @@ pub fn any_with<A: Arbitrary>(args: ParamsFor<A>) -> StrategyFor<A> {
 /// [`Strategy`]: ../strategy/trait.Strategy.html
 #[must_use = "strategies do nothing unless used"]
 #[allow(
-    clippy::single_call_fn,
-    reason = "delegate the inference-friendly arbitrary::arbitrary free function to A::arbitrary"
+  clippy::single_call_fn,
+  reason = "delegate the inference-friendly arbitrary::arbitrary free function to A::arbitrary"
 )]
 pub fn arbitrary<A, S>() -> S
 where
-    // The backlinking here cause an injection which helps type inference.
-    S: Strategy<Value = A>,
-    A: Arbitrary<Strategy = S>,
+  // The backlinking here cause an injection which helps type inference.
+  S: Strategy<Value = A>,
+  A: Arbitrary<Strategy = S>,
 {
-    A::arbitrary()
+  A::arbitrary()
 }
 
 /// Generates a [`Strategy`] producing [`Arbitrary`] values of `A` with the
@@ -284,11 +285,12 @@ where
 ///
 /// ```rust
 /// extern crate proptest;
-/// use proptest::arbitrary::{arbitrary_with, StrategyFor};
+/// use proptest::arbitrary::StrategyFor;
+/// use proptest::arbitrary::arbitrary_with;
 /// use proptest::collection::size_range;
 ///
 /// fn gen_vec_10_u32() -> StrategyFor<Vec<u32>> {
-///     arbitrary_with(size_range(10).lift())
+///   arbitrary_with(size_range(10).lift())
 /// }
 ///
 /// # fn main() {}
@@ -301,10 +303,10 @@ where
 #[must_use = "strategies do nothing unless used"]
 pub fn arbitrary_with<A, S, P>(args: P) -> S
 where
-    P: Default,
-    // The backlinking here cause an injection which helps type inference.
-    S: Strategy<Value = A>,
-    A: Arbitrary<Strategy = S, Parameters = P>,
+  P: Default,
+  // The backlinking here cause an injection which helps type inference.
+  S: Strategy<Value = A>,
+  A: Arbitrary<Strategy = S, Parameters = P>,
 {
-    A::arbitrary_with(args)
+  A::arbitrary_with(args)
 }

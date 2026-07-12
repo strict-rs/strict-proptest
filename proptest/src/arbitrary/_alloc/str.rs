@@ -9,14 +9,19 @@
 
 //! Arbitrary implementations for `std::str`.
 
-use crate::std_facade::Vec;
 use core::iter::repeat_n;
-use core::str::{ParseBoolError, Utf8Error, from_utf8};
+use core::str::ParseBoolError;
+use core::str::Utf8Error;
+use core::str::from_utf8;
 
-use crate::arbitrary::{StrategyFor, any};
-use crate::strategy::{
-    FilterMap, Just, Strategy as _, TupleUnion, WeightedStrategy,
-};
+use crate::arbitrary::StrategyFor;
+use crate::arbitrary::any;
+use crate::std_facade::Vec;
+use crate::strategy::FilterMap;
+use crate::strategy::Just;
+use crate::strategy::Strategy as _;
+use crate::strategy::TupleUnion;
+use crate::strategy::WeightedStrategy;
 
 arbitrary!(ParseBoolError; {
     loop {
@@ -62,10 +67,10 @@ arbitrary!(Utf8Error, Utf8ErrorStrategy;
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    no_panic_test!(
-        parse_bool_error => ParseBoolError,
-        utf8_error => Utf8Error
-    );
+  no_panic_test!(
+      parse_bool_error => ParseBoolError,
+      utf8_error => Utf8Error
+  );
 }

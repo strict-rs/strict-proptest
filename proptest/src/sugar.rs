@@ -9,7 +9,9 @@
 
 use crate::std_facade::fmt;
 #[cfg(feature = "std")]
-use crate::test_runner::{Config, emit_closure_fork_unsupported};
+use crate::test_runner::Config;
+#[cfg(feature = "std")]
+use crate::test_runner::emit_closure_fork_unsupported;
 
 /// Easily define `proptest` tests.
 ///
@@ -515,7 +517,7 @@ macro_rules! prop_oneof {
 /// #[derive(Clone, Debug)]
 /// struct MyStruct {
 ///   integer: u32,
-///   string: String,
+///   string:  String,
 /// }
 ///
 /// prop_compose! {
@@ -619,12 +621,11 @@ macro_rules! prop_oneof {
 /// [Hypothesis' `@composite`](https://hypothesis.readthedocs.io/en/latest/data.html#composite-strategies),
 /// but not everything.
 ///
-/// - You can't filter via this macro. For filtering, you need to make the
-///   strategy the "normal" way and use `prop_filter()`.
+/// - You can't filter via this macro. For filtering, you need to make the strategy the "normal" way
+///   and use `prop_filter()`.
 ///
-/// - More than two layers of strategies or arbitrary logic between the two
-///   layers. If you need either of these, you can achieve them by calling
-///   `prop_flat_map()` by hand.
+/// - More than two layers of strategies or arbitrary logic between the two layers. If you need
+///   either of these, you can achieve them by calling `prop_flat_map()` by hand.
 #[macro_export]
 macro_rules! prop_compose {
     ($(#[$meta:meta])*
@@ -911,7 +912,7 @@ macro_rules! prop_compose_ffi {
 /// // The macro can be used from another function provided it has a compatible
 /// // return type.
 /// fn assert_from_other_function(a: f64, b: f64) -> Result<(), TestCaseError> {
-///   prop_assert!((a*a + b*b).sqrt() <= a + b);
+///   prop_assert!((a * a + b * b).sqrt() <= a + b);
 ///   Ok(())
 /// }
 /// #
@@ -1250,10 +1251,10 @@ macro_rules! proptest_helper {
 pub struct NamedArguments<N, V>(#[doc(hidden)] pub N, #[doc(hidden)] pub V);
 
 impl<V: fmt::Debug> fmt::Debug for NamedArguments<&'static str, V> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} = ", self.0)?;
-        self.1.fmt(f)
-    }
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{} = ", self.0)?;
+    self.1.fmt(f)
+  }
 }
 
 macro_rules! named_arguments_tuple {
@@ -1345,48 +1346,48 @@ named_arguments_tuple!(0 AN AV 1 BN BV 2 CN CV 3 DN DV 4 EN EV
 /// Disable fork isolation for closure-style tests when `fork` is compiled in.
 #[cfg(all(feature = "std", feature = "fork"))]
 #[allow(
-    clippy::single_call_fn,
-    reason = "name the fork-feature field update that closure-style tests must disable"
+  clippy::single_call_fn,
+  reason = "name the fork-feature field update that closure-style tests must disable"
 )]
 const fn disable_closure_fork(config: &mut Config) {
-    config.fork = false;
+  config.fork = false;
 }
 
 /// Preserve the same call path when `fork` is not compiled in.
 #[cfg(all(feature = "std", not(feature = "fork")))]
 #[allow(
-    clippy::single_call_fn,
-    reason = "keep the closure fork-disabling call feature-neutral when fork is absent"
+  clippy::single_call_fn,
+  reason = "keep the closure fork-disabling call feature-neutral when fork is absent"
 )]
 const fn disable_closure_fork(_: &mut Config) {}
 
 /// Disable case timeout for closure-style tests when `timeout` is compiled in.
 #[cfg(all(feature = "std", feature = "timeout"))]
 #[allow(
-    clippy::single_call_fn,
-    reason = "name the timeout-feature field update that closure-style tests must disable"
+  clippy::single_call_fn,
+  reason = "name the timeout-feature field update that closure-style tests must disable"
 )]
 const fn disable_closure_timeout(config: &mut Config) {
-    config.timeout = 0;
+  config.timeout = 0;
 }
 
 /// Preserve the same call path when `timeout` is not compiled in.
 #[cfg(all(feature = "std", not(feature = "timeout")))]
 #[allow(
-    clippy::single_call_fn,
-    reason = "keep the closure timeout-disabling call feature-neutral when timeout is absent"
+  clippy::single_call_fn,
+  reason = "keep the closure timeout-disabling call feature-neutral when timeout is absent"
 )]
 const fn disable_closure_timeout(_: &mut Config) {}
 
 #[cfg(feature = "std")]
 #[doc(hidden)]
 pub fn force_no_fork(config: &mut Config) {
-    if config.fork() {
-        emit_closure_fork_unsupported();
+  if config.fork() {
+    emit_closure_fork_unsupported();
 
-        disable_closure_fork(config);
-        disable_closure_timeout(config);
-    }
+    disable_closure_fork(config);
+    disable_closure_timeout(config);
+  }
 }
 
 #[cfg(not(feature = "std"))]
@@ -1394,788 +1395,713 @@ pub fn force_no_fork(_: &mut crate::test_runner::Config) {}
 
 #[cfg(test)]
 mod test {
-    use crate::std_facade::ToOwned as _;
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_eq;
+  use strict_test_support::ensure_some;
 
-    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
+  use crate::std_facade::ToOwned as _;
+  use crate::strategy::Just;
+  use crate::strategy::Strategy;
+  use crate::strategy::TupleUnion;
+  use crate::strategy::Union;
+  use crate::strategy::ValueTree as _;
+  use crate::test_runner::TestCaseError;
+  use crate::test_runner::TestRunner;
+  use crate::test_runner::test_runner_without_persistence;
 
-    use crate::strategy::{Just, Strategy, TupleUnion, Union, ValueTree as _};
-    use crate::test_runner::{
-        TestCaseError, TestRunner, test_runner_without_persistence,
-    };
+  /// Ensure a `prop_oneof!` strategy can generate every expected arm.
+  fn expect_oneof_count(n: usize, strategy: impl Strategy<Value = i32>) -> Result<(), TestFailure> {
+    use std::collections::HashSet;
 
-    /// Ensure a `prop_oneof!` strategy can generate every expected arm.
-    fn expect_oneof_count(
-        n: usize,
-        strategy: impl Strategy<Value = i32>,
-    ) -> Result<(), TestFailure> {
-        use std::collections::HashSet;
-
-        let mut runner = test_runner_without_persistence();
-        let mut seen = HashSet::new();
-        for _ in 0..1024 {
-            let tree = match strategy.new_tree(&mut runner) {
-                Ok(tree) => tree,
-                Err(reason) => {
-                    return Err(TestFailure::WasErr {
-                        context: "oneof strategy generates a value tree",
-                        cause: reason.message().into(),
-                    });
-                }
-            };
-            let _was_new = seen.insert(tree.current());
+    let mut runner = test_runner_without_persistence();
+    let mut seen = HashSet::new();
+    for _ in 0..1024 {
+      let tree = match strategy.new_tree(&mut runner) {
+        Ok(tree) => tree,
+        Err(reason) => {
+          return Err(TestFailure::WasErr {
+            context: "oneof strategy generates a value tree",
+            cause:   reason.message().into(),
+          });
         }
-
-        ensure_eq(&n, &seen.len(), "oneof strategy covers every arm")
+      };
+      let _was_new = seen.insert(tree.current());
     }
 
-    /// Type-check that `prop_oneof!` selected the tuple-union strategy.
-    const fn assert_static_oneof<T>(union: TupleUnion<T>) -> TupleUnion<T> {
-        union
-    }
+    ensure_eq(&n, &seen.len(), "oneof strategy covers every arm")
+  }
 
-    prop_compose! {
-        /// These are docs!
-        fn two_ints(relative: i32)(low in 0..relative, high in relative..)
-                   -> (i32, i32) {
-            (low, high)
-        }
-    }
+  /// Type-check that `prop_oneof!` selected the tuple-union strategy.
+  const fn assert_static_oneof<T>(union: TupleUnion<T>) -> TupleUnion<T> {
+    union
+  }
 
-    prop_compose! {
-        /// These are docs!
-        pub(super) fn two_ints_pub(relative: i32)(low in 0..relative, high in relative..)
-                           -> (i32, i32) {
-            (low, high)
-        }
-    }
+  prop_compose! {
+      /// These are docs!
+      fn two_ints(relative: i32)(low in 0..relative, high in relative..)
+                 -> (i32, i32) {
+          (low, high)
+      }
+  }
 
-    prop_compose_ffi! {
-        /// These are docs!
-        pub(super) fn two_ints_pub_with_ffi_mapper
-            (relative: i32)(low in 0..relative, high in relative..)
-        with extern "C" fn signed_gap(low: i32, high: i32) -> i32 {
-            high.saturating_sub(low)
-        }
-        call signed_gap(low, high);
-    }
+  prop_compose! {
+      /// These are docs!
+      pub(super) fn two_ints_pub(relative: i32)(low in 0..relative, high in relative..)
+                         -> (i32, i32) {
+          (low, high)
+      }
+  }
 
-    prop_compose_ffi! {
-        fn two_stage_ffi_mapper(base: i32)
-            (greater in base.saturating_add(1)..base.saturating_add(100))
-            (lesser in base..greater, greater in Just(greater))
-        with extern "C" fn span(lesser: i32, greater: i32) -> i32 {
-            greater.saturating_sub(lesser)
-        }
-        call span(lesser, greater);
-    }
+  prop_compose_ffi! {
+      /// These are docs!
+      pub(super) fn two_ints_pub_with_ffi_mapper
+          (relative: i32)(low in 0..relative, high in relative..)
+      with extern "C" fn signed_gap(low: i32, high: i32) -> i32 {
+          high.saturating_sub(low)
+      }
+      call signed_gap(low, high);
+  }
 
-    prop_compose! {
-        fn a_less_than_b()(greater in 0..1000)(lesser in 0..greater, greater in Just(greater))
-                        -> (i32, i32) {
-            (lesser, greater)
-        }
-    }
+  prop_compose_ffi! {
+      fn two_stage_ffi_mapper(base: i32)
+          (greater in base.saturating_add(1)..base.saturating_add(100))
+          (lesser in base..greater, greater in Just(greater))
+      with extern "C" fn span(lesser: i32, greater: i32) -> i32 {
+          greater.saturating_sub(lesser)
+      }
+      call span(lesser, greater);
+  }
+
+  prop_compose! {
+      fn a_less_than_b()(greater in 0..1000)(lesser in 0..greater, greater in Just(greater))
+                      -> (i32, i32) {
+          (lesser, greater)
+      }
+  }
+
+  __proptest_internal! {
+      #[test]
+      fn test_something(first in 0_u32..42_u32, second in 1_u32..10_u32) {
+          if first == 41 && second == 9 {
+              return Err(TestCaseError::reject(
+                  "the rejected edge case is covered by the assumption path",
+              ));
+          }
+          if first.saturating_add(second) >= 50 {
+              return Err(TestCaseError::fail(
+                  "the generated sum stays below the documented bound",
+              ));
+          }
+      }
+  }
+
+  prop_compose! {
+      fn single_closure_is_move(base: u64)(off in 0..10_u64) -> u64 {
+          base.saturating_add(off)
+      }
+  }
+
+  prop_compose! {
+      fn double_closure_is_move
+          (base: u64)
+          (off1 in 0..10_u64)
+          (off2 in off1..off1.saturating_add(10))
+          -> u64
+      {
+          base.saturating_add(off2)
+      }
+  }
+
+  mod test_arg_counts {
+    use core::hint::black_box;
+
+    use crate::strategy::Just;
 
     __proptest_internal! {
         #[test]
-        fn test_something(first in 0_u32..42_u32, second in 1_u32..10_u32) {
-            if first == 41 && second == 9 {
-                return Err(TestCaseError::reject(
-                    "the rejected edge case is covered by the assumption path",
-                ));
-            }
-            if first.saturating_add(second) >= 50 {
-                return Err(TestCaseError::fail(
-                    "the generated sum stays below the documented bound",
-                ));
-            }
+        fn test_1_arg(first in Just(0)) {
+            let observed = black_box([first]);
+            let _arity = observed.len();
+        }
+        #[test]
+        fn test_2_arg(first in Just(0), second in Just(0)) {
+            let values: [i32; 2] = (first, second).into();
+            let observed = black_box(values);
+            let _arity = observed.len();
+        }
+        #[test]
+        fn test_3_arg(first in Just(0), second in Just(0), third in Just(0)) {
+            let values: [i32; 3] = (first, second, third).into();
+            let observed = black_box(values);
+            let _arity = observed.len();
+        }
+        #[test]
+        fn test_4_arg(first in Just(0), second in Just(0), third in Just(0),
+                      fourth in Just(0)) {
+            let values: [i32; 4] =
+                (first, second, third, fourth).into();
+            let observed = black_box(values);
+            let _arity = observed.len();
+        }
+        #[test]
+        fn test_5_arg(first in Just(0), second in Just(0), third in Just(0),
+                      fourth in Just(0), fifth in Just(0)) {
+            let values: [i32; 5] =
+                (first, second, third, fourth, fifth).into();
+            let observed = black_box(values);
+            let _arity = observed.len();
+        }
+        #[test]
+        fn test_6_arg(first in Just(0), second in Just(0), third in Just(0),
+                      fourth in Just(0), fifth in Just(0), f in Just(0)) {
+            let values: [i32; 6] =
+                (first, second, third, fourth, fifth, f).into();
+            let observed = black_box(values);
+            let _arity = observed.len();
+        }
+        #[test]
+        fn test_7_arg(first in Just(0), second in Just(0), third in Just(0),
+                      fourth in Just(0), fifth in Just(0), f in Just(0),
+                      seventh in Just(0)) {
+            let values: [i32; 7] =
+                (first, second, third, fourth, fifth, f, seventh).into();
+            let observed = black_box(values);
+            let _arity = observed.len();
+        }
+        #[test]
+        fn test_8_arg(first in Just(0), second in Just(0), third in Just(0),
+                      fourth in Just(0), fifth in Just(0), f in Just(0),
+                      seventh in Just(0), eighth in Just(0)) {
+            let values: [i32; 8] = (
+                first, second, third, fourth, fifth, f, seventh, eighth,
+            ).into();
+            let observed = black_box(values);
+            let _arity = observed.len();
+        }
+        #[test]
+        fn test_9_arg(first in Just(0), second in Just(0), third in Just(0),
+                      fourth in Just(0), fifth in Just(0), f in Just(0),
+                      seventh in Just(0), eighth in Just(0), i in Just(0)) {
+            let values: [i32; 9] = (
+                first, second, third, fourth, fifth, f, seventh, eighth, i,
+            ).into();
+            let observed = black_box(values);
+            let _arity = observed.len();
+        }
+        #[test]
+        fn test_a_arg(first in Just(0), second in Just(0), third in Just(0),
+                      fourth in Just(0), fifth in Just(0), f in Just(0),
+                      seventh in Just(0), eighth in Just(0), i in Just(0),
+                      j in Just(0)) {
+            let values: [i32; 10] = (
+                first, second, third, fourth, fifth, f, seventh, eighth, i,
+                j,
+            ).into();
+            let observed = black_box(values);
+            let _arity = observed.len();
+        }
+        #[test]
+        fn test_b_arg(first in Just(0), second in Just(0), third in Just(0),
+                      fourth in Just(0), fifth in Just(0), f in Just(0),
+                      seventh in Just(0), eighth in Just(0), i in Just(0),
+                      j in Just(0), eleventh in Just(0)) {
+            let values: [i32; 11] = (
+                first, second, third, fourth, fifth, f, seventh, eighth, i,
+                j, eleventh,
+            ).into();
+            let observed = black_box(values);
+            let _arity = observed.len();
+        }
+        #[test]
+        fn test_c_arg(first in Just(0), second in Just(0), third in Just(0),
+                      fourth in Just(0), fifth in Just(0), f in Just(0),
+                      seventh in Just(0), eighth in Just(0), i in Just(0),
+                      j in Just(0), eleventh in Just(0), twelfth in Just(0)) {
+            let values: [i32; 12] = (
+                first, second, third, fourth, fifth, f, seventh, eighth, i,
+                j, eleventh, twelfth,
+            ).into();
+            let observed = black_box(values);
+            let _arity = observed.len();
         }
     }
+  }
 
-    prop_compose! {
-        fn single_closure_is_move(base: u64)(off in 0..10_u64) -> u64 {
-            base.saturating_add(off)
-        }
-    }
+  fn draw<S: Strategy>(strategy: S) -> Result<S::Value, TestFailure> {
+    let mut runner = TestRunner::deterministic();
+    Ok(ensure_some(strategy.new_tree(&mut runner).ok(), "strategy generates a value tree")?.current())
+  }
 
-    prop_compose! {
-        fn double_closure_is_move
-            (base: u64)
-            (off1 in 0..10_u64)
-            (off2 in off1..off1.saturating_add(10))
-            -> u64
-        {
-            base.saturating_add(off2)
-        }
-    }
+  #[test]
+  fn prop_compose_fixtures_generate_values() -> Result<(), TestFailure> {
+    let (low, high) = draw(two_ints(10))?;
+    ensure(low < 10, "lower value honors the first strategy")?;
+    ensure(high >= 10, "higher value honors the second strategy")?;
 
-    mod test_arg_counts {
-        use core::hint::black_box;
+    let (lesser, greater) = draw(a_less_than_b())?;
+    ensure(lesser < greater, "dependent strategy keeps lesser below greater")?;
 
-        use crate::strategy::Just;
+    let single = draw(single_closure_is_move(10))?;
+    ensure((10..20).contains(&single), "single closure strategy captures the base argument")?;
 
-        __proptest_internal! {
-            #[test]
-            fn test_1_arg(first in Just(0)) {
-                let observed = black_box([first]);
-                let _arity = observed.len();
-            }
-            #[test]
-            fn test_2_arg(first in Just(0), second in Just(0)) {
-                let values: [i32; 2] = (first, second).into();
-                let observed = black_box(values);
-                let _arity = observed.len();
-            }
-            #[test]
-            fn test_3_arg(first in Just(0), second in Just(0), third in Just(0)) {
-                let values: [i32; 3] = (first, second, third).into();
-                let observed = black_box(values);
-                let _arity = observed.len();
-            }
-            #[test]
-            fn test_4_arg(first in Just(0), second in Just(0), third in Just(0),
-                          fourth in Just(0)) {
-                let values: [i32; 4] =
-                    (first, second, third, fourth).into();
-                let observed = black_box(values);
-                let _arity = observed.len();
-            }
-            #[test]
-            fn test_5_arg(first in Just(0), second in Just(0), third in Just(0),
-                          fourth in Just(0), fifth in Just(0)) {
-                let values: [i32; 5] =
-                    (first, second, third, fourth, fifth).into();
-                let observed = black_box(values);
-                let _arity = observed.len();
-            }
-            #[test]
-            fn test_6_arg(first in Just(0), second in Just(0), third in Just(0),
-                          fourth in Just(0), fifth in Just(0), f in Just(0)) {
-                let values: [i32; 6] =
-                    (first, second, third, fourth, fifth, f).into();
-                let observed = black_box(values);
-                let _arity = observed.len();
-            }
-            #[test]
-            fn test_7_arg(first in Just(0), second in Just(0), third in Just(0),
-                          fourth in Just(0), fifth in Just(0), f in Just(0),
-                          seventh in Just(0)) {
-                let values: [i32; 7] =
-                    (first, second, third, fourth, fifth, f, seventh).into();
-                let observed = black_box(values);
-                let _arity = observed.len();
-            }
-            #[test]
-            fn test_8_arg(first in Just(0), second in Just(0), third in Just(0),
-                          fourth in Just(0), fifth in Just(0), f in Just(0),
-                          seventh in Just(0), eighth in Just(0)) {
-                let values: [i32; 8] = (
-                    first, second, third, fourth, fifth, f, seventh, eighth,
-                ).into();
-                let observed = black_box(values);
-                let _arity = observed.len();
-            }
-            #[test]
-            fn test_9_arg(first in Just(0), second in Just(0), third in Just(0),
-                          fourth in Just(0), fifth in Just(0), f in Just(0),
-                          seventh in Just(0), eighth in Just(0), i in Just(0)) {
-                let values: [i32; 9] = (
-                    first, second, third, fourth, fifth, f, seventh, eighth, i,
-                ).into();
-                let observed = black_box(values);
-                let _arity = observed.len();
-            }
-            #[test]
-            fn test_a_arg(first in Just(0), second in Just(0), third in Just(0),
-                          fourth in Just(0), fifth in Just(0), f in Just(0),
-                          seventh in Just(0), eighth in Just(0), i in Just(0),
-                          j in Just(0)) {
-                let values: [i32; 10] = (
-                    first, second, third, fourth, fifth, f, seventh, eighth, i,
-                    j,
-                ).into();
-                let observed = black_box(values);
-                let _arity = observed.len();
-            }
-            #[test]
-            fn test_b_arg(first in Just(0), second in Just(0), third in Just(0),
-                          fourth in Just(0), fifth in Just(0), f in Just(0),
-                          seventh in Just(0), eighth in Just(0), i in Just(0),
-                          j in Just(0), eleventh in Just(0)) {
-                let values: [i32; 11] = (
-                    first, second, third, fourth, fifth, f, seventh, eighth, i,
-                    j, eleventh,
-                ).into();
-                let observed = black_box(values);
-                let _arity = observed.len();
-            }
-            #[test]
-            fn test_c_arg(first in Just(0), second in Just(0), third in Just(0),
-                          fourth in Just(0), fifth in Just(0), f in Just(0),
-                          seventh in Just(0), eighth in Just(0), i in Just(0),
-                          j in Just(0), eleventh in Just(0), twelfth in Just(0)) {
-                let values: [i32; 12] = (
-                    first, second, third, fourth, fifth, f, seventh, eighth, i,
-                    j, eleventh, twelfth,
-                ).into();
-                let observed = black_box(values);
-                let _arity = observed.len();
-            }
-        }
-    }
+    let ffi_gap = draw(two_ints_pub_with_ffi_mapper(10))?;
+    ensure(ffi_gap > 0, "one-layer ffi mapper receives generated scalar values")?;
 
-    fn draw<S: Strategy>(strategy: S) -> Result<S::Value, TestFailure> {
-        let mut runner = TestRunner::deterministic();
-        Ok(ensure_some(
-            strategy.new_tree(&mut runner).ok(),
-            "strategy generates a value tree",
-        )?
-        .current())
-    }
+    let ffi_span = draw(two_stage_ffi_mapper(10))?;
+    ensure(ffi_span > 0, "two-layer ffi mapper receives dependent generated scalar values")?;
 
-    #[test]
-    fn prop_compose_fixtures_generate_values() -> Result<(), TestFailure> {
-        let (low, high) = draw(two_ints(10))?;
-        ensure(low < 10, "lower value honors the first strategy")?;
-        ensure(high >= 10, "higher value honors the second strategy")?;
+    let double = draw(double_closure_is_move(10))?;
+    ensure(
+      (10..29).contains(&double),
+      "double closure strategy captures the base argument through both stages",
+    )
+  }
 
-        let (lesser, greater) = draw(a_less_than_b())?;
-        ensure(
-            lesser < greater,
-            "dependent strategy keeps lesser below greater",
-        )?;
+  #[test]
+  fn named_arguments_is_debug_for_needed_cases() -> Result<(), TestFailure> {
+    use super::NamedArguments;
 
-        let single = draw(single_closure_is_move(10))?;
-        ensure(
-            (10..20).contains(&single),
-            "single closure strategy captures the base argument",
-        )?;
+    ensure_eq(
+      &std::format!("{:?}", NamedArguments("foo", &"bar")),
+      &"foo = \"bar\"".to_owned(),
+      "single named value keeps the name/value format",
+    )?;
 
-        let ffi_gap = draw(two_ints_pub_with_ffi_mapper(10))?;
-        ensure(
-            ffi_gap > 0,
-            "one-layer ffi mapper receives generated scalar values",
-        )?;
+    let one = std::format!("{:?}", NamedArguments(("foo",), &(1,)));
+    ensure_eq(&one, &"foo = 1".to_owned(), "one tuple argument formats without tuple punctuation")?;
+    ensure(!one.contains(','), "one tuple argument formatting does not contain a comma")?;
 
-        let ffi_span = draw(two_stage_ffi_mapper(10))?;
-        ensure(
-            ffi_span > 0,
-            "two-layer ffi mapper receives dependent generated scalar values",
-        )?;
+    ensure_eq(
+      &std::format!("{:?}", NamedArguments(("foo", "bar"), &(1, 2))),
+      &"foo = 1, bar = 2".to_owned(),
+      "two tuple arguments are comma separated",
+    )?;
 
-        let double = draw(double_closure_is_move(10))?;
-        ensure(
-            (10..29).contains(&double),
-            "double closure strategy captures the base argument through both stages",
-        )
-    }
+    drop(std::format!("{:?}", NamedArguments(("a", "b", "c"), &(1, 2, 3))));
+    drop(std::format!("{:?}", NamedArguments(("a", "b", "c", "d"), &(1, 2, 3, 4))));
+    drop(std::format!("{:?}", NamedArguments(("a", "b", "c", "d", "e"), &(1, 2, 3, 4, 5))));
+    drop(std::format!(
+      "{:?}",
+      NamedArguments(("a", "b", "c", "d", "e", "f"), &(1, 2, 3, 4, 5, 6))
+    ));
+    drop(std::format!(
+      "{:?}",
+      NamedArguments(("a", "b", "c", "d", "e", "f", "g"), &(1, 2, 3, 4, 5, 6, 7))
+    ));
+    drop(std::format!(
+      "{:?}",
+      NamedArguments(("a", "b", "c", "d", "e", "f", "g", "h"), &(1, 2, 3, 4, 5, 6, 7, 8))
+    ));
+    drop(std::format!(
+      "{:?}",
+      NamedArguments(("a", "b", "c", "d", "e", "f", "g", "h", "i"), &(1, 2, 3, 4, 5, 6, 7, 8, 9))
+    ));
+    drop(std::format!(
+      "{:?}",
+      NamedArguments(("a", "b", "c", "d", "e", "f", "g", "h", "i", "j"), &(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
+    ));
+    drop(std::format!("{:?}", NamedArguments((("a", "b"), "c", "d"), &((1, 2), 3, 4))));
+    Ok(())
+  }
 
-    #[test]
-    fn named_arguments_is_debug_for_needed_cases() -> Result<(), TestFailure> {
-        use super::NamedArguments;
+  #[test]
+  fn oneof_static_counts_through_five() -> Result<(), TestFailure> {
+    expect_oneof_count(1, prop_oneof![Just(0_i32)])?;
+    expect_oneof_count(2, assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32),]))?;
+    expect_oneof_count(3, assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32), Just(2_i32),]))?;
+    expect_oneof_count(
+      4,
+      assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32), Just(2_i32), Just(3_i32),]),
+    )?;
+    expect_oneof_count(
+      5,
+      assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32), Just(2_i32), Just(3_i32), Just(4_i32),]),
+    )
+  }
 
-        ensure_eq(
-            &std::format!("{:?}", NamedArguments("foo", &"bar")),
-            &"foo = \"bar\"".to_owned(),
-            "single named value keeps the name/value format",
-        )?;
+  #[test]
+  fn oneof_static_counts_six_through_ten() -> Result<(), TestFailure> {
+    expect_oneof_count(
+      6,
+      assert_static_oneof(prop_oneof![
+        Just(0_i32),
+        Just(1_i32),
+        Just(2_i32),
+        Just(3_i32),
+        Just(4_i32),
+        Just(5_i32),
+      ]),
+    )?;
+    expect_oneof_count(
+      7,
+      assert_static_oneof(prop_oneof![
+        Just(0_i32),
+        Just(1_i32),
+        Just(2_i32),
+        Just(3_i32),
+        Just(4_i32),
+        Just(5_i32),
+        Just(6_i32),
+      ]),
+    )?;
+    expect_oneof_count(
+      8,
+      assert_static_oneof(prop_oneof![
+        Just(0_i32),
+        Just(1_i32),
+        Just(2_i32),
+        Just(3_i32),
+        Just(4_i32),
+        Just(5_i32),
+        Just(6_i32),
+        Just(7_i32),
+      ]),
+    )?;
+    expect_oneof_count(
+      9,
+      assert_static_oneof(prop_oneof![
+        Just(0_i32),
+        Just(1_i32),
+        Just(2_i32),
+        Just(3_i32),
+        Just(4_i32),
+        Just(5_i32),
+        Just(6_i32),
+        Just(7_i32),
+        Just(8_i32),
+      ]),
+    )?;
+    expect_oneof_count(
+      10,
+      assert_static_oneof(prop_oneof![
+        Just(0_i32),
+        Just(1_i32),
+        Just(2_i32),
+        Just(3_i32),
+        Just(4_i32),
+        Just(5_i32),
+        Just(6_i32),
+        Just(7_i32),
+        Just(8_i32),
+        Just(9_i32),
+      ]),
+    )
+  }
 
-        let one = std::format!("{:?}", NamedArguments(("foo",), &(1,)));
-        ensure_eq(
-            &one,
-            &"foo = 1".to_owned(),
-            "one tuple argument formats without tuple punctuation",
-        )?;
-        ensure(
-            !one.contains(','),
-            "one tuple argument formatting does not contain a comma",
-        )?;
-
-        ensure_eq(
-            &std::format!("{:?}", NamedArguments(("foo", "bar"), &(1, 2))),
-            &"foo = 1, bar = 2".to_owned(),
-            "two tuple arguments are comma separated",
-        )?;
-
-        drop(std::format!(
-            "{:?}",
-            NamedArguments(("a", "b", "c"), &(1, 2, 3))
-        ));
-        drop(std::format!(
-            "{:?}",
-            NamedArguments(("a", "b", "c", "d"), &(1, 2, 3, 4))
-        ));
-        drop(std::format!(
-            "{:?}",
-            NamedArguments(("a", "b", "c", "d", "e"), &(1, 2, 3, 4, 5))
-        ));
-        drop(std::format!(
-            "{:?}",
-            NamedArguments(("a", "b", "c", "d", "e", "f"), &(1, 2, 3, 4, 5, 6))
-        ));
-        drop(std::format!(
-            "{:?}",
-            NamedArguments(
-                ("a", "b", "c", "d", "e", "f", "g"),
-                &(1, 2, 3, 4, 5, 6, 7)
-            )
-        ));
-        drop(std::format!(
-            "{:?}",
-            NamedArguments(
-                ("a", "b", "c", "d", "e", "f", "g", "h"),
-                &(1, 2, 3, 4, 5, 6, 7, 8)
-            )
-        ));
-        drop(std::format!(
-            "{:?}",
-            NamedArguments(
-                ("a", "b", "c", "d", "e", "f", "g", "h", "i"),
-                &(1, 2, 3, 4, 5, 6, 7, 8, 9)
-            )
-        ));
-        drop(std::format!(
-            "{:?}",
-            NamedArguments(
-                ("a", "b", "c", "d", "e", "f", "g", "h", "i", "j"),
-                &(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-            )
-        ));
-        drop(std::format!(
-            "{:?}",
-            NamedArguments((("a", "b"), "c", "d"), &((1, 2), 3, 4))
-        ));
-        Ok(())
-    }
-
-    #[test]
-    fn oneof_static_counts_through_five() -> Result<(), TestFailure> {
-        expect_oneof_count(1, prop_oneof![Just(0_i32)])?;
-        expect_oneof_count(
-            2,
-            assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32),]),
-        )?;
-        expect_oneof_count(
-            3,
-            assert_static_oneof(prop_oneof![
-                Just(0_i32),
-                Just(1_i32),
-                Just(2_i32),
-            ]),
-        )?;
-        expect_oneof_count(
-            4,
-            assert_static_oneof(prop_oneof![
-                Just(0_i32),
-                Just(1_i32),
-                Just(2_i32),
-                Just(3_i32),
-            ]),
-        )?;
-        expect_oneof_count(
-            5,
-            assert_static_oneof(prop_oneof![
-                Just(0_i32),
-                Just(1_i32),
-                Just(2_i32),
-                Just(3_i32),
-                Just(4_i32),
-            ]),
-        )
-    }
-
-    #[test]
-    fn oneof_static_counts_six_through_ten() -> Result<(), TestFailure> {
-        expect_oneof_count(
-            6,
-            assert_static_oneof(prop_oneof![
-                Just(0_i32),
-                Just(1_i32),
-                Just(2_i32),
-                Just(3_i32),
-                Just(4_i32),
-                Just(5_i32),
-            ]),
-        )?;
-        expect_oneof_count(
-            7,
-            assert_static_oneof(prop_oneof![
-                Just(0_i32),
-                Just(1_i32),
-                Just(2_i32),
-                Just(3_i32),
-                Just(4_i32),
-                Just(5_i32),
-                Just(6_i32),
-            ]),
-        )?;
-        expect_oneof_count(
-            8,
-            assert_static_oneof(prop_oneof![
-                Just(0_i32),
-                Just(1_i32),
-                Just(2_i32),
-                Just(3_i32),
-                Just(4_i32),
-                Just(5_i32),
-                Just(6_i32),
-                Just(7_i32),
-            ]),
-        )?;
-        expect_oneof_count(
-            9,
-            assert_static_oneof(prop_oneof![
-                Just(0_i32),
-                Just(1_i32),
-                Just(2_i32),
-                Just(3_i32),
-                Just(4_i32),
-                Just(5_i32),
-                Just(6_i32),
-                Just(7_i32),
-                Just(8_i32),
-            ]),
-        )?;
-        expect_oneof_count(
-            10,
-            assert_static_oneof(prop_oneof![
-                Just(0_i32),
-                Just(1_i32),
-                Just(2_i32),
-                Just(3_i32),
-                Just(4_i32),
-                Just(5_i32),
-                Just(6_i32),
-                Just(7_i32),
-                Just(8_i32),
-                Just(9_i32),
-            ]),
-        )
-    }
-
-    #[test]
-    fn oneof_dynamic_count_after_tuple_limit() -> Result<(), TestFailure> {
-        let dynamic_oneof: Union<_> = prop_oneof![
-            Just(0_i32),
-            Just(1_i32),
-            Just(2_i32),
-            Just(3_i32),
-            Just(4_i32),
-            Just(5_i32),
-            Just(6_i32),
-            Just(7_i32),
-            Just(8_i32),
-            Just(9_i32),
-            Just(10_i32),
-        ];
-        expect_oneof_count(11, dynamic_oneof)
-    }
+  #[test]
+  fn oneof_dynamic_count_after_tuple_limit() -> Result<(), TestFailure> {
+    let dynamic_oneof: Union<_> = prop_oneof![
+      Just(0_i32),
+      Just(1_i32),
+      Just(2_i32),
+      Just(3_i32),
+      Just(4_i32),
+      Just(5_i32),
+      Just(6_i32),
+      Just(7_i32),
+      Just(8_i32),
+      Just(9_i32),
+      Just(10_i32),
+    ];
+    expect_oneof_count(11, dynamic_oneof)
+  }
 }
 
 #[cfg(test)]
 #[cfg(feature = "timeout")]
 mod test_timeout {
-    use crate::test_runner::{Config, runner_test_config};
+  use crate::test_runner::Config;
+  use crate::test_runner::runner_test_config;
 
-    __proptest_internal! {
-        #![proptest_config(Config {
-            fork: true,
-            .. runner_test_config()
-        })]
+  __proptest_internal! {
+      #![proptest_config(Config {
+          fork: true,
+          .. runner_test_config()
+      })]
 
-        // Ensure that the macro sets the test name properly. If it doesn't,
-        // this test will fail to run correctly.
-        #[test]
-        fn test_name_set_correctly_for_fork(_ in 0_u32..1_u32) { }
-    }
+      // Ensure that the macro sets the test name properly. If it doesn't,
+      // this test will fail to run correctly.
+      #[test]
+      fn test_name_set_correctly_for_fork(_ in 0_u32..1_u32) { }
+  }
 }
 
 #[cfg(test)]
 mod another_test {
-    use crate::sugar;
+  use crate::sugar;
 
-    // Ensure that we can access the `[pub]` composed function above.
-    #[test]
-    fn can_access_pub_compose() {
-        drop(sugar::test::two_ints_pub(42));
-        drop(sugar::test::two_ints_pub_with_ffi_mapper(42));
-    }
+  // Ensure that we can access the `[pub]` composed function above.
+  #[test]
+  fn can_access_pub_compose() {
+    drop(sugar::test::two_ints_pub(42));
+    drop(sugar::test::two_ints_pub_with_ffi_mapper(42));
+  }
 }
 
 #[cfg(test)]
 mod ownership_tests {
-    use core::hint::black_box;
+  use core::hint::black_box;
 
-    #[cfg(feature = "std")]
-    __proptest_internal! {
-        #[test]
-        fn accept_ref_arg(ref digit in "[0-9]") {
-            use crate::std_facade::String;
-            fn assert_string(_s: &String) {}
-            assert_string(digit);
-        }
+  #[cfg(feature = "std")]
+  __proptest_internal! {
+      #[test]
+      fn accept_ref_arg(ref digit in "[0-9]") {
+          use crate::std_facade::String;
+          fn assert_string(_s: &String) {}
+          assert_string(digit);
+      }
 
-        #[test]
-        fn accept_move_arg(digit in "[0-9]") {
-            use crate::std_facade::String;
-            fn assert_string(_s: String) {}
-            assert_string(digit);
-        }
-    }
+      #[test]
+      fn accept_move_arg(digit in "[0-9]") {
+          use crate::std_facade::String;
+          fn assert_string(_s: String) {}
+          assert_string(digit);
+      }
+  }
 
-    #[derive(Debug)]
-    struct NotClone;
-    const MK: fn() -> NotClone = || NotClone;
+  #[derive(Debug)]
+  struct NotClone;
+  const MK: fn() -> NotClone = || NotClone;
 
-    __proptest_internal! {
-        #[test]
-        fn accept_noclone_arg(nc in MK) {
-            let _: NotClone = black_box(nc);
-        }
+  __proptest_internal! {
+      #[test]
+      fn accept_noclone_arg(nc in MK) {
+          let _: NotClone = black_box(nc);
+      }
 
-        #[test]
-        fn accept_noclone_ref_arg(ref nc in MK) {
-            let _: &NotClone = black_box(nc);
-        }
-    }
+      #[test]
+      fn accept_noclone_ref_arg(ref nc in MK) {
+          let _: &NotClone = black_box(nc);
+      }
+  }
 }
 
 #[cfg(test)]
 mod closure_tests {
-    use strict_test_support::{TestFailure, ensure};
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
 
-    use crate::test_runner::{TestCaseError, runner_test_config};
+  use crate::test_runner::TestCaseError;
+  use crate::test_runner::runner_test_config;
 
-    #[test]
-    fn test_simple() -> Result<(), TestFailure> {
-        let x = 420;
+  #[test]
+  fn test_simple() -> Result<(), TestFailure> {
+    let x = 420;
 
-        ensure(
-            __proptest_internal!(|(y: i32)| {
-                let _: (i32, i32) = (x, y);
-            })
-            .is_ok(),
-            "typed closure-style syntax runs",
-        )?;
+    ensure(
+      __proptest_internal!(|(y: i32)| {
+          let _: (i32, i32) = (x, y);
+      })
+      .is_ok(),
+      "typed closure-style syntax runs",
+    )?;
 
-        ensure(
-            __proptest_internal!(|(y in 0..100)| {
-                let _: (i32, i32) = (x, y);
-            })
-            .is_ok(),
-            "strategy closure-style syntax runs",
-        )?;
+    ensure(
+      __proptest_internal!(|(y in 0..100)| {
+          let _: (i32, i32) = (x, y);
+      })
+      .is_ok(),
+      "strategy closure-style syntax runs",
+    )?;
 
-        ensure(
-            __proptest_internal!(|(y: i32,)| {
-                let _: (i32, i32) = (x, y);
-            })
-            .is_ok(),
-            "typed closure-style syntax accepts a trailing comma",
-        )?;
+    ensure(
+      __proptest_internal!(|(y: i32,)| {
+          let _: (i32, i32) = (x, y);
+      })
+      .is_ok(),
+      "typed closure-style syntax accepts a trailing comma",
+    )?;
 
-        ensure(
-            __proptest_internal!(|(y in 0..100,)| {
-                let _: (i32, i32) = (x, y);
-            })
-            .is_ok(),
-            "strategy closure-style syntax accepts a trailing comma",
-        )
-    }
+    ensure(
+      __proptest_internal!(|(y in 0..100,)| {
+          let _: (i32, i32) = (x, y);
+      })
+      .is_ok(),
+      "strategy closure-style syntax accepts a trailing comma",
+    )
+  }
 
-    #[test]
-    fn test_move() -> Result<(), TestFailure> {
-        #[derive(Debug)]
-        struct Foo;
+  #[test]
+  fn test_move() -> Result<(), TestFailure> {
+    #[derive(Debug)]
+    struct Foo;
 
-        let first_foo = Foo;
+    let first_foo = Foo;
 
-        ensure(
-            __proptest_internal!(move |(x in 1_i32..100_i32, y in 0_i32..100_i32)| {
-                let _: (i32, &Foo) = (x.saturating_add(y), &first_foo);
-            })
-            .is_ok(),
-            "move closure captures surrounding state",
-        )?;
+    ensure(
+      __proptest_internal!(move |(x in 1_i32..100_i32, y in 0_i32..100_i32)| {
+          let _: (i32, &Foo) = (x.saturating_add(y), &first_foo);
+      })
+      .is_ok(),
+      "move closure captures surrounding state",
+    )?;
 
-        let second_foo = Foo;
-        ensure(
-            __proptest_internal!(move |(x: (), y: ())| {
-                fn accept_units(_: (), _: ()) -> usize {
-                    2
-                }
+    let second_foo = Foo;
+    ensure(
+      __proptest_internal!(move |(x: (), y: ())| {
+          fn accept_units(_: (), _: ()) -> usize {
+              2
+          }
 
-                let _: (usize, &Foo) = (accept_units(x, y), &second_foo);
-            })
-            .is_ok(),
-            "typed move closure captures surrounding state",
-        )
-    }
+          let _: (usize, &Foo) = (accept_units(x, y), &second_foo);
+      })
+      .is_ok(),
+      "typed move closure captures surrounding state",
+    )
+  }
 
-    #[test]
-    fn returns_error_if_closure_fails() -> Result<(), TestFailure> {
-        let result = __proptest_internal!(|(_ in 0..1)| {
-            let should_fail = true;
-            if should_fail {
-                return Err(TestCaseError::fail(
-                    "intentional test-case failure",
-                ));
-            }
-        });
-        ensure(result.is_err(), "closure-style failure is returned")
-    }
+  #[test]
+  fn returns_error_if_closure_fails() -> Result<(), TestFailure> {
+    let result = __proptest_internal!(|(_ in 0..1)| {
+        let should_fail = true;
+        if should_fail {
+            return Err(TestCaseError::fail(
+                "intentional test-case failure",
+            ));
+        }
+    });
+    ensure(result.is_err(), "closure-style failure is returned")
+  }
 
-    #[test]
-    fn accepts_unblocked_syntax() -> Result<(), TestFailure> {
-        ensure(
-            __proptest_internal!(|(x in 0_u32..10, y in 10_u32..20)| {
-                let _: (u32, u32) = (x, y);
-            })
-            .is_ok(),
-            "closure-style syntax accepts two generated values",
-        )?;
-        ensure(
-            __proptest_internal!(|(x in 0_u32..10, y in 10_u32..20,)| {
-                let _: (u32, u32) = (x, y);
-            })
-            .is_ok(),
-            "closure-style syntax accepts a trailing comma",
-        )
-    }
+  #[test]
+  fn accepts_unblocked_syntax() -> Result<(), TestFailure> {
+    ensure(
+      __proptest_internal!(|(x in 0_u32..10, y in 10_u32..20)| {
+          let _: (u32, u32) = (x, y);
+      })
+      .is_ok(),
+      "closure-style syntax accepts two generated values",
+    )?;
+    ensure(
+      __proptest_internal!(|(x in 0_u32..10, y in 10_u32..20,)| {
+          let _: (u32, u32) = (x, y);
+      })
+      .is_ok(),
+      "closure-style syntax accepts a trailing comma",
+    )
+  }
 
-    #[test]
-    fn accepts_custom_config() -> Result<(), TestFailure> {
-        let conf = runner_test_config();
+  #[test]
+  fn accepts_custom_config() -> Result<(), TestFailure> {
+    let conf = runner_test_config();
 
-        ensure(
-            __proptest_internal!(conf, |(x in 0_u32..10, y in 10_u32..20)| {
-                let _: (u32, u32) = (x, y);
-            })
-            .is_ok(),
-            "owned custom config is accepted",
-        )?;
-        ensure(
-            __proptest_internal!(&conf, |(x in 0_u32..10, y in 10_u32..20)| {
-                let _: (u32, u32) = (x, y);
-            })
-            .is_ok(),
-            "borrowed custom config is accepted",
-        )?;
-        ensure(
-            __proptest_internal!(conf, move |(x in 0_u32..10, y in 10_u32..20)| {
-                let _: (u32, u32) = (x, y);
-            })
-            .is_ok(),
-            "move closure accepts an owned custom config",
-        )?;
-        ensure(
-            __proptest_internal!(conf, |(_x: u32, _y: u32)| {}).is_ok(),
-            "typed closure accepts an owned custom config",
-        )?;
-        ensure(
-            __proptest_internal!(conf, move |(_x: u32, _y: u32)| {}).is_ok(),
-            "typed move closure accepts an owned custom config",
-        )?;
+    ensure(
+      __proptest_internal!(conf, |(x in 0_u32..10, y in 10_u32..20)| {
+          let _: (u32, u32) = (x, y);
+      })
+      .is_ok(),
+      "owned custom config is accepted",
+    )?;
+    ensure(
+      __proptest_internal!(&conf, |(x in 0_u32..10, y in 10_u32..20)| {
+          let _: (u32, u32) = (x, y);
+      })
+      .is_ok(),
+      "borrowed custom config is accepted",
+    )?;
+    ensure(
+      __proptest_internal!(conf, move |(x in 0_u32..10, y in 10_u32..20)| {
+          let _: (u32, u32) = (x, y);
+      })
+      .is_ok(),
+      "move closure accepts an owned custom config",
+    )?;
+    ensure(
+      __proptest_internal!(conf, |(_x: u32, _y: u32)| {}).is_ok(),
+      "typed closure accepts an owned custom config",
+    )?;
+    ensure(
+      __proptest_internal!(conf, move |(_x: u32, _y: u32)| {}).is_ok(),
+      "typed move closure accepts an owned custom config",
+    )?;
 
-        // Same as above, but with extra trailing comma
-        ensure(
-            __proptest_internal!(conf, |(x in 0_u32..10, y in 10_u32..20,)| {
-                let _: (u32, u32) = (x, y);
-            })
-            .is_ok(),
-            "owned custom config accepts a trailing comma",
-        )?;
-        ensure(
-            __proptest_internal!(&conf, |(x in 0_u32..10, y in 10_u32..20,)| {
-                let _: (u32, u32) = (x, y);
-            })
-            .is_ok(),
-            "borrowed custom config accepts a trailing comma",
-        )?;
-        ensure(
-            __proptest_internal!(conf, move |(x in 0_u32..10, y in 10_u32..20,)| {
-                let _: (u32, u32) = (x, y);
-            })
-            .is_ok(),
-            "move closure with custom config accepts a trailing comma",
-        )?;
-        ensure(
-            __proptest_internal!(conf, |(_x: u32, _y: u32,)| {}).is_ok(),
-            "typed closure with custom config accepts a trailing comma",
-        )?;
-        ensure(
-            __proptest_internal!(conf, move |(_x: u32, _y: u32,)| {}).is_ok(),
-            "typed move closure with custom config accepts a trailing comma",
-        )
-    }
+    // Same as above, but with extra trailing comma
+    ensure(
+      __proptest_internal!(conf, |(x in 0_u32..10, y in 10_u32..20,)| {
+          let _: (u32, u32) = (x, y);
+      })
+      .is_ok(),
+      "owned custom config accepts a trailing comma",
+    )?;
+    ensure(
+      __proptest_internal!(&conf, |(x in 0_u32..10, y in 10_u32..20,)| {
+          let _: (u32, u32) = (x, y);
+      })
+      .is_ok(),
+      "borrowed custom config accepts a trailing comma",
+    )?;
+    ensure(
+      __proptest_internal!(conf, move |(x in 0_u32..10, y in 10_u32..20,)| {
+          let _: (u32, u32) = (x, y);
+      })
+      .is_ok(),
+      "move closure with custom config accepts a trailing comma",
+    )?;
+    ensure(
+      __proptest_internal!(conf, |(_x: u32, _y: u32,)| {}).is_ok(),
+      "typed closure with custom config accepts a trailing comma",
+    )?;
+    ensure(
+      __proptest_internal!(conf, move |(_x: u32, _y: u32,)| {}).is_ok(),
+      "typed move closure with custom config accepts a trailing comma",
+    )
+  }
 }
 
 #[cfg(test)]
 mod any_tests {
-    use strict_test_support::TestFailure;
+  use strict_test_support::TestFailure;
 
-    __proptest_internal! {
-        #[test]
-        fn test_something
-            (
-                flag: bool,
-                first in 25_u8..,
-                second in 25_u8..,
-                _d: (),
-                mut _e: (),
-                ref _f: (),
-                ref mut _g: (),
-                [(), ()]: [(); 2],
-            ) {
-            let _: bool = flag;
-            let _sum = usize::from(first).saturating_add(usize::from(second));
-        }
-    }
+  __proptest_internal! {
+      #[test]
+      fn test_something
+          (
+              flag: bool,
+              first in 25_u8..,
+              second in 25_u8..,
+              _d: (),
+              mut _e: (),
+              ref _f: (),
+              ref mut _g: (),
+              [(), ()]: [(); 2],
+          ) {
+          let _: bool = flag;
+          let _sum = usize::from(first).saturating_add(usize::from(second));
+      }
+  }
 
-    // Test that the macro accepts some of the inputs we expect it to:
-    #[test]
-    fn proptest_ext_test() -> Result<(), TestFailure> {
-        use strict_test_support::ensure_eq;
+  // Test that the macro accepts some of the inputs we expect it to:
+  #[test]
+  fn proptest_ext_test() -> Result<(), TestFailure> {
+    use strict_test_support::ensure_eq;
 
-        struct Wrapper(pub u8);
+    struct Wrapper(pub u8);
 
-        fn accept_strategy<T>(_strategy: T) {}
+    fn accept_strategy<T>(_strategy: T) {}
 
-        accept_strategy(proptest_helper!(@_EXT _STRAT( _ : u8 )));
-        accept_strategy(proptest_helper!(@_EXT _STRAT( x : u8 )));
-        accept_strategy(proptest_helper!(@_EXT _STRAT( ref x : u8 )));
-        accept_strategy(proptest_helper!(@_EXT _STRAT( mut x : u8 )));
-        accept_strategy(proptest_helper!(@_EXT _STRAT( ref mut x : u8 )));
-        accept_strategy(proptest_helper!(@_EXT _STRAT( [_, _] : u8 )));
-        accept_strategy(
-            proptest_helper!(@_EXT _STRAT( (&mut Wrapper(x)) : u8 )),
-        );
-        accept_strategy(proptest_helper!(@_EXT _STRAT( x in 1..2 )));
+    accept_strategy(proptest_helper!(@_EXT _STRAT( _ : u8 )));
+    accept_strategy(proptest_helper!(@_EXT _STRAT( x : u8 )));
+    accept_strategy(proptest_helper!(@_EXT _STRAT( ref x : u8 )));
+    accept_strategy(proptest_helper!(@_EXT _STRAT( mut x : u8 )));
+    accept_strategy(proptest_helper!(@_EXT _STRAT( ref mut x : u8 )));
+    accept_strategy(proptest_helper!(@_EXT _STRAT( [_, _] : u8 )));
+    accept_strategy(proptest_helper!(@_EXT _STRAT( (&mut Wrapper(x)) : u8 )));
+    accept_strategy(proptest_helper!(@_EXT _STRAT( x in 1..2 )));
 
-        let proptest_helper!(@_EXT _PAT( _ : u8 )): u8 = 1;
-        let proptest_helper!(@_EXT _PAT( _name : u8 )) = 1;
-        let proptest_helper!(@_EXT _PAT( mut _mut_name : u8 )) = 1;
-        let proptest_helper!(@_EXT _PAT( [_, _] : u8 )) = [1, 2];
-        let proptest_helper!(@_EXT _PAT( (&mut Wrapper(_wrapped)) : u8 )) =
-            &mut Wrapper(1);
-        let proptest_helper!(@_EXT _PAT( ranged in 1..2 )) = 1;
-        ensure_eq(&ranged, &1, "ranged pattern binds the generated value")?;
-        let matched_ref = u8::from(matches!(
-            Some(1),
-            Some(proptest_helper!(@_EXT _PAT( ref _x : u8 )))
-        ));
-        ensure_eq(&matched_ref, &1, "ref pattern matches the generated value")?;
+    let proptest_helper!(@_EXT _PAT( _ : u8 )): u8 = 1;
+    let proptest_helper!(@_EXT _PAT( _name : u8 )) = 1;
+    let proptest_helper!(@_EXT _PAT( mut _mut_name : u8 )) = 1;
+    let proptest_helper!(@_EXT _PAT( [_, _] : u8 )) = [1, 2];
+    let proptest_helper!(@_EXT _PAT( (&mut Wrapper(_wrapped)) : u8 )) = &mut Wrapper(1);
+    let proptest_helper!(@_EXT _PAT( ranged in 1..2 )) = 1;
+    ensure_eq(&ranged, &1, "ranged pattern binds the generated value")?;
+    let matched_ref = u8::from(matches!(Some(1), Some(proptest_helper!(@_EXT _PAT( ref _x : u8 )))));
+    ensure_eq(&matched_ref, &1, "ref pattern matches the generated value")?;
 
-        let matched_ref_mut = u8::from(matches!(
-            Some(1),
-            Some(proptest_helper!(@_EXT _PAT( ref mut _x : u8 )))
-        ));
-        ensure_eq(
-            &matched_ref_mut,
-            &1,
-            "ref mut pattern matches the generated value",
-        )
-    }
+    let matched_ref_mut = u8::from(matches!(Some(1), Some(proptest_helper!(@_EXT _PAT( ref mut _x : u8 )))));
+    ensure_eq(&matched_ref_mut, &1, "ref mut pattern matches the generated value")
+  }
 }
 
 // Behavioural coverage for the `macro_rules!` hygiene above: the general
@@ -2189,105 +2115,101 @@ mod any_tests {
 #[cfg(test)]
 #[cfg(feature = "strict-test")]
 mod macro_hygiene {
-    use std::string::ToString as _;
+  use std::string::ToString as _;
 
-    use strict_test_support::{ensure, ensure_contains, ensure_some};
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_contains;
+  use strict_test_support::ensure_some;
 
-    use crate::strategy::{Just, Strategy};
-    use crate::strict::{TestResult, ensure_property};
+  use crate::strategy::Just;
+  use crate::strategy::Strategy;
+  use crate::strict::TestResult;
+  use crate::strict::ensure_property;
 
-    // Eleven arms with no trailing comma drives the general `prop_oneof!`
-    // arm whose transcriber previously repeated `$weight`/`$item` under
-    // `,*`; it expands to a dynamic `Union::new_weighted`. The arms carry
-    // distinct values so a dropped arm would show up as a missing sample.
-    fn eleven_way_union() -> impl Strategy<Value = i32> {
-        // Unsuffixed literals infer to `i32` from the return type.
-        prop_oneof![
-            Just(0),
-            Just(1),
-            Just(2),
-            Just(3),
-            Just(4),
-            Just(5),
-            Just(6),
-            Just(7),
-            Just(8),
-            Just(9),
-            Just(10)
-        ]
-    }
+  // Eleven arms with no trailing comma drives the general `prop_oneof!`
+  // arm whose transcriber previously repeated `$weight`/`$item` under
+  // `,*`; it expands to a dynamic `Union::new_weighted`. The arms carry
+  // distinct values so a dropped arm would show up as a missing sample.
+  fn eleven_way_union() -> impl Strategy<Value = i32> {
+    // Unsuffixed literals infer to `i32` from the return type.
+    prop_oneof![
+      Just(0),
+      Just(1),
+      Just(2),
+      Just(3),
+      Just(4),
+      Just(5),
+      Just(6),
+      Just(7),
+      Just(8),
+      Just(9),
+      Just(10)
+    ]
+  }
 
-    #[test]
-    fn prop_oneof_dynamic_union_stays_within_its_arms() -> TestResult {
-        ensure_property(
-            &eleven_way_union(),
-            "every sample comes from one of the eleven arms",
-            |sample| ensure((0..=10).contains(&sample), "sample in 0..=10"),
-        )
-    }
+  #[test]
+  fn prop_oneof_dynamic_union_stays_within_its_arms() -> TestResult {
+    ensure_property(&eleven_way_union(), "every sample comes from one of the eleven arms", |sample| {
+      ensure((0..=10).contains(&sample), "sample in 0..=10")
+    })
+  }
 
-    #[test]
-    fn prop_oneof_dynamic_union_reports_a_falsified_bound() -> TestResult {
-        let failure = ensure_some(
-            ensure_property(
-                &eleven_way_union(),
-                "no sample reaches the eleventh arm",
-                |sample| ensure(sample < 10, "sample below ten"),
-            )
-            .err(),
-            "the eleventh arm must falsify the below-ten property",
-        )?;
-        ensure_contains(
-            &failure.to_string(),
-            "property falsified",
-            "the falsification surfaces through the strict runner",
-        )
-    }
+  #[test]
+  fn prop_oneof_dynamic_union_reports_a_falsified_bound() -> TestResult {
+    let failure = ensure_some(
+      ensure_property(&eleven_way_union(), "no sample reaches the eleventh arm", |sample| {
+        ensure(sample < 10, "sample below ten")
+      })
+      .err(),
+      "the eleventh arm must falsify the below-ten property",
+    )?;
+    ensure_contains(
+      &failure.to_string(),
+      "property falsified",
+      "the falsification surfaces through the strict runner",
+    )
+  }
 
-    // `prop_compose!` with two closure lists where the first list uses the
-    // `name: type` form routes through the `$($arg:tt)+`/`$($arg2:tt)+`
-    // rule — the arm that previously transcribed the unbound `$strategy`
-    // metavariable. The first stage draws a ceiling via `any::<u8>()`; the
-    // second stage draws a value bounded by that ceiling and threads the
-    // ceiling back out so the body can return both.
-    prop_compose! {
-        fn ceiling_then_bounded()
-            (ceiling: u8)
-            (drawn in 0_u8..=ceiling, ceiling_kept in Just(ceiling))
-            -> (u8, u8)
-        {
-            (drawn, ceiling_kept)
-        }
-    }
+  // `prop_compose!` with two closure lists where the first list uses the
+  // `name: type` form routes through the `$($arg:tt)+`/`$($arg2:tt)+`
+  // rule — the arm that previously transcribed the unbound `$strategy`
+  // metavariable. The first stage draws a ceiling via `any::<u8>()`; the
+  // second stage draws a value bounded by that ceiling and threads the
+  // ceiling back out so the body can return both.
+  prop_compose! {
+      fn ceiling_then_bounded()
+          (ceiling: u8)
+          (drawn in 0_u8..=ceiling, ceiling_kept in Just(ceiling))
+          -> (u8, u8)
+      {
+          (drawn, ceiling_kept)
+      }
+  }
 
-    #[test]
-    fn prop_compose_typed_two_stage_bounds_hold() -> TestResult {
-        ensure_property(
-            &ceiling_then_bounded(),
-            "the second-stage draw never exceeds the first-stage ceiling",
-            |(drawn, ceiling)| {
-                ensure(drawn <= ceiling, "draw within the drawn ceiling")
-            },
-        )
-    }
+  #[test]
+  fn prop_compose_typed_two_stage_bounds_hold() -> TestResult {
+    ensure_property(
+      &ceiling_then_bounded(),
+      "the second-stage draw never exceeds the first-stage ceiling",
+      |(drawn, ceiling)| ensure(drawn <= ceiling, "draw within the drawn ceiling"),
+    )
+  }
 
-    #[test]
-    fn prop_compose_typed_two_stage_reports_falsification() -> TestResult {
-        let failure = ensure_some(
-            ensure_property(
-                &ceiling_then_bounded(),
-                "the second draw never equals the ceiling",
-                |(drawn, ceiling)| {
-                    ensure(drawn != ceiling, "draw differs from the ceiling")
-                },
-            )
-            .err(),
-            "a draw equal to the ceiling must falsify the property",
-        )?;
-        ensure_contains(
-            &failure.to_string(),
-            "property falsified",
-            "the falsification surfaces through the strict runner",
-        )
-    }
+  #[test]
+  fn prop_compose_typed_two_stage_reports_falsification() -> TestResult {
+    let failure = ensure_some(
+      ensure_property(
+        &ceiling_then_bounded(),
+        "the second draw never equals the ceiling",
+        |(drawn, ceiling)| ensure(drawn != ceiling, "draw differs from the ceiling"),
+      )
+      .err(),
+      "a draw equal to the ceiling must falsify the property",
+    )?;
+    ensure_contains(
+      &failure.to_string(),
+      "property falsified",
+      "the falsification surfaces through the strict runner",
+    )
+  }
 }

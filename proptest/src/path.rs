@@ -5,7 +5,8 @@
 //! [`Arbitrary`](crate::arbitrary::Arbitrary) implementation for
 //! [`PathBuf`](std::path::PathBuf).
 
-use crate::{collection::SizeRange, string::StringParam};
+use crate::collection::SizeRange;
+use crate::string::StringParam;
 
 /// Parameters for the [`Arbitrary`](crate::arbitrary::Arbitrary)
 /// implementation for [`PathBuf`](std::path::PathBuf).
@@ -14,49 +15,46 @@ use crate::{collection::SizeRange, string::StringParam};
 /// default [`StringParam`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PathParams {
-    /// The number of components in the path.
-    components: SizeRange,
-    /// The regular expression to generate individual components.
-    component_regex: StringParam,
+  /// The number of components in the path.
+  components:      SizeRange,
+  /// The regular expression to generate individual components.
+  component_regex: StringParam,
 }
 
 impl PathParams {
-    /// Gets the number of components in the path.
-    #[must_use]
-    pub fn components(&self) -> SizeRange {
-        self.components.clone()
-    }
+  /// Gets the number of components in the path.
+  #[must_use]
+  pub fn components(&self) -> SizeRange {
+    self.components.clone()
+  }
 
-    /// Sets the number of components in the path.
-    #[must_use]
-    pub fn with_components(mut self, components: impl Into<SizeRange>) -> Self {
-        self.components = components.into();
-        self
-    }
+  /// Sets the number of components in the path.
+  #[must_use]
+  pub fn with_components(mut self, components: impl Into<SizeRange>) -> Self {
+    self.components = components.into();
+    self
+  }
 
-    /// Gets the regular expression to generate individual components.
-    #[must_use]
-    pub const fn component_regex(&self) -> StringParam {
-        self.component_regex
-    }
+  /// Gets the regular expression to generate individual components.
+  #[must_use]
+  pub const fn component_regex(&self) -> StringParam {
+    self.component_regex
+  }
 
-    /// Sets the regular expression to generate individual components.
-    #[must_use]
-    pub fn with_component_regex(
-        mut self,
-        component_regex: impl Into<StringParam>,
-    ) -> Self {
-        self.component_regex = component_regex.into();
-        self
-    }
+  /// Sets the regular expression to generate individual components.
+  #[must_use]
+  pub fn with_component_regex(mut self, component_regex: impl Into<StringParam>) -> Self {
+    self.component_regex = component_regex.into();
+    self
+  }
 }
 
 impl Default for PathParams {
-    fn default() -> Self {
-        Self {
-            components: (0..8).into(),
-            // This is the default regex for `any::<String>()`.
-            component_regex: StringParam::default(),
-        }
+  fn default() -> Self {
+    Self {
+      components:      (0..8).into(),
+      // This is the default regex for `any::<String>()`.
+      component_regex: StringParam::default(),
     }
+  }
 }

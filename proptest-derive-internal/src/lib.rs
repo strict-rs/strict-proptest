@@ -53,16 +53,14 @@ pub mod void;
 /// `compile_error!`, so there is no panic path.
 #[must_use]
 #[allow(
-    clippy::single_call_fn,
-    reason = "library entry point invoked once by the proptest-derive proc-macro shim"
+  clippy::single_call_fn,
+  reason = "library entry point invoked once by the proptest-derive proc-macro shim"
 )]
-pub fn derive_arbitrary(
-    input: proc_macro2::TokenStream,
-) -> proc_macro2::TokenStream {
-    match syn::parse2(input) {
-        Ok(ast) => derive::impl_proptest_arbitrary(ast),
-        Err(error) => error.to_compile_error(),
-    }
+pub fn derive_arbitrary(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+  match syn::parse2(input) {
+    Ok(ast) => derive::impl_proptest_arbitrary(ast),
+    Err(error) => error.to_compile_error(),
+  }
 }
 
 #[cfg(test)]

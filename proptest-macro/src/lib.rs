@@ -10,16 +10,16 @@ use proc_macro::TokenStream;
 
 /// Token streams for one `#[property_test]` expansion.
 struct PropertyTestInput {
-    /// The attribute body supplied to `#[property_test(...)]`.
-    attr: proc_macro2::TokenStream,
-    /// The function annotated with `#[property_test]`.
-    annotated_fn: proc_macro2::TokenStream,
+  /// The attribute body supplied to `#[property_test(...)]`.
+  attr:         proc_macro2::TokenStream,
+  /// The function annotated with `#[property_test]`.
+  annotated_fn: proc_macro2::TokenStream,
 }
 
 /// Expands a parsed `#[property_test]` invocation.
 trait ExpandPropertyTest {
-    /// Rewrite the annotated function into the generated strict property test.
-    fn expand(self) -> proc_macro2::TokenStream;
+  /// Rewrite the annotated function into the generated strict property test.
+  fn expand(self) -> proc_macro2::TokenStream;
 }
 
 /// The parse / validate / options / codegen pipeline that rewrites an
@@ -48,11 +48,11 @@ mod property_test;
 /// # use proptest_macro::property_test;
 /// #[property_test]
 /// fn foo(x: i32) -> proptest::strict::TestResult {
-///     // Real bodies check invariants with the `ensure*` helpers from
-///     // `strict-test-support` and propagate failures with `?`; a passing
-///     // property returns `Ok(())`.
-///     let _ = x;
-///     Ok(())
+///   // Real bodies check invariants with the `ensure*` helpers from
+///   // `strict-test-support` and propagate failures with `?`; a passing
+///   // property returns `Ok(())`.
+///   let _ = x;
+///   Ok(())
 /// }
 /// ```
 ///
@@ -116,10 +116,10 @@ mod property_test;
 /// # use proptest_macro::property_test;
 /// #[property_test]
 /// fn foo(#[strategy = "[0-9]*"] s: String) -> proptest::strict::TestResult {
-///     // Real bodies verify with the `ensure*` helpers from
-///     // `strict-test-support`; a passing property returns `Ok(())`.
-///     let _all_numeric = s.chars().all(|c| c.is_numeric());
-///     Ok(())
+///   // Real bodies verify with the `ensure*` helpers from
+///   // `strict-test-support`; a passing property returns `Ok(())`.
+///   let _all_numeric = s.chars().all(|c| c.is_numeric());
+///   Ok(())
 /// }
 /// ```
 /// Multiple `#[strategy = <expr>]` attributes on an argument are not allowed.
@@ -133,17 +133,14 @@ mod property_test;
 /// `proptest::strict::ensure_property` is, however, part of the documented contract.
 #[proc_macro_attribute]
 #[allow(
-    clippy::single_call_fn,
-    reason = "proc_macro_attribute entry point that bridges proc_macro tokens into the internal pipeline"
+  clippy::single_call_fn,
+  reason = "proc_macro_attribute entry point that bridges proc_macro tokens into the internal pipeline"
 )]
-pub fn property_test(
-    attr: TokenStream,
-    annotated_fn: TokenStream,
-) -> TokenStream {
-    PropertyTestInput {
-        attr: attr.into(),
-        annotated_fn: annotated_fn.into(),
-    }
-    .expand()
-    .into()
+pub fn property_test(attr: TokenStream, annotated_fn: TokenStream) -> TokenStream {
+  PropertyTestInput {
+    attr:         attr.into(),
+    annotated_fn: annotated_fn.into(),
+  }
+  .expand()
+  .into()
 }

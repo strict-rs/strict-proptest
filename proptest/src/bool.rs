@@ -9,12 +9,14 @@
 
 //! Strategies for generating `bool` values.
 
+use rand::RngExt as _;
+
+use crate::strategy::NewTree;
+use crate::strategy::Strategy;
+use crate::strategy::ValueTree;
 #[cfg(test)]
 use crate::strategy::check_strategy_sanity;
-use crate::strategy::{NewTree, Strategy, ValueTree};
 use crate::test_runner::TestRunner;
-
-use rand::RngExt as _;
 
 /// The type of the `ANY` constant.
 #[derive(Clone, Copy, Debug)]
@@ -26,12 +28,12 @@ pub struct Any(());
 pub const ANY: Any = Any(());
 
 impl Strategy for Any {
-    type Tree = BoolValueTree;
-    type Value = bool;
+  type Tree = BoolValueTree;
+  type Value = bool;
 
-    fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-        Ok(BoolValueTree::new(runner.rng().random()))
-    }
+  fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+    Ok(BoolValueTree::new(runner.rng().random()))
+  }
 }
 
 /// Generates boolean values by picking `true` with the given `probability`
@@ -39,7 +41,7 @@ impl Strategy for Any {
 ///
 /// Shrinks `true` to `false`.
 pub const fn weighted(probability: f64) -> Weighted {
-    Weighted(probability)
+  Weighted(probability)
 }
 
 /// The return type from `weighted()`.
@@ -48,118 +50,113 @@ pub const fn weighted(probability: f64) -> Weighted {
 pub struct Weighted(f64);
 
 impl Strategy for Weighted {
-    type Tree = BoolValueTree;
-    type Value = bool;
+  type Tree = BoolValueTree;
+  type Value = bool;
 
-    fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-        Ok(BoolValueTree::new(runner.rng().random_bool(self.0)))
-    }
+  fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
+    Ok(BoolValueTree::new(runner.rng().random_bool(self.0)))
+  }
 }
 
 /// The `ValueTree` to shrink booleans to false.
 #[derive(Clone, Copy, Debug)]
 pub struct BoolValueTree {
-    /// The boolean this tree currently represents.
-    current: bool,
-    /// How far shrinking has progressed for this tree.
-    state: ShrinkState,
+  /// The boolean this tree currently represents.
+  current: bool,
+  /// How far shrinking has progressed for this tree.
+  state:   ShrinkState,
 }
 
 /// Tracks how far a `BoolValueTree` has moved through its `true` → `false`
 /// shrink.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum ShrinkState {
-    /// No shrink step has been taken yet.
-    Untouched,
-    /// The value was simplified from `true` to `false`.
-    Simplified,
-    /// Shrinking is exhausted; no further step will change the value.
-    Final,
+  /// No shrink step has been taken yet.
+  Untouched,
+  /// The value was simplified from `true` to `false`.
+  Simplified,
+  /// Shrinking is exhausted; no further step will change the value.
+  Final,
 }
 
 impl BoolValueTree {
-    /// Creates a tree holding `current` with a fresh, untouched shrink state.
-    const fn new(current: bool) -> Self {
-        Self {
-            current,
-            state: ShrinkState::Untouched,
-        }
+  /// Creates a tree holding `current` with a fresh, untouched shrink state.
+  const fn new(current: bool) -> Self {
+    Self {
+      current,
+      state: ShrinkState::Untouched,
     }
+  }
 }
 
 impl ValueTree for BoolValueTree {
-    type Value = bool;
+  type Value = bool;
 
-    fn current(&self) -> bool {
-        self.current
-    }
-    fn simplify(&mut self) -> bool {
-        match self.state {
-            ShrinkState::Untouched if self.current => {
-                self.current = false;
-                self.state = ShrinkState::Simplified;
-                true
-            }
+  fn current(&self) -> bool {
+    self.current
+  }
+  fn simplify(&mut self) -> bool {
+    match self.state {
+      ShrinkState::Untouched if self.current => {
+        self.current = false;
+        self.state = ShrinkState::Simplified;
+        true
+      }
 
-            ShrinkState::Untouched
-            | ShrinkState::Simplified
-            | ShrinkState::Final => {
-                self.state = ShrinkState::Final;
-                false
-            }
-        }
+      ShrinkState::Untouched | ShrinkState::Simplified | ShrinkState::Final => {
+        self.state = ShrinkState::Final;
+        false
+      }
     }
-    fn complicate(&mut self) -> bool {
-        match self.state {
-            ShrinkState::Untouched | ShrinkState::Final => {
-                self.state = ShrinkState::Final;
-                false
-            }
+  }
+  fn complicate(&mut self) -> bool {
+    match self.state {
+      ShrinkState::Untouched | ShrinkState::Final => {
+        self.state = ShrinkState::Final;
+        false
+      }
 
-            ShrinkState::Simplified => {
-                self.current = true;
-                self.state = ShrinkState::Final;
-                true
-            }
-        }
+      ShrinkState::Simplified => {
+        self.current = true;
+        self.state = ShrinkState::Final;
+        true
+      }
     }
+  }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::test_runner::Reason;
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure_all;
 
-    use strict_test_support::{TestFailure, ensure_all};
+  use super::*;
+  use crate::test_runner::Reason;
 
-    use super::*;
+  #[test]
+  fn test_sanity() -> Result<(), Reason> {
+    check_strategy_sanity(ANY, None)
+  }
 
-    #[test]
-    fn test_sanity() -> Result<(), Reason> {
-        check_strategy_sanity(ANY, None)
-    }
+  #[test]
+  fn shrinks_properly() -> Result<(), TestFailure> {
+    let mut tree = BoolValueTree::new(true);
+    ensure_all(&[
+      (tree.simplify(), "true simplifies once"),
+      (!tree.current(), "simplified tree reads false"),
+      (!tree.clone().simplify(), "simplified tree cannot simplify"),
+      (tree.complicate(), "simplified tree complicates back"),
+      (!tree.clone().complicate(), "complicated tree cannot complicate again"),
+      (tree.current(), "complicated tree reads true"),
+      (!tree.simplify(), "complicated tree cannot simplify"),
+      (tree.current(), "tree still reads true"),
+    ])?;
 
-    #[test]
-    fn shrinks_properly() -> Result<(), TestFailure> {
-        let mut tree = BoolValueTree::new(true);
-        ensure_all(&[
-            (tree.simplify(), "true simplifies once"),
-            (!tree.current(), "simplified tree reads false"),
-            (!tree.clone().simplify(), "simplified tree cannot simplify"),
-            (tree.complicate(), "simplified tree complicates back"),
-            (
-                !tree.clone().complicate(),
-                "complicated tree cannot complicate again",
-            ),
-            (tree.current(), "complicated tree reads true"),
-            (!tree.simplify(), "complicated tree cannot simplify"),
-            (tree.current(), "tree still reads true"),
-        ])?;
-
-        tree = BoolValueTree::new(false);
-        ensure_all(&[
-            (!tree.clone().simplify(), "false cannot simplify"),
-            (!tree.clone().complicate(), "false cannot complicate"),
-            (!tree.current(), "false tree reads false"),
-        ])
-    }
+    tree = BoolValueTree::new(false);
+    ensure_all(&[
+      (!tree.clone().simplify(), "false cannot simplify"),
+      (!tree.clone().complicate(), "false cannot complicate"),
+      (!tree.current(), "false tree reads false"),
+    ])
+  }
 }

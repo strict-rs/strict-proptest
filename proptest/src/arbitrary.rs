@@ -14,8 +14,9 @@
 //!
 //! [`Arbitrary`]: trait.Arbitrary.html
 
+use crate::strategy::Map;
+use crate::strategy::Strategy;
 use crate::strategy::statics;
-use crate::strategy::{Map, Strategy};
 
 //==============================================================================
 // Trait and impls
@@ -57,8 +58,7 @@ pub use self::traits::*;
 /// A `pub(crate)` mapped-strategy alias like `SMapped`, but over an arbitrary
 /// source strategy `S` rather than `StrategyFor<I>`. Names the `statics::Map`
 /// type the impl macros produce so rustdoc stays readable.
-pub(crate) type SFnPtrMap<S, O> =
-    statics::Map<S, fn(<S as Strategy>::Value) -> O>;
+pub(crate) type SFnPtrMap<S, O> = statics::Map<S, fn(<S as Strategy>::Value) -> O>;
 
 /// A static map from a strategy of `I` to `O`.
 ///

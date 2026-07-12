@@ -1,12 +1,12 @@
 [package]
 name = "proptest"
-version = "1.11.0"
-authors = ["Jason Lingle"]
+version.workspace = true
+authors = ["Jason Lingle", "Takumi Shimada <hello@takumi.earth>"]
 license.workspace = true
 readme = "README.md"
 repository.workspace = true
-homepage = "https://proptest-rs.github.io/proptest/proptest/index.html"
-documentation = "https://docs.rs/proptest/latest/proptest/"
+homepage.workspace = true
+documentation.workspace = true
 keywords = ["property", "testing", "quickcheck", "fuzz", "hypothesis"]
 categories.workspace = true
 edition.workspace = true

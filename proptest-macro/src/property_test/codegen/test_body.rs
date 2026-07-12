@@ -1,10 +1,15 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Block, Ident, Pat, parse_quote, parse2};
+use syn::Block;
+use syn::Ident;
+use syn::Pat;
+use syn::parse_quote;
+use syn::parse2;
 
-use crate::property_test::{options::Options, utils::Argument};
-
-use super::{field_name_for_arg, struct_name};
+use super::field_name_for_arg;
+use super::struct_name;
+use crate::property_test::options::Options;
+use crate::property_test::utils::Argument;
 
 /// Generate the new test body by putting the struct and arbitrary impl at the
 /// start, then handing the labeled strategy to the strict runner: the final
@@ -12,86 +17,78 @@ use super::{field_name_for_arg, struct_name};
 /// `ensure_property_with_config`) call, whose verdict is the wrapper's return
 /// value
 #[allow(
-    clippy::single_call_fn,
-    reason = "the strict-runner block wrapping the original property body"
+  clippy::single_call_fn,
+  reason = "the strict-runner block wrapping the original property body"
 )]
-pub(super) fn body(
-    block: &Block,
-    args: &[Argument],
-    struct_and_impl: &TokenStream,
-    fn_name: &Ident,
-    options: &Options,
-) -> Block {
-    let struct_name = struct_name(fn_name);
+pub(super) fn body(block: &Block, args: &[Argument], struct_and_impl: &TokenStream, fn_name: &Ident, options: &Options) -> Block {
+  let struct_name = struct_name(fn_name);
 
-    // convert each arg to `field0: x`
-    let struct_fields = args.iter().enumerate().map(|(index, arg)| {
-        let pat = arg.pat_ty.pat.as_ref();
-        let field_name = field_name_for_arg(arg, index);
+  // convert each arg to `field0: x`
+  let struct_fields = args.iter().enumerate().map(|(index, arg)| {
+    let pat = arg.pat_ty.pat.as_ref();
+    let field_name = field_name_for_arg(arg, index);
 
-        // If the pattern is an ident, we know that the field name is equal to the pattern name.
-        // This means we need to avoid generating: `x: x`, which would trigger a lint suggesting
-        // shorthand struct initialization.
+    // If the pattern is an ident, we know that the field name is equal to the pattern name.
+    // This means we need to avoid generating: `x: x`, which would trigger a lint suggesting
+    // shorthand struct initialization.
 
-        // We need to make sure to handle any mutability modifiers here, i.e. if the user wrote
-        // `mut x: i32`, we have to generate `mut x`, not `x: mut x`
-        //
-        // See https://github.com/proptest-rs/proptest/issues/601
-        if let Pat::Ident(ref i) = *pat {
-            i.mutability.map_or_else(
-                || quote!(#field_name,),
-                |mutability| quote!(#mutability #field_name,),
-            )
-        } else {
-            quote!(#field_name: #pat,)
-        }
-    });
+    // We need to make sure to handle any mutability modifiers here, i.e. if the user wrote
+    // `mut x: i32`, we have to generate `mut x`, not `x: mut x`
+    //
+    // See https://github.com/proptest-rs/proptest/issues/601
+    if let Pat::Ident(ref i) = *pat {
+      i.mutability
+        .map_or_else(|| quote!(#field_name,), |mutability| quote!(#mutability #field_name,))
+    } else {
+      quote!(#field_name: #pat,)
+    }
+  });
 
-    // e.g. FooArgs { field0: x, field1: (y, z), }
-    let struct_pattern = quote! {
-        #struct_name { #(#struct_fields)* }
-    };
+  // e.g. FooArgs { field0: x, field1: (y, z), }
+  let struct_pattern = quote! {
+      #struct_name { #(#struct_fields)* }
+  };
 
-    let proptest = options.true_proptest_path();
+  let proptest = options.true_proptest_path();
 
-    let context = quote! {
-        concat!(module_path!(), "::", stringify!(#fn_name))
-    };
+  let context = quote! {
+      concat!(module_path!(), "::", stringify!(#fn_name))
+  };
 
-    let property = quote! {
-        |#proptest::sugar::NamedArguments(_, #struct_pattern)| #block
-    };
+  let property = quote! {
+      |#proptest::sugar::NamedArguments(_, #struct_pattern)| #block
+  };
 
-    // With an explicit `config = <expr>`, `test_name`/`source_file` are still
-    // forced over the caller's expression so failure reports keep naming the
-    // annotated test (matching the pre-strict runner glue); the config is then
-    // used verbatim by the strict runner. Without one, the strict defaults
-    // apply (deterministic `STRICT_TEST_SEED` seeding, persistence disabled).
-    let default_ensure_property_tokens = || {
-        quote! {
-            #proptest::strict::ensure_property(&strategy, #context, #property)
-        }
-    };
-    let configured_ensure_property_tokens = |config| {
-        quote! {
-            #proptest::strict::ensure_property_with_config(
-                &strategy,
-                #context,
-                #proptest::test_runner::Config {
-                    test_name: Some(concat!(module_path!(), "::", stringify!(#fn_name))),
-                    source_file: Some(file!()),
-                    ..#config
-                },
-                #property,
-            )
-        }
-    };
-    let run = options.config.as_ref().map_or_else(
-        default_ensure_property_tokens,
-        configured_ensure_property_tokens,
-    );
+  // With an explicit `config = <expr>`, `test_name`/`source_file` are still
+  // forced over the caller's expression so failure reports keep naming the
+  // annotated test (matching the pre-strict runner glue); the config is then
+  // used verbatim by the strict runner. Without one, the strict defaults
+  // apply (deterministic `STRICT_TEST_SEED` seeding, persistence disabled).
+  let default_ensure_property_tokens = || {
+    quote! {
+        #proptest::strict::ensure_property(&strategy, #context, #property)
+    }
+  };
+  let configured_ensure_property_tokens = |config| {
+    quote! {
+        #proptest::strict::ensure_property_with_config(
+            &strategy,
+            #context,
+            #proptest::test_runner::Config {
+                test_name: Some(concat!(module_path!(), "::", stringify!(#fn_name))),
+                source_file: Some(file!()),
+                ..#config
+            },
+            #property,
+        )
+    }
+  };
+  let run = options
+    .config
+    .as_ref()
+    .map_or_else(default_ensure_property_tokens, configured_ensure_property_tokens);
 
-    let tokens = quote!( {
+  let tokens = quote!( {
 
         #struct_and_impl
 
@@ -103,14 +100,14 @@ pub(super) fn body(
         #run
     } );
 
-    // Every accumulated diagnostic is emitted as a full `compile_error!(...);`
-    // statement, so this block always parses; the fallback exists so any
-    // future emission bug surfaces as a compile error at the use site rather
-    // than a proc-macro panic.
-    parse2(tokens).unwrap_or_else(|error| {
-        let message = error.to_string();
-        parse_quote!({
-            ::core::compile_error!(#message);
-        })
+  // Every accumulated diagnostic is emitted as a full `compile_error!(...);`
+  // statement, so this block always parses; the fallback exists so any
+  // future emission bug surfaces as a compile error at the use site rather
+  // than a proc-macro panic.
+  parse2(tokens).unwrap_or_else(|error| {
+    let message = error.to_string();
+    parse_quote!({
+      ::core::compile_error!(#message);
     })
+  })
 }

@@ -1,21 +1,18 @@
-use super::*;
 use quote::quote_spanned;
+
+use super::*;
 
 /// Generate the arbitrary impl for the struct
 #[allow(
-    clippy::single_call_fn,
-    reason = "select between the unboxed and boxed Arbitrary impl based on strategy overrides"
+  clippy::single_call_fn,
+  reason = "select between the unboxed and boxed Arbitrary impl based on strategy overrides"
 )]
-pub(super) fn gen_arbitrary_impl(
-    fn_name: &Ident,
-    args: &[Argument],
-    options: &Options,
-) -> TokenStream {
-    if args.iter().all(|arg| arg.strategy.is_none()) {
-        no_custom_strategies(fn_name, args, options)
-    } else {
-        custom_strategies(fn_name, args, options)
-    }
+pub(super) fn gen_arbitrary_impl(fn_name: &Ident, args: &[Argument], options: &Options) -> TokenStream {
+  if args.iter().all(|arg| arg.strategy.is_none()) {
+    no_custom_strategies(fn_name, args, options)
+  } else {
+    custom_strategies(fn_name, args, options)
+  }
 }
 
 /// Generate the unboxed `Arbitrary` impl when no argument overrides its
@@ -33,39 +30,35 @@ pub(super) fn gen_arbitrary_impl(
 // expression for the strategy (e.g. `#[strategy = my_custom_strategy()]` doesn't tell us the
 // return type of `my_custom_strategy`). In these cases, we just use `BoxedStrategy<Self>`
 #[allow(
-    clippy::single_call_fn,
-    reason = "emit the unboxed Arbitrary impl when every argument uses its default strategy"
+  clippy::single_call_fn,
+  reason = "emit the unboxed Arbitrary impl when every argument uses its default strategy"
 )]
-fn no_custom_strategies(
-    fn_name: &Ident,
-    args: &[Argument],
-    options: &Options,
-) -> TokenStream {
-    let proptest = options.true_proptest_path();
-    let arg_type_fields = args.iter().map(|arg| {
-        let ty = &arg.pat_ty.ty;
-        quote!(#ty,)
-    });
+fn no_custom_strategies(fn_name: &Ident, args: &[Argument], options: &Options) -> TokenStream {
+  let proptest = options.true_proptest_path();
+  let arg_type_fields = args.iter().map(|arg| {
+    let ty = &arg.pat_ty.ty;
+    quote!(#ty,)
+  });
 
-    let arg_types = quote! { #(#arg_type_fields)* };
+  let arg_types = quote! { #(#arg_type_fields)* };
 
-    let arg_name_fields = args.iter().enumerate().map(|(index, arg)| {
-        let name = field_name_for_arg(arg, index);
-        quote!(#name,)
-    });
+  let arg_name_fields = args.iter().enumerate().map(|(index, arg)| {
+    let name = field_name_for_arg(arg, index);
+    quote!(#name,)
+  });
 
-    let arg_names = quote! { #(#arg_name_fields)* };
+  let arg_names = quote! { #(#arg_name_fields)* };
 
-    let strategy_type = quote! {
-        #proptest::strategy::Map<#proptest::arbitrary::StrategyFor<(#arg_types)>, fn((#arg_types)) -> Self>
-    };
+  let strategy_type = quote! {
+      #proptest::strategy::Map<#proptest::arbitrary::StrategyFor<(#arg_types)>, fn((#arg_types)) -> Self>
+  };
 
-    let strategy_expr = quote! {
-        use #proptest::strategy::Strategy;
-        #proptest::prelude::any::<(#arg_types)>().prop_map(|(#arg_names)| Self { #arg_names })
-    };
+  let strategy_expr = quote! {
+      use #proptest::strategy::Strategy;
+      #proptest::prelude::any::<(#arg_types)>().prop_map(|(#arg_names)| Self { #arg_names })
+  };
 
-    arbitrary_shared(fn_name, &strategy_type, &strategy_expr, options)
+  arbitrary_shared(fn_name, &strategy_type, &strategy_expr, options)
 }
 
 /// Generate the boxed `Arbitrary` impl when at least one argument carries a
@@ -87,68 +80,59 @@ fn no_custom_strategies(
 // }
 // ```
 #[allow(
-    clippy::single_call_fn,
-    reason = "emit the boxed Arbitrary impl when an argument overrides its default strategy"
+  clippy::single_call_fn,
+  reason = "emit the boxed Arbitrary impl when an argument overrides its default strategy"
 )]
-fn custom_strategies(
-    fn_name: &Ident,
-    args: &[Argument],
-    options: &Options,
-) -> TokenStream {
-    let proptest = options.true_proptest_path();
-    let arg_strategies: TokenStream = args
-        .iter()
-        .map(|arg| {
-            arg.strategy.as_ref().map_or_else(
-                || {
-                    let ty = &arg.pat_ty.ty;
-                    quote_spanned! {
-                        ty.span() => #proptest::prelude::any::<#ty>(),
-                    }
-                },
-                |expr| quote! {#expr,},
-            )
-        })
-        .collect();
+fn custom_strategies(fn_name: &Ident, args: &[Argument], options: &Options) -> TokenStream {
+  let proptest = options.true_proptest_path();
+  let arg_strategies: TokenStream = args
+    .iter()
+    .map(|arg| {
+      arg.strategy.as_ref().map_or_else(
+        || {
+          let ty = &arg.pat_ty.ty;
+          quote_spanned! {
+              ty.span() => #proptest::prelude::any::<#ty>(),
+          }
+        },
+        |expr| quote! {#expr,},
+      )
+    })
+    .collect();
 
-    let arg_names: TokenStream = args
-        .iter()
-        .enumerate()
-        .map(|(index, arg)| {
-            let name = field_name_for_arg(arg, index);
-            quote!(#name,)
-        })
-        .collect();
+  let arg_names: TokenStream = args
+    .iter()
+    .enumerate()
+    .map(|(index, arg)| {
+      let name = field_name_for_arg(arg, index);
+      quote!(#name,)
+    })
+    .collect();
 
-    let strategy_expr = quote! {
-        use #proptest::strategy::Strategy;
-        (#arg_strategies).prop_map(|(#arg_names)| Self { #arg_names }).boxed()
-    };
+  let strategy_expr = quote! {
+      use #proptest::strategy::Strategy;
+      (#arg_strategies).prop_map(|(#arg_names)| Self { #arg_names }).boxed()
+  };
 
-    let strategy_type = quote! {
-        #proptest::strategy::BoxedStrategy<Self>
-    };
-    arbitrary_shared(fn_name, &strategy_type, &strategy_expr, options)
+  let strategy_type = quote! {
+      #proptest::strategy::BoxedStrategy<Self>
+  };
+  arbitrary_shared(fn_name, &strategy_type, &strategy_expr, options)
 }
 
 /// shared code between both boxed and unboxed paths
-fn arbitrary_shared(
-    fn_name: &Ident,
-    strategy_type: &TokenStream,
-    strategy_expr: &TokenStream,
-    options: &Options,
-) -> TokenStream {
-    let proptest = options.true_proptest_path();
-    let struct_name = struct_name(fn_name);
+fn arbitrary_shared(fn_name: &Ident, strategy_type: &TokenStream, strategy_expr: &TokenStream, options: &Options) -> TokenStream {
+  let proptest = options.true_proptest_path();
+  let struct_name = struct_name(fn_name);
 
-    quote! {
-        impl #proptest::prelude::Arbitrary for #struct_name {
-            type Parameters = ();
-            type Strategy = #strategy_type;
+  quote! {
+      impl #proptest::prelude::Arbitrary for #struct_name {
+          type Parameters = ();
+          type Strategy = #strategy_type;
 
-            fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
-                #strategy_expr
-            }
-        }
-    }
+          fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+              #strategy_expr
+          }
+      }
+  }
 }

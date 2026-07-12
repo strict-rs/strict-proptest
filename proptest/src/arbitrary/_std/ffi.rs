@@ -9,19 +9,32 @@
 
 //! Arbitrary implementations for `std::ffi`.
 
-use crate::std_facade::{Box, String, Vec};
 use core::iter::repeat_n;
-use std::ffi::{
-    CStr, CString, FromBytesWithNulError, IntoStringError, OsStr, OsString,
-};
+use std::ffi::CStr;
+use std::ffi::CString;
+use std::ffi::FromBytesWithNulError;
+use std::ffi::IntoStringError;
+use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::ops::RangeInclusive;
 
-use crate::arbitrary::{Arbitrary, SMapped, StrategyFor, any, any_with};
-use crate::collection::{SizeRange, VecStrategy, vec};
-use crate::strategy::statics::static_map;
-use crate::strategy::{BoxedStrategy, FilterMap, MapInto, Strategy as _};
-
 use super::string::not_utf8_bytes;
+use crate::arbitrary::Arbitrary;
+use crate::arbitrary::SMapped;
+use crate::arbitrary::StrategyFor;
+use crate::arbitrary::any;
+use crate::arbitrary::any_with;
+use crate::collection::SizeRange;
+use crate::collection::VecStrategy;
+use crate::collection::vec;
+use crate::std_facade::Box;
+use crate::std_facade::String;
+use crate::std_facade::Vec;
+use crate::strategy::BoxedStrategy;
+use crate::strategy::FilterMap;
+use crate::strategy::MapInto;
+use crate::strategy::Strategy as _;
+use crate::strategy::statics::static_map;
 
 std_arbitrary_with_params!(CString,
     FilterMap<VecStrategy<RangeInclusive<u8>>, fn(Vec<u8>) -> Option<Self>>,
@@ -109,68 +122,59 @@ arbitrary!(
 
 #[cfg(test)]
 mod test {
-    use strict_test_support::{TestFailure, ensure, ensure_some};
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_some;
 
-    use super::*;
-    use crate::arbitrary::any_with;
-    use crate::collection::size_range;
-    use crate::strategy::ValueTree as _;
-    use crate::test_runner::TestRunner;
+  use super::*;
+  use crate::arbitrary::any_with;
+  use crate::collection::size_range;
+  use crate::strategy::ValueTree as _;
+  use crate::test_runner::TestRunner;
 
-    no_panic_test!(
-        c_string => CString,
-        os_string => OsString,
-        box_c_str => Box<CStr>,
-        box_os_str => Box<OsStr>,
-        into_string_error => IntoStringError,
-        from_bytes_with_nul => FromBytesWithNulError
-    );
-    #[cfg(feature = "unstable")]
-    no_panic_test!(
-        rc_c_str => Rc<CStr>,
-        rc_os_str => Rc<OsStr>,
-        arc_c_str => Arc<CStr>,
-        arc_os_str => Arc<OsStr>
-    );
+  no_panic_test!(
+      c_string => CString,
+      os_string => OsString,
+      box_c_str => Box<CStr>,
+      box_os_str => Box<OsStr>,
+      into_string_error => IntoStringError,
+      from_bytes_with_nul => FromBytesWithNulError
+  );
+  #[cfg(feature = "unstable")]
+  no_panic_test!(
+      rc_c_str => Rc<CStr>,
+      rc_os_str => Rc<OsStr>,
+      arc_c_str => Arc<CStr>,
+      arc_os_str => Arc<OsStr>
+  );
 
-    fn ensure_c_string_contract(
-        bounds: SizeRange,
-        expected: impl Fn(usize) -> bool,
-        context: &'static str,
-    ) -> Result<(), TestFailure> {
-        let mut runner = TestRunner::deterministic();
-        let strategy = any_with::<CString>(bounds);
-        for _ in 0..64 {
-            let value = ensure_some(
-                strategy.new_tree(&mut runner).ok(),
-                "CString strategy generates a value tree",
-            )?
-            .current();
-            let bytes = value.as_bytes();
-            ensure(expected(bytes.len()), context)?;
-            ensure(
-                !bytes.contains(&0),
-                "generated CString bytes contain no interior NUL",
-            )?;
-        }
-        Ok(())
+  fn ensure_c_string_contract(bounds: SizeRange, expected: impl Fn(usize) -> bool, context: &'static str) -> Result<(), TestFailure> {
+    let mut runner = TestRunner::deterministic();
+    let strategy = any_with::<CString>(bounds);
+    for _ in 0..64 {
+      let value = ensure_some(strategy.new_tree(&mut runner).ok(), "CString strategy generates a value tree")?.current();
+      let bytes = value.as_bytes();
+      ensure(expected(bytes.len()), context)?;
+      ensure(!bytes.contains(&0), "generated CString bytes contain no interior NUL")?;
     }
+    Ok(())
+  }
 
-    #[test]
-    fn c_string_respects_zero_length_range() -> Result<(), TestFailure> {
-        ensure_c_string_contract(
-            size_range(0..=0),
-            |len| len == 0,
-            "zero-length CString range generates empty byte strings",
-        )
-    }
+  #[test]
+  fn c_string_respects_zero_length_range() -> Result<(), TestFailure> {
+    ensure_c_string_contract(
+      size_range(0..=0),
+      |len| len == 0,
+      "zero-length CString range generates empty byte strings",
+    )
+  }
 
-    #[test]
-    fn c_string_respects_bounded_length_range() -> Result<(), TestFailure> {
-        ensure_c_string_contract(
-            size_range(3..=5),
-            |len| (3..=5).contains(&len),
-            "bounded CString range generates lengths inside the range",
-        )
-    }
+  #[test]
+  fn c_string_respects_bounded_length_range() -> Result<(), TestFailure> {
+    ensure_c_string_contract(
+      size_range(3..=5),
+      |len| (3..=5).contains(&len),
+      "bounded CString range generates lengths inside the range",
+    )
+  }
 }

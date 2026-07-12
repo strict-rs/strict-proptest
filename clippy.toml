@@ -1,10 +1,9 @@
-# Clippy thresholds and disallowed-lists for the strict lint policy. Lint
-# *levels* live in the `[workspace.lints]` table in the workspace
-# `Cargo.toml`, which member crates adopt via `lints.workspace = true`; this
-# file only configures the lints themselves.
+# Clippy thresholds and disallowed-lists. Lint levels themselves live in
+# `[workspace.lints.clippy]` in Cargo.toml. For the full reference of every
+# configurable key, see `template-clippy.toml`.
 #
-# No `msrv` key: clippy reads the pinned `rust-version` (the MSRV) from the
-# workspace `Cargo.toml` automatically.
+# No `msrv` pin: this template tracks rolling stable. Clippy defaults to the
+# active toolchain's feature set, which is what we want.
 
 # ── Quality-of-life gates ───────────────────────────────────────────────────
 avoid-breaking-exported-api      = false
@@ -18,7 +17,7 @@ allow-useless-vec-in-tests       = false
 
 # ── Complexity / size thresholds ────────────────────────────────────────────
 cognitive-complexity-threshold   = 20
-excessive-nesting-threshold      = 4
+excessive-nesting-threshold      = 4       # mirrors tsconfig max-depth
 too-many-arguments-threshold     = 7
 too-many-lines-threshold         = 90
 type-complexity-threshold        = 160
@@ -41,18 +40,32 @@ max-trait-bounds                 = 3
 vec-box-size-threshold           = 4096
 unnecessary-box-size             = 128
 
-# ── Name allow-list ─────────────────────────────────────────────────────────
+# ── Name allow-list (matches tsconfig ALLOWED_SHORT_NAMES philosophy) ──────
 allowed-idents-below-min-chars = [
     "x", "y", "z", "i", "j", "n", "f",
 ]
 
 # ── Doc identifier allow-list (extends, does NOT replace, clippy defaults) ──
-# `clippy::doc_markdown` flags un-backticked identifiers in docs. The `..`
-# token splices in clippy's built-in list (GitHub, OAuth, …); project-specific
-# idents are prepended before `..`.
-doc-valid-idents = ["QuickCheck", ".."]
+# `clippy::doc_markdown` (active via the `pedantic` deny floor) flags
+# un-backticked identifiers in docs. The `..` token splices in clippy's built-in
+# list (GitHub, OAuth, WebGL, …); to allow a project-specific ident, prepend it
+# before `..`, e.g. `["MyProduct", ".."]`. As written this only restates the
+# defaults — an explicit, documented extension point rather than a behaviour change.
+doc-valid-idents = [".."]
 
-# ── Blocked placeholder names ───────────────────────────────────────────────
+# ── Async suspension hazards ────────────────────────────────────────────────
+# Extend `await_holding_invalid_type` to the sync guard types we most want to
+# drop before `.await`.
+await-holding-invalid-types = [
+    "parking_lot::MutexGuard",
+    "parking_lot::MappedMutexGuard",
+    "parking_lot::RwLockReadGuard",
+    "parking_lot::MappedRwLockReadGuard",
+    "parking_lot::RwLockWriteGuard",
+    "parking_lot::MappedRwLockWriteGuard",
+]
+
+# ── Blocked placeholder names (bad variable names that AI agents love) ─────
 disallowed-names = [
     "foo", "bar", "baz", "tmp", "temp",
     "data", "val", "thing", "stuff", "date",
@@ -60,34 +73,28 @@ disallowed-names = [
     "info", "value", "item", "price", "amount",
 ]
 
-# ── Disallowed macros (debug artefacts, panicking assertions, legacy property
-#    harness front doors) ─────────────────────────────────────────────────────
-# Assertion macros panic. No test exemption: tests return
-# `Result<(), strict_test_support::TestFailure>` and use the `ensure*`
-# helpers (`ensure`, `ensure_eq`, `ensure_ne`, …).
-#
-# Property tests go through `proptest::strict::ensure_property`, the native
-# strict property runner: it returns `Result<(), TestFailure>` and still
-# shrinks failures, without panicking. The legacy macro front doors below
-# either panic or bypass the `TestFailure` vocabulary. The non-panicking
-# strategy constructors (`prop_oneof!`, `prop_compose!`) remain allowed. The
-# external `strict_test_support::ensure_property` wrapper is the deferred
-# legacy path, not the destination.
+# ── Disallowed macros (debug artefacts, stubs, ad-hoc error construction) ──
+# Ad-hoc error construction macros from `anyhow` are blocked workspace-wide;
+# boundary crates (bin, xtask) opt in via per-crate `[lints.clippy]` overrides.
 disallowed-macros = [
-    { path = "std::dbg",           reason = "debug artefact — remove before committing" },
-    { path = "core::todo",         reason = "incomplete code must not land" },
-    { path = "core::unimplemented", reason = "incomplete code must not land" },
-    { path = "std::print",         reason = "direct console output; route diagnostics through structured runner output or a logger" },
-    { path = "std::println",       reason = "direct console output; route diagnostics through structured runner output or a logger" },
-    { path = "std::eprint",        reason = "direct console output; route diagnostics through structured runner output or a logger" },
-    { path = "std::eprintln",      reason = "direct console output; route diagnostics through structured runner output or a logger" },
-    { path = "core::panic",        reason = "panics; model the failure as a typed error or TestFailure instead" },
-    { path = "core::assert",       reason = "panics; return Result and use strict_test_support::ensure" },
-    { path = "core::assert_eq",    reason = "panics; use strict_test_support::ensure_eq or ensure(a == b, ..)" },
-    { path = "core::assert_ne",    reason = "panics; use strict_test_support::ensure_ne or ensure(a != b, ..)" },
-    { path = "core::debug_assert", reason = "panics in debug, silently dropped in release; model the invariant instead" },
-    { path = "core::debug_assert_eq", reason = "panics in debug, silently dropped in release; use strict_test_support::ensure_eq" },
-    { path = "core::debug_assert_ne", reason = "panics in debug, silently dropped in release; use strict_test_support::ensure_ne" },
+    { path = "std::dbg",                                 reason = "debug artefact — remove before committing" },
+    { path = "std::todo",                                reason = "incomplete code must not land" },
+    { path = "std::unimplemented",                       reason = "incomplete code must not land" },
+    { path = "std::print",                               reason = "use tracing/log crate" },
+    { path = "std::println",                             reason = "use tracing/log crate" },
+    { path = "std::eprint",                              reason = "use tracing/log crate" },
+    { path = "std::eprintln",                            reason = "use tracing/log crate" },
+    { path = "anyhow::anyhow",                           reason = "typed errors only; anyhow is permitted only at bin/xtask boundary points" },
+    { path = "anyhow::bail",                             reason = "typed errors only; anyhow is permitted only at bin/xtask boundary points" },
+    { path = "anyhow::ensure",                           reason = "typed errors only; anyhow is permitted only at bin/xtask boundary points" },
+    # Assertion macros panic. No test exemption: tests return
+    # `Result<(), strict_test_support::TestFailure>` and use the `ensure*` helpers.
+    { path = "std::assert",                              reason = "panics; return Result + strict_test_support::ensure / ensure_eq" },
+    { path = "std::assert_eq",                           reason = "panics; use strict_test_support::ensure_eq or ensure(a == b, ..)" },
+    { path = "std::assert_ne",                           reason = "panics; use strict_test_support::ensure_ne or ensure(a != b, ..)" },
+    { path = "std::debug_assert",                        reason = "panics in debug, silently dropped in release; model the invariant instead" },
+    { path = "std::debug_assert_eq",                     reason = "panics in debug, silently dropped in release; use strict_test_support::ensure_eq" },
+    { path = "std::debug_assert_ne",                     reason = "panics in debug, silently dropped in release; use strict_test_support::ensure_ne" },
     # Legacy property harness front doors. The native strict property runner
     # is `proptest::strict::ensure_property`.
     { path = "proptest::prelude::proptest",       reason = "panicking property harness; use proptest::strict::ensure_property" },
@@ -95,23 +102,25 @@ disallowed-macros = [
     { path = "proptest::prelude::prop_assert_eq", reason = "bypasses the TestFailure vocabulary; use strict_test_support::ensure_eq inside a proptest::strict::ensure_property closure" },
     { path = "proptest::prelude::prop_assert_ne", reason = "bypasses the TestFailure vocabulary; use strict_test_support::ensure_ne inside a proptest::strict::ensure_property closure" },
     { path = "proptest::prelude::prop_assume",    reason = "rejection belongs in the strategy; use Strategy::prop_filter" },
+    # Snapshot tests go through `strict_test_support::ensure_snapshot`, which wraps
+    # snapbox's Result-based `Assert::try_eq`; the macro front door panics.
+    { path = "snapbox::assert_data_eq",                  reason = "panicking snapshot harness; use strict_test_support::ensure_snapshot" },
 ]
 
-# ── Disallowed methods (ad-hoc error construction + panicking std items) ────
+# ── Disallowed methods (ad-hoc error construction + easy-to-misuse std items) ─
 disallowed-methods = [
     { path = "std::mem::forget",        reason = "leaks resources; use drop or ManuallyDrop" },
     { path = "std::process::exit",      reason = "bypasses destructors; return from main instead" },
     { path = "std::process::abort",     reason = "bypasses destructors" },
     { path = "std::env::set_var",       reason = "racy in multi-threaded programs" },
     { path = "std::env::remove_var",    reason = "racy in multi-threaded programs" },
-    # NOTE: `std::io::Error::new` / `std::io::Error::other` are also banned
-    # policy-wise (ad-hoc error construction; define a typed error instead),
-    # but clippy cannot resolve those inherent-impl paths on current
-    # toolchains ("does not refer to a reachable function"), so the ban is
-    # enforced by source audit (`rg "std::io::Error::(new|other)"`) rather
-    # than by a disallowed-methods entry.
-    { path = "std::time::SystemTime::now", reason = "non-deterministic; inject the clock or derive time from the seeded RNG" },
-    # ── Panicking slice methods (indexing_slicing only catches `[]`) ──
+    { path = "std::io::Error::new",     reason = "ad-hoc error construction; define a typed error (e.g. via thiserror)" },
+    { path = "std::io::Error::other",   reason = "ad-hoc error construction; define a typed error (e.g. via thiserror)" },
+    { path = "std::time::SystemTime::now", reason = "non-deterministic; inject the clock or derive time from the seeded RNG, use chrono::Utc::now" },
+    { path = "f64::to_string",          reason = "financial precision" },
+    { path = "f32::to_string",          reason = "financial precision" },
+    { path = "anyhow::Error::msg",      reason = "typed errors only; anyhow is permitted only at bin/xtask boundary points" },
+    # ── Panicking slice methods (indexing_slicing only catches the `[]` operator) ──
     { path = "slice::split_at",         reason = "panics if mid > len; use split_at_checked" },
     { path = "slice::split_at_mut",     reason = "panics if mid > len; use split_at_mut_checked" },
     { path = "slice::chunks",           reason = "panics if chunk size == 0; validate the size first" },
@@ -150,15 +159,17 @@ disallowed-methods = [
     # ── Interior-mutability borrows that panic on a borrow conflict ──
     { path = "std::cell::RefCell::borrow",     reason = "panics on a borrow conflict; use try_borrow" },
     { path = "std::cell::RefCell::borrow_mut", reason = "panics on a borrow conflict; use try_borrow_mut" },
-    # NOTE: map / slice / array `[]` indexing and `str` range slicing are
-    # covered by `indexing_slicing` + `string_slice` lint levels in the
-    # workspace lints table — no disallowed-methods entry works for the `[]`
-    # operator (it does not catch the Index::index desugar).
+    # NOTE: map / slice / array `[]` indexing (incl. `map[key]`) and `str` range
+    # slicing are already hard errors via `indexing_slicing` + `string_slice`
+    # (deny) in Cargo.toml — no disallowed-methods entry is needed or works for
+    # the `[]` operator (it does not catch the Index::index desugar).
 ]
 
-# ── Disallowed types (poisoning-prone std locks) ────────────────────────────
+# ── Disallowed types (no type-erased or ad-hoc error wrappers in libraries) ─
 disallowed-types = [
-    { path = "std::sync::Mutex",   reason = "poisoning-prone lock; prefer parking_lot or redesign the shared state" },
-    { path = "std::sync::RwLock",  reason = "poisoning-prone lock; prefer parking_lot or redesign the shared state" },
-    { path = "std::sync::Condvar", reason = "poisoning-prone primitive; prefer parking_lot or redesign the signalling" },
+    { path = "anyhow::Error",      reason = "typed errors only; anyhow is permitted only at bin/xtask boundary points" },
+    { path = "anyhow::Result",     reason = "typed errors only; use Result<T, YourCrateError>" },
+    { path = "std::sync::Mutex",   reason = "prefer parking_lot in sync code; use async-aware primitives or redesign shared state in async code" },
+    { path = "std::sync::RwLock",  reason = "prefer parking_lot in sync code; use async-aware primitives or redesign shared state in async code" },
+    { path = "std::sync::Condvar", reason = "prefer parking_lot in sync code; use async-aware signalling in async code" },
 ]

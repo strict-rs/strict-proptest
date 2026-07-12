@@ -8,24 +8,27 @@
 // except according to those terms.
 
 use crate::arbitrary::Arbitrary;
-use crate::sample::{Index, IndexStrategy, Selector, SelectorStrategy};
+use crate::sample::Index;
+use crate::sample::IndexStrategy;
+use crate::sample::Selector;
+use crate::sample::SelectorStrategy;
 
 impl Arbitrary for Index {
-    type Parameters = ();
+  type Parameters = ();
 
-    type Strategy = IndexStrategy;
+  type Strategy = IndexStrategy;
 
-    fn arbitrary_with((): ()) -> IndexStrategy {
-        IndexStrategy::new()
-    }
+  fn arbitrary_with((): ()) -> IndexStrategy {
+    IndexStrategy::new()
+  }
 }
 
 impl Arbitrary for Selector {
-    type Parameters = ();
+  type Parameters = ();
 
-    type Strategy = SelectorStrategy;
+  type Strategy = SelectorStrategy;
 
-    fn arbitrary_with((): ()) -> SelectorStrategy {
-        SelectorStrategy::new()
-    }
+  fn arbitrary_with((): ()) -> SelectorStrategy {
+    SelectorStrategy::new()
+  }
 }
