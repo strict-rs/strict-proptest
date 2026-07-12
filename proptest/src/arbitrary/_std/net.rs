@@ -13,13 +13,15 @@ use std::net::AddrParseError;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
-#[cfg(feature = "unstable")]
+#[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
 use std::net::Ipv6MulticastScope;
 use std::net::Shutdown;
 use std::net::SocketAddr;
 use std::net::SocketAddrV4;
 use std::net::SocketAddrV6;
 
+#[cfg(feature = "alt-stable")]
+use crate::alt_stable::Ipv6MulticastScope as StableIpv6MulticastScope;
 use crate::arbitrary::SMapped;
 use crate::arbitrary::StrategyFor;
 use crate::arbitrary::any;
@@ -99,13 +101,35 @@ arbitrary!(SocketAddr,
     ]
 );
 
-#[cfg(feature = "unstable")]
+#[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
 arbitrary!(Ipv6MulticastScope,
     TupleUnion<(WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>,
                 WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>,
                 WeightedStrategy<Just<Self>>)>;
     {
         use std::net::Ipv6MulticastScope::{
+            AdminLocal, Global, InterfaceLocal, LinkLocal, OrganizationLocal,
+            RealmLocal, SiteLocal,
+        };
+        prop_oneof![
+            Just(InterfaceLocal),
+            Just(LinkLocal),
+            Just(RealmLocal),
+            Just(AdminLocal),
+            Just(SiteLocal),
+            Just(OrganizationLocal),
+            Just(Global),
+        ]
+    }
+);
+
+#[cfg(feature = "alt-stable")]
+arbitrary!(StableIpv6MulticastScope,
+    TupleUnion<(WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>,
+                WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>,
+                WeightedStrategy<Just<Self>>)>;
+    {
+        use crate::alt_stable::Ipv6MulticastScope::{
             AdminLocal, Global, InterfaceLocal, LinkLocal, OrganizationLocal,
             RealmLocal, SiteLocal,
         };
@@ -136,8 +160,13 @@ mod test {
       socket_addr => SocketAddr
   );
 
-  #[cfg(feature = "unstable")]
+  #[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
   no_panic_test!(
       ipv6_multicast_scope => Ipv6MulticastScope
+  );
+
+  #[cfg(feature = "alt-stable")]
+  no_panic_test!(
+      stable_ipv6_multicast_scope => StableIpv6MulticastScope
   );
 }

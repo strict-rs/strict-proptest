@@ -346,9 +346,13 @@ impl ValueTree for CharValueTree {
 #[cfg(test)]
 mod test {
   use core::slice;
+  #[cfg(feature = "strict-test")]
   use std::char::from_u32 as std_from_u32;
+  #[cfg(feature = "strict-test")]
   use std::cmp::max;
+  #[cfg(feature = "strict-test")]
   use std::cmp::min;
+  #[cfg(feature = "strict-test")]
   use std::vec::Vec;
 
   use strict_test_support::TestFailure;
@@ -356,11 +360,15 @@ mod test {
   use strict_test_support::ensure_some;
 
   use super::*;
+  #[cfg(feature = "strict-test")]
   use crate::collection;
+  #[cfg(feature = "strict-test")]
   use crate::strict::ensure_property;
   use crate::test_runner::Reason;
+  #[cfg(feature = "strict-test")]
   use crate::test_runner::test_runner_without_persistence;
 
+  #[cfg(feature = "strict-test")]
   fn ensure_current_char_in_input_ranges<V>(value: &V, input_ranges: &[(u32, u32)]) -> Result<(), TestFailure>
   where
     V: ValueTree<Value = char>,
@@ -372,6 +380,7 @@ mod test {
     )
   }
 
+  #[cfg(feature = "strict-test")]
   #[allow(
     clippy::single_call_fn,
     reason = "the range property names the generated-char shrink walk separately from strategy construction"
@@ -390,6 +399,7 @@ mod test {
     Ok(())
   }
 
+  #[cfg(feature = "strict-test")]
   #[test]
   fn stays_in_range() -> Result<(), TestFailure> {
     // The non-char pairs are filtered out in the strategy (the legacy

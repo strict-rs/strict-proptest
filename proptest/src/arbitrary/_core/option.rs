@@ -9,6 +9,8 @@
 
 //! Arbitrary implementations for `std::option`.
 
+#[cfg(feature = "alt-stable")]
+use core::convert::Infallible;
 use core::ops::RangeInclusive;
 use core::option as opt;
 
@@ -18,6 +20,7 @@ use crate::arbitrary::any_with;
 use crate::option::OptionStrategy;
 use crate::option::Probability;
 use crate::option::weighted;
+#[cfg(not(feature = "alt-stable"))]
 use crate::std_facade::string;
 use crate::strategy::MapInto;
 use crate::strategy::Strategy as _;
@@ -28,9 +31,11 @@ arbitrary!(Probability, MapInto<RangeInclusive<f64>, Self>;
 );
 
 // These are Option<AnUninhabitedType> impls:
-
-arbitrary!(Option<string::ParseError>; None);
-#[cfg(feature = "unstable")]
+#[cfg(not(feature = "alt-stable"))]
+arbitrary!(Option<string::ParseError>; None::<string::ParseError>);
+#[cfg(feature = "alt-stable")]
+arbitrary!(Option<Infallible>; None::<Infallible>);
+#[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
 arbitrary!(Option<!>; None);
 
 arbitrary!([A: Arbitrary] Option<A>, OptionStrategy<A::Strategy>,
@@ -54,6 +59,7 @@ lift1!(['static] opt::IntoIter<A>, Probability;
 #[cfg(test)]
 mod test {
   use super::*;
+  use crate::std_facade::string;
 
   no_panic_test!(
       probability => Probability,
@@ -61,4 +67,21 @@ mod test {
       option_iter => opt::IntoIter<u8>,
       option_parse_error => Option<string::ParseError>
   );
+
+  #[cfg(feature = "alt-stable")]
+  #[test]
+  fn option_infallible_always_generates_none() -> Result<(), strict_test_support::TestFailure> {
+    use crate::arbitrary::any;
+    use crate::strategy::Strategy as _;
+    use crate::strategy::ValueTree as _;
+    use crate::test_runner::TestRunner;
+
+    let mut runner = TestRunner::deterministic();
+    let mut tree = strict_test_support::ensure_some(
+      any::<Option<Infallible>>().new_tree(&mut runner).ok(),
+      "Option<Infallible> generates a value tree",
+    )?;
+    strict_test_support::ensure(tree.current().is_none(), "Option<Infallible> always generates None")?;
+    strict_test_support::ensure(!tree.simplify(), "a None-only option strategy has no simpler value")
+  }
 }

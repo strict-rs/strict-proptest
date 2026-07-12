@@ -10,9 +10,11 @@
 use core::error::Error;
 use core::mem;
 
+#[cfg(all(not(feature = "std"), not(test)))]
+use num_traits::MulAdd as _;
 use num_traits::ToPrimitive as _;
-#[cfg(not(feature = "std"))]
-use num_traits::float::FloatCore;
+#[cfg(all(not(feature = "std"), not(test)))]
+use num_traits::float::FloatCore as _;
 
 use crate::num::sample_uniform;
 use crate::std_facade::Arc;
@@ -120,6 +122,10 @@ impl<T: Strategy> Union<T> {
   /// If `options` is empty, the resulting strategy reports a generation
   /// error from [`Strategy::new_tree`]. [`Union::try_new_uniform`] is the
   /// eager validation form.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "public uniform-union constructor names the infallible API next to the checked constructor"
+  )]
   pub fn new(options: impl IntoIterator<Item = T>) -> Self {
     Self {
       options: options.into_iter().map(|strategy| (1, Arc::new(strategy))).collect(),
@@ -813,7 +819,9 @@ mod test {
   use crate::strategy::CheckStrategySanityOptions;
   use crate::strategy::check_strategy_sanity;
   use crate::strategy::just::Just;
+  #[cfg(feature = "std")]
   use crate::test_runner::TestCaseError;
+  #[cfg(feature = "std")]
   use crate::test_runner::TestError;
 
   // FIXME(2018-06-01): figure out a way to run this test on no_std.

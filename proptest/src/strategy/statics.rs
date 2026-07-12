@@ -230,6 +230,7 @@ mod test {
   use strict_test_support::ensure_some;
 
   use super::*;
+  #[cfg(feature = "strict-test")]
   use crate::strict::ensure_property;
   use crate::test_runner::test_runner_without_persistence;
 
@@ -259,6 +260,7 @@ mod test {
     Ok(())
   }
 
+  #[cfg(feature = "strict-test")]
   #[test]
   fn test_static_map() -> Result<(), TestFailure> {
     #[derive(Clone, Copy, Debug)]

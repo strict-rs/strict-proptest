@@ -84,6 +84,10 @@ impl TestCaseError {
   ///
   /// The string gives the location and context of the rejection, and
   /// should be suitable for formatting like `Foo did X at {whence}`.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "public constructor names the reject arm of the test-case error vocabulary"
+  )]
   pub fn reject(reason: impl Into<Reason>) -> Self {
     Self::Reject(reason.into())
   }

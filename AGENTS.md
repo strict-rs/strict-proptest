@@ -18,7 +18,34 @@ This is a Cargo workspace (`resolver = "3"`, edition 2024) of five crates:
 
 Toolchain: the workspace `Cargo.toml` pins `edition = "2024"` / `rust-version = "1.96"` (the MSRV), inherited by every member crate via `.workspace = true`; the `README.md` MSRV note and the `pinned` CI job (`.github/workflows/rust.yml`) are kept in sync with it. Formatting is enforced by `rustfmt` with `max_width = 80` (`rustfmt.toml`); edition-2024 formatting requires the nightly formatter, so run `cargo +nightly fmt --all`.
 
-Lint policy: the workspace `Cargo.toml` carries a `[workspace.lints]` table (rust, rustdoc, and clippy levels) that every member crate adopts via `lints.workspace = true`; `clippy.toml` holds the thresholds and the disallowed macro/method/type lists with their reason strings (panicking assertions and the legacy property-macro front doors are banned in favor of the `strict_test_support` `ensure*` helpers and `proptest::strict::ensure_property`; preconditions belong in `Strategy::prop_filter`). Every deny-level entry holds across `cargo +nightly clippy --workspace --all-targets --all-features`; warn-level entries are the visible residual ledger. Fix code rather than weakening the table, the thresholds, or adding `#[allow]`/`#[expect]`.
+Lint policy: the workspace `Cargo.toml` carries a `[workspace.lints]` table (rust, rustdoc, and clippy levels) that every member crate adopts via `lints.workspace = true`; `clippy.toml` holds the thresholds and the disallowed macro/method/type lists with their reason strings (panicking assertions and the legacy property-macro front doors are banned in favor of the `strict_test_support` `ensure*` helpers and `proptest::strict::ensure_property`; preconditions belong in `Strategy::prop_filter`). Every deny-level entry holds across the full clippy matrix below; warn-level entries are the visible residual ledger. Fix code rather than weakening the table, the thresholds, or adding `#[allow]`/`#[expect]`.
+
+Full verification matrix:
+
+```sh
+cargo +nightly fmt --all
+cargo check --workspace --all-targets --all-features
+cargo check --workspace --all-targets --no-default-features
+cargo check -p proptest --no-default-features --features "alloc libm alt-stable"
+cargo clippy --workspace --all-targets --all-features
+cargo clippy --workspace --all-targets --no-default-features
+cargo clippy -p proptest --no-default-features --features "alloc libm alt-stable"
+cargo test --workspace --all-targets --all-features
+cargo test --workspace --all-targets --no-default-features
+cargo test -p proptest --no-default-features --features "alloc libm alt-stable"
+cargo +nightly check --workspace --all-targets --all-features
+cargo +nightly check --workspace --all-targets --no-default-features
+cargo +nightly check --workspace --all-targets --features proptest/unstable
+cargo +nightly check -p proptest --no-default-features --features "alloc libm unstable"
+cargo +nightly clippy --workspace --all-targets --all-features
+cargo +nightly clippy --workspace --all-targets --no-default-features
+cargo +nightly clippy --workspace --all-targets --features proptest/unstable
+cargo +nightly clippy -p proptest --no-default-features --features "alloc libm unstable"
+cargo +nightly test --workspace --all-targets --all-features
+cargo +nightly test --workspace --all-targets --no-default-features
+cargo +nightly test --workspace --all-targets --features proptest/unstable
+cargo +nightly test -p proptest --no-default-features --features "alloc libm unstable"
+```
 
 Core crate:
 
@@ -40,7 +67,12 @@ proptest-macro (snapshot tests via `insta`; review changed snapshots with `cargo
 cargo test -p proptest-macro
 ```
 
-proptest-derive — **requires nightly**, and is sensitive to stale build artifacts: if you get errors that make no sense, `cargo clean` and retry (it uses `compiletest_rs` with UI cases under `tests/compile-fail/` and `tests/*.rs`). The expansion unit tests live in `proptest-derive-internal`; run both crates, both feature configs:
+proptest-derive full UI coverage — **requires nightly** for the literal-`!`
+fixtures. The stable compiletest route uses `core::convert::Infallible` for
+uninhabited-type coverage and skips the nightly-only fixture directories. If
+you get errors that make no sense, `cargo clean` and retry. The expansion unit
+tests live in `proptest-derive-internal`; run both crates, both feature
+configs:
 
 ```sh
 cargo +nightly test -p proptest-derive
@@ -55,12 +87,10 @@ proptest-state-machine:
 cargo test -p proptest-state-machine
 ```
 
-Feature-matrix / no_std builds (compile-only checks — the test suite is **not** no_std-clean, so only the build is verified). The default feature set is `["std", "fork", "timeout", "bit-set", "strict-test"]`:
+Cross-target no_std release checks are separate from the local verification
+matrix above:
 
 ```sh
-cargo build -p proptest --no-default-features --features std
-cargo build -p proptest --no-default-features --features fork
-cargo +nightly build -p proptest --no-default-features --features "alloc unstable libm hardware-rng"
 ./prerelease-checks.sh   # cross-compiles no_std to thumbv7em + wasm32 (needs those targets + nightly)
 ```
 
@@ -89,9 +119,20 @@ cd proptest/test-persistence-location && ./run-tests.sh
 
 **`std_facade` — the no_std bridge** (`proptest/src/std_facade.rs`). The crate is `#![no_std]`, so it must **never** name `std::` directly outside test code or `std`-gated code. Import allocated/std types from `crate::std_facade` instead (e.g. `Arc`, `Vec`, `Box`); it re-exports from `std`, `alloc`, or `core` depending on enabled features. New code that reaches for an allocating type must pull it from `std_facade` or it will break the `no_std`/`alloc` builds.
 
+**Stable substitutes for nightly APIs** (`proptest/src/alt_stable.rs`,
+behind the `alt-stable` feature). Exact impls for still-nightly standard
+types (`alloc::Global` / `AllocError`, primitive `f16`,
+`core::ops::CoroutineState`, and `std::net::Ipv6MulticastScope`) stay behind
+`unstable` when `alt-stable` is **not** enabled. The `alt-stable` feature adds
+stable substitutes instead: `allocator_api2::alloc::{Global, AllocError}`,
+`half::f16`, and `proptest::alt_stable::{CoroutineState,
+Ipv6MulticastScope}`. `alt-stable` wins when both features are enabled, so
+stable `--all-features` builds select the substitute surface rather than
+requesting `#![feature(...)]`.
+
 **Sugar macros** (`proptest/src/sugar.rs`, with internal helpers in `proptest/src/macros.rs`). The user-facing surface: `proptest! { #[test] fn … (x in strat) { … } }`, `prop_assert!`/`prop_assert_eq!`, `prop_assume!` (reject the current case), `prop_compose!` (define a strategy), `prop_oneof!` (weighted union).
 
-**Optional features** plug into the runner and are gated in `proptest/Cargo.toml`: `fork` (process-isolate each case via `rusty-fork`), `timeout` (per-case time limits; requires `fork`), `bit-set` (bitset strategies), `unstable` (nightly-only language features), `handle-panics` (suppress intermediate panic spew during shrinking), `strict-test` (default-on; gates the `proptest::strict` Result-returning property harness and its `strict-test-support` dependency; requires `std`).
+**Optional features** plug into the runner and are gated in `proptest/Cargo.toml`: `fork` (process-isolate each case via `rusty-fork`), `timeout` (per-case time limits; requires `fork`), `bit-set` (bitset strategies), `unstable` (exact nightly-only standard-library and language APIs), `f16` (primitive nightly `f16`, unless `alt-stable` selects `half::f16`), `alt-stable` (stable substitute APIs for the still-nightly surfaces), `handle-panics` (suppress intermediate panic spew during shrinking), `strict-test` (default-on; gates the `proptest::strict` Result-returning property harness and its `strict-test-support` dependency; requires `std`).
 
 ### Supporting crates
 

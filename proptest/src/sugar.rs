@@ -8,7 +8,6 @@
 // except according to those terms.
 
 use crate::std_facade::fmt;
-#[cfg(feature = "std")]
 use crate::test_runner::Config;
 #[cfg(feature = "std")]
 use crate::test_runner::emit_closure_fork_unsupported;
@@ -37,6 +36,7 @@ use crate::test_runner::emit_closure_fork_unsupported;
 ///     prop_assert!(a + b <= 18);
 ///   }
 ///
+///   # #[cfg(feature = "std")]
 ///   # /*
 ///   #[test]
 ///   # */
@@ -46,7 +46,11 @@ use crate::test_runner::emit_closure_fork_unsupported;
 ///   }
 /// }
 /// #
-/// # fn main() { test_addition(); test_string_concat(); }
+/// # fn main() {
+/// #   test_addition();
+/// #   #[cfg(feature = "std")]
+/// #   test_string_concat();
+/// # }
 /// ```
 ///
 /// You can also use the normal argument syntax `pattern: type` as in:
@@ -62,6 +66,7 @@ use crate::test_runner::emit_closure_fork_unsupported;
 ///     prop_assert_eq!(a as u16 + b as u16, b as u16 + a as u16);
 ///   }
 ///
+///   # #[cfg(feature = "std")]
 ///   # /*
 ///   #[test]
 ///   # */
@@ -71,7 +76,11 @@ use crate::test_runner::emit_closure_fork_unsupported;
 ///   }
 /// }
 /// #
-/// # fn main() { addition_is_commutative(); test_string_concat(); }
+/// # fn main() {
+/// #   addition_is_commutative();
+/// #   #[cfg(feature = "std")]
+/// #   test_string_concat();
+/// # }
 /// ```
 ///
 /// As you can see, you can mix `pattern: type` and `pattern in expr`.
@@ -520,6 +529,7 @@ macro_rules! prop_oneof {
 ///   string:  String,
 /// }
 ///
+/// # #[cfg(feature = "std")]
 /// prop_compose! {
 ///   fn my_struct_strategy(max_integer: u32)
 ///                        (integer in 0..max_integer, string in ".*")
@@ -544,6 +554,7 @@ macro_rules! prop_oneof {
 /// #  string: String,
 /// # }
 ///
+/// # #[cfg(feature = "std")]
 /// prop_compose! {
 ///   fn my_struct_strategy(max_integer: u32)
 ///                        (integer in 0..max_integer, string: String)
@@ -946,6 +957,7 @@ macro_rules! prop_assert {
 /// ```
 /// use proptest::prelude::*;
 ///
+/// # #[cfg(feature = "std")]
 /// proptest! {
 ///   # /*
 ///   #[test]
@@ -961,7 +973,10 @@ macro_rules! prop_assert {
 ///   }
 /// }
 /// #
+/// # #[cfg(feature = "std")]
 /// # fn main() { concat_string_length(); }
+/// # #[cfg(not(feature = "std"))]
+/// # fn main() {}
 /// ```
 #[macro_export]
 macro_rules! prop_assert_eq {
@@ -1391,7 +1406,7 @@ pub fn force_no_fork(config: &mut Config) {
 }
 
 #[cfg(not(feature = "std"))]
-pub fn force_no_fork(_: &mut crate::test_runner::Config) {}
+pub const fn force_no_fork(_: &mut Config) {}
 
 #[cfg(test)]
 mod test {

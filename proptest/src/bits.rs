@@ -434,10 +434,10 @@ impl<T: BitSetLike> ValueTree for BitSetValueTree<T> {
 macro_rules! int_api {
   ($typ:ident, $max:expr) => {
     #[doc = concat!(
-                        "Bit-set strategies for `",
-                        stringify!($typ),
-                        "` values, shrinking by clearing selected bits."
-                    )]
+                                                                                            "Bit-set strategies for `",
+                                                                                            stringify!($typ),
+                                                                                            "` values, shrinking by clearing selected bits."
+                                                                                        )]
     pub mod $typ {
       use super::*;
 
@@ -498,10 +498,10 @@ int_api!(i128, 128);
 macro_rules! minimal_api {
   ($md:ident, $typ:ty) => {
     #[doc = concat!(
-                        "Bit-set strategies for `",
-                        stringify!($typ),
-                        "` values, shrinking by clearing selected bits."
-                    )]
+                                                                                            "Bit-set strategies for `",
+                                                                                            stringify!($typ),
+                                                                                            "` values, shrinking by clearing selected bits."
+                                                                                        )]
     pub mod $md {
       use super::*;
 
@@ -550,10 +550,16 @@ minimal_api!(bool_vec, Vec<bool>);
 mod varsize {
   use core::iter::FromIterator;
 
+  #[cfg(feature = "bit-set")]
   use super::BitSet;
   use super::BitSetLike;
+  #[cfg(feature = "bit-set")]
   use super::BitVec;
   use super::usize;
+  #[cfg(not(feature = "bit-set"))]
+  use crate::std_facade::Vec;
+  #[cfg(not(feature = "bit-set"))]
+  use crate::std_facade::vec;
 
   /// Backing bit-set type: `BitSet` when the `bit-set` feature is enabled.
   #[cfg(feature = "bit-set")]

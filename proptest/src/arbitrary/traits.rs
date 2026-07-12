@@ -27,7 +27,7 @@ use crate::strategy::Strategy;
 /// This trait analogous to
 /// [Haskell QuickCheck's implementation of `Arbitrary`][HaskellQC].
 /// In this interpretation of `Arbitrary`, `Strategy` is the equivalent of
-/// the `Gen` monad. Unlike in QuickCheck, `Arbitrary` is not a core component;
+/// the `Gen` monad. Unlike in `QuickCheck`, `Arbitrary` is not a core component;
 /// types do not need to implement `Arbitrary` unless one wants to use
 /// [`any`](fn.any.html) or other free functions in this module.
 ///

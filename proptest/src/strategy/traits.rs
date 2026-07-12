@@ -432,6 +432,7 @@ pub trait Strategy: fmt::Debug {
   ///   Map(HashMap<String, JsonNode>),
   /// }
   ///
+  /// # #[cfg(feature = "std")]
   /// # fn main() {
   /// #
   /// // Define a strategy for generating leaf nodes of the AST
@@ -457,6 +458,8 @@ pub trait Strategy: fmt::Debug {
   ///   },
   /// );
   /// # }
+  /// # #[cfg(not(feature = "std"))]
+  /// # fn main() {}
   /// ```
   fn prop_recursive<R: Strategy<Value = Self::Value> + 'static, F: Fn(BoxedStrategy<Self::Value>) -> R>(
     self,
@@ -1106,6 +1109,7 @@ where
 }
 
 #[cfg(test)]
+#[cfg(feature = "strict-test")]
 mod test {
   use std::string::ToString as _;
 

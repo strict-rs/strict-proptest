@@ -47,8 +47,10 @@ impl<'a> ResultCacheKey<'a> {
 
 /// Display adapter for hashing a cache key by the wrapped value's `Debug`
 /// representation.
+#[cfg(feature = "std")]
 struct DebugDisplay<'a>(&'a dyn fmt::Debug);
 
+#[cfg(feature = "std")]
 impl fmt::Display for DebugDisplay<'_> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     fmt::Debug::fmt(self.0, f)

@@ -17,10 +17,8 @@
 //! it is trying to describe.
 
 use std::fmt;
+use std::io;
 use std::io::Write;
-use std::io::{
-  self,
-};
 use std::path::Path;
 use std::path::PathBuf;
 use std::string::String;

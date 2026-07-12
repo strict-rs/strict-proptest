@@ -26,10 +26,10 @@ arbitrary!([H: Default + Hasher] BuildHasherDefault<H>; BuildHasherDefault::defa
 lazy_just!(DefaultHasher, Default::default; RandomState, Default::default);
 
 #[cfg(test)]
+#[cfg(all(feature = "std", feature = "strict-test"))]
 mod test {
   use super::*;
 
-  #[cfg(feature = "std")]
   no_panic_test!(
       default_hasher => DefaultHasher,
       random_state => RandomState,

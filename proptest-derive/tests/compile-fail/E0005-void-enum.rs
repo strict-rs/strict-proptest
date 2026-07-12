@@ -6,8 +6,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(never_type)]
-
 extern crate proptest_derive;
 use proptest_derive::Arbitrary;
 
@@ -15,12 +13,12 @@ fn main() {}
 
 #[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0005]
 enum T0 {
-    V0(!),
+    V0(core::convert::Infallible),
 }
 
 #[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0005]
 enum T1 {
-    V0(!, bool),
-    V1([!; 1]),
-    V2([(!, bool); 1])
+    V0(core::convert::Infallible, bool),
+    V1([core::convert::Infallible; 1]),
+    V2([(core::convert::Infallible, bool); 1])
 }

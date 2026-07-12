@@ -15,11 +15,9 @@ use std::boxed::Box;
 use std::env;
 use std::format;
 use std::fs;
+use std::io;
 use std::io::BufRead as _;
 use std::io::Write as _;
-use std::io::{
-  self,
-};
 use std::path::Path;
 use std::path::PathBuf;
 use std::string::String;
@@ -31,10 +29,8 @@ use self::FileFailurePersistence::Direct;
 use self::FileFailurePersistence::Off;
 use self::FileFailurePersistence::SourceParallel;
 use self::FileFailurePersistence::WithSource;
+use crate::test_runner::diagnostics;
 use crate::test_runner::diagnostics::RunnerDiagnostic;
-use crate::test_runner::diagnostics::{
-  self,
-};
 use crate::test_runner::failure_persistence::FailurePersistence;
 use crate::test_runner::failure_persistence::PersistedSeed;
 

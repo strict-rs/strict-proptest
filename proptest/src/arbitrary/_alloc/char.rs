@@ -9,15 +9,12 @@
 
 //! Arbitrary implementations for `std::char`.
 
-#[cfg(feature = "unstable")]
 use core::char::CharTryFromError;
 use core::char::EscapeDebug;
 use core::char::EscapeDefault;
 use core::char::EscapeUnicode;
 use core::char::ParseCharError;
-#[cfg(feature = "unstable")]
 use core::char::ToLowercase;
-#[cfg(feature = "unstable")]
 use core::char::ToUppercase;
 use core::iter::once;
 
@@ -37,7 +34,6 @@ const VEC_MAX: usize = 65_535;
 use crate::arbitrary::SMapped;
 use crate::arbitrary::any;
 use crate::strategy::BoxedStrategy;
-#[cfg(feature = "unstable")]
 use crate::strategy::Just;
 use crate::strategy::Strategy as _;
 use crate::strategy::statics::static_map;
@@ -58,9 +54,7 @@ macro_rules! impl_wrap_char {
 impl_wrap_char!(EscapeDebug, char::escape_debug);
 impl_wrap_char!(EscapeDefault, char::escape_default);
 impl_wrap_char!(EscapeUnicode, char::escape_unicode);
-#[cfg(feature = "unstable")]
 impl_wrap_char!(ToLowercase, char::to_lowercase);
-#[cfg(feature = "unstable")]
 impl_wrap_char!(ToUppercase, char::to_uppercase);
 
 arbitrary!(DecodeUtf16<<Vec<u16> as IntoIterator>::IntoIter>,
@@ -77,7 +71,6 @@ arbitrary!(ParseCharError, BoxedStrategy<Self>;
         .boxed()
 );
 
-#[cfg(feature = "unstable")]
 arbitrary!(CharTryFromError, BoxedStrategy<Self>; {
     use core::convert::TryFrom as _;
     Just(0xD800_u32)
@@ -112,7 +105,6 @@ mod test {
       decode_utf16 => DecodeUtf16<<Vec<u16> as IntoIterator>::IntoIter>
   );
 
-  #[cfg(feature = "unstable")]
   no_panic_test!(
       to_lowercase => ToLowercase,
       to_uppercase => ToUppercase,

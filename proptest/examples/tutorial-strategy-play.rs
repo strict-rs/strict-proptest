@@ -20,27 +20,23 @@
 // This is *not* how proptest is normally used; it is simply used to play
 // around with value generation.
 
+use std::error::Error;
+use std::io;
 use std::io::Write as _;
-use std::io::{
-  self,
-};
 
 use proptest::strategy::Strategy as _;
 use proptest::strategy::ValueTree as _;
 use proptest::test_runner::TestRunner;
 
-fn main() -> io::Result<()> {
+fn main() -> Result<(), Box<dyn Error>> {
   let mut runner = TestRunner::default();
-  let int_val = (0..100_i32)
-    .new_tree(&mut runner)
-    .map_err(|reason| io::Error::new(io::ErrorKind::InvalidInput, reason.to_string()))?;
-  let str_val = "[a-z]{1,4}\\p{Cyrillic}{1,4}\\p{Greek}{1,4}"
-    .new_tree(&mut runner)
-    .map_err(|reason| io::Error::new(io::ErrorKind::InvalidInput, reason.to_string()))?;
+  let int_val = (0..100_i32).new_tree(&mut runner)?;
+  let str_val = "[a-z]{1,4}\\p{Cyrillic}{1,4}\\p{Greek}{1,4}".new_tree(&mut runner)?;
   writeln!(
     io::stdout().lock(),
     "int_val = {}, str_val = {}",
     int_val.current(),
     str_val.current()
-  )
+  )?;
+  Ok(())
 }

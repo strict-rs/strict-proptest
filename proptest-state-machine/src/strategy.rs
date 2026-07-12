@@ -10,10 +10,8 @@
 //! Strategies used for abstract state machine testing.
 
 use std::sync::Arc;
+use std::sync::atomic;
 use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::{
-  self,
-};
 
 use proptest::bits::BitSetLike as _;
 use proptest::bits::VarBitSet;
@@ -753,10 +751,8 @@ mod test {
 
   use heap_state_machine::*;
   use proptest::collection::hash_set;
+  use proptest::strict;
   use proptest::strict::TestFailure;
-  use proptest::strict::{
-    self,
-  };
   use strict_test_support::ensure;
   use strict_test_support::ensure_contains;
   use strict_test_support::ensure_eq;
@@ -1099,10 +1095,8 @@ mod test {
     use proptest::collection;
     use proptest::prelude::*;
     use proptest::strategy::BoxedStrategy;
+    use proptest::strict;
     use proptest::strict::TestFailure;
-    use proptest::strict::{
-      self,
-    };
     use proptest::test_runner::RngAlgorithm;
     use proptest::test_runner::TestCaseError;
     use proptest::test_runner::TestError;
@@ -1220,11 +1214,9 @@ mod test {
   /// generation keeps a mirrored SUT aligned.
   mod strict_runner_behavior {
     use proptest::strategy::BoxedStrategy;
+    use proptest::strict;
     use proptest::strict::TestFailure;
     use proptest::strict::TestResult;
-    use proptest::strict::{
-      self,
-    };
     use strict_test_support::ensure;
     use strict_test_support::ensure_contains;
     use strict_test_support::ensure_eq;

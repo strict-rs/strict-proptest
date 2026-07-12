@@ -36,7 +36,7 @@
     ]
   },
   "Markdown": {
-    "blanks": 1783,
+    "blanks": 1795,
     "children": {
       "BASH": [
         {
@@ -307,8 +307,8 @@
           "stats": {
             "blanks": 2,
             "blobs": {},
-            "code": 4,
-            "comments": 5
+            "code": 5,
+            "comments": 4
           }
         },
         {
@@ -350,16 +350,16 @@
       ]
     },
     "code": 0,
-    "comments": 3824,
+    "comments": 3951,
     "inaccurate": false,
     "reports": [
       {
         "name": "./AGENTS.md",
         "stats": {
-          "blanks": 39,
+          "blanks": 42,
           "blobs": {},
           "code": 0,
-          "comments": 75
+          "comments": 113
         }
       },
       {
@@ -563,17 +563,17 @@
       {
         "name": "./book/src/proptest/no-std.md",
         "stats": {
-          "blanks": 5,
+          "blanks": 8,
           "blobs": {
             "TOML": {
               "blanks": 2,
               "blobs": {},
-              "code": 4,
-              "comments": 5
+              "code": 5,
+              "comments": 4
             }
           },
           "code": 0,
-          "comments": 20
+          "comments": 27
         }
       },
       {
@@ -941,7 +941,7 @@
           "blanks": 41,
           "blobs": {},
           "code": 0,
-          "comments": 61
+          "comments": 66
         }
       },
       {
@@ -1155,7 +1155,7 @@
           "blanks": 16,
           "blobs": {},
           "code": 0,
-          "comments": 42
+          "comments": 44
         }
       },
       {
@@ -1164,7 +1164,7 @@
           "blanks": 386,
           "blobs": {},
           "code": 0,
-          "comments": 751
+          "comments": 769
         }
       },
       {
@@ -1179,7 +1179,7 @@
       {
         "name": "./proptest/README.md",
         "stats": {
-          "blanks": 77,
+          "blanks": 80,
           "blobs": {
             "Rust": {
               "blanks": 10,
@@ -1195,7 +1195,7 @@
             }
           },
           "code": 0,
-          "comments": 250
+          "comments": 278
         }
       },
       {
@@ -1219,10 +1219,10 @@
       {
         "name": "./proptest/readme-antelogue.md",
         "stats": {
-          "blanks": 4,
+          "blanks": 7,
           "blobs": {},
           "code": 0,
-          "comments": 9
+          "comments": 37
         }
       },
       {
@@ -1276,7 +1276,7 @@
           "blanks": 13,
           "blobs": {},
           "code": 0,
-          "comments": 30
+          "comments": 31
         }
       },
       {
@@ -1551,7 +1551,7 @@
     ]
   },
   "Rust": {
-    "blanks": 5683,
+    "blanks": 5796,
     "children": {
       "Markdown": [
         {
@@ -2044,6 +2044,15 @@
           }
         },
         {
+          "name": "./proptest/src/alt_stable.rs",
+          "stats": {
+            "blanks": 1,
+            "blobs": {},
+            "code": 0,
+            "comments": 17
+          }
+        },
+        {
           "name": "./proptest/src/arbitrary.rs",
           "stats": {
             "blanks": 6,
@@ -2121,7 +2130,7 @@
             "blanks": 0,
             "blobs": {},
             "code": 0,
-            "comments": 1
+            "comments": 3
           }
         },
         {
@@ -2513,7 +2522,7 @@
             "blanks": 47,
             "blobs": {},
             "code": 0,
-            "comments": 213
+            "comments": 214
           }
         },
         {
@@ -2585,7 +2594,7 @@
             "blanks": 42,
             "blobs": {},
             "code": 0,
-            "comments": 172
+            "comments": 180
           }
         },
         {
@@ -2711,7 +2720,7 @@
                     "comments": 1
                   }
                 },
-                "code": 32,
+                "code": 35,
                 "comments": 4
               }
             },
@@ -2754,12 +2763,12 @@
               "Rust": {
                 "blanks": 13,
                 "blobs": {},
-                "code": 120,
+                "code": 127,
                 "comments": 7
               }
             },
             "code": 0,
-            "comments": 262
+            "comments": 271
           }
         },
         {
@@ -2774,10 +2783,10 @@
         {
           "name": "./proptest/src/test_runner/config.rs",
           "stats": {
-            "blanks": 56,
+            "blanks": 57,
             "blobs": {},
             "code": 0,
-            "comments": 239
+            "comments": 243
           }
         },
         {
@@ -2949,8 +2958,8 @@
         }
       ]
     },
-    "code": 31775,
-    "comments": 3975,
+    "code": 32574,
+    "comments": 4029,
     "inaccurate": false,
     "reports": [
       {
@@ -2981,7 +2990,7 @@
               "comments": 156
             }
           },
-          "code": 458,
+          "code": 454,
           "comments": 58
         }
       },
@@ -2997,7 +3006,7 @@
               "comments": 81
             }
           },
-          "code": 549,
+          "code": 545,
           "comments": 126
         }
       },
@@ -3029,7 +3038,7 @@
               "comments": 13
             }
           },
-          "code": 323,
+          "code": 321,
           "comments": 12
         }
       },
@@ -3100,7 +3109,7 @@
       {
         "name": "./proptest-derive-internal/src/void.rs",
         "stats": {
-          "blanks": 28,
+          "blanks": 34,
           "blobs": {
             "Markdown": {
               "blanks": 2,
@@ -3109,7 +3118,7 @@
               "comments": 17
             }
           },
-          "code": 80,
+          "code": 116,
           "comments": 37
         }
       },
@@ -3162,6 +3171,42 @@
         }
       },
       {
+        "name": "./proptest-derive/tests/compile-fail-nightly/E0003-void-struct.rs",
+        "stats": {
+          "blanks": 9,
+          "blobs": {},
+          "code": 29,
+          "comments": 9
+        }
+      },
+      {
+        "name": "./proptest-derive/tests/compile-fail-nightly/E0004-void-enum.rs",
+        "stats": {
+          "blanks": 5,
+          "blobs": {},
+          "code": 8,
+          "comments": 7
+        }
+      },
+      {
+        "name": "./proptest-derive/tests/compile-fail-nightly/E0005-void-enum.rs",
+        "stats": {
+          "blanks": 5,
+          "blobs": {},
+          "code": 14,
+          "comments": 7
+        }
+      },
+      {
+        "name": "./proptest-derive/tests/compile-fail-nightly/E0006-void-enum.rs",
+        "stats": {
+          "blanks": 8,
+          "blobs": {},
+          "code": 37,
+          "comments": 9
+        }
+      },
+      {
         "name": "./proptest-derive/tests/compile-fail/E0001-lifetime.rs",
         "stats": {
           "blanks": 5,
@@ -3182,36 +3227,36 @@
       {
         "name": "./proptest-derive/tests/compile-fail/E0003-void-struct.rs",
         "stats": {
-          "blanks": 9,
+          "blanks": 8,
           "blobs": {},
-          "code": 29,
+          "code": 28,
           "comments": 9
         }
       },
       {
         "name": "./proptest-derive/tests/compile-fail/E0004-void-enum.rs",
         "stats": {
-          "blanks": 5,
+          "blanks": 4,
           "blobs": {},
-          "code": 8,
+          "code": 7,
           "comments": 7
         }
       },
       {
         "name": "./proptest-derive/tests/compile-fail/E0005-void-enum.rs",
         "stats": {
-          "blanks": 5,
+          "blanks": 4,
           "blobs": {},
-          "code": 14,
+          "code": 13,
           "comments": 7
         }
       },
       {
         "name": "./proptest-derive/tests/compile-fail/E0006-void-enum.rs",
         "stats": {
-          "blanks": 8,
+          "blanks": 7,
           "blobs": {},
-          "code": 37,
+          "code": 36,
           "comments": 9
         }
       },
@@ -3578,7 +3623,7 @@
               "comments": 8
             }
           },
-          "code": 228,
+          "code": 237,
           "comments": 11
         }
       },
@@ -3711,9 +3756,27 @@
         }
       },
       {
+        "name": "./proptest-derive/tests/run-pass-nightly/skip-never.rs",
+        "stats": {
+          "blanks": 7,
+          "blobs": {},
+          "code": 26,
+          "comments": 7
+        }
+      },
+      {
+        "name": "./proptest-derive/tests/run-pass-nightly/uninhabited-never.rs",
+        "stats": {
+          "blanks": 11,
+          "blobs": {},
+          "code": 38,
+          "comments": 7
+        }
+      },
+      {
         "name": "./proptest-derive/tests/skip.rs",
         "stats": {
-          "blanks": 9,
+          "blanks": 10,
           "blobs": {
             "Markdown": {
               "blanks": 1,
@@ -3722,7 +3785,7 @@
               "comments": 5
             }
           },
-          "code": 44,
+          "code": 49,
           "comments": 7
         }
       },
@@ -3761,7 +3824,7 @@
       {
         "name": "./proptest-derive/tests/uninhabited-pass.rs",
         "stats": {
-          "blanks": 17,
+          "blanks": 18,
           "blobs": {
             "Markdown": {
               "blanks": 1,
@@ -3770,7 +3833,7 @@
               "comments": 8
             }
           },
-          "code": 99,
+          "code": 104,
           "comments": 11
         }
       },
@@ -4005,7 +4068,7 @@
               "comments": 13
             }
           },
-          "code": 125,
+          "code": 127,
           "comments": 2
         }
       },
@@ -4085,7 +4148,7 @@
               "comments": 71
             }
           },
-          "code": 483,
+          "code": 477,
           "comments": 36
         }
       },
@@ -4133,7 +4196,7 @@
               "comments": 200
             }
           },
-          "code": 948,
+          "code": 940,
           "comments": 99
         }
       },
@@ -4156,7 +4219,7 @@
               "comments": 78
             }
           },
-          "code": 314,
+          "code": 310,
           "comments": 44
         }
       },
@@ -4172,7 +4235,7 @@
               "comments": 5
             }
           },
-          "code": 16,
+          "code": 14,
           "comments": 8
         }
       },
@@ -4236,7 +4299,7 @@
               "comments": 6
             }
           },
-          "code": 19,
+          "code": 16,
           "comments": 12
         }
       },
@@ -4252,8 +4315,24 @@
               "comments": 6
             }
           },
-          "code": 22,
+          "code": 18,
           "comments": 12
+        }
+      },
+      {
+        "name": "./proptest/src/alt_stable.rs",
+        "stats": {
+          "blanks": 13,
+          "blobs": {
+            "Markdown": {
+              "blanks": 1,
+              "blobs": {},
+              "code": 0,
+              "comments": 17
+            }
+          },
+          "code": 91,
+          "comments": 8
         }
       },
       {
@@ -4284,14 +4363,14 @@
               "comments": 1
             }
           },
-          "code": 11,
+          "code": 10,
           "comments": 8
         }
       },
       {
         "name": "./proptest/src/arbitrary/_alloc/alloc.rs",
         "stats": {
-          "blanks": 11,
+          "blanks": 19,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -4300,7 +4379,7 @@
               "comments": 3
             }
           },
-          "code": 36,
+          "code": 79,
           "comments": 24
         }
       },
@@ -4348,7 +4427,7 @@
               "comments": 8
             }
           },
-          "code": 88,
+          "code": 80,
           "comments": 8
         }
       },
@@ -4364,7 +4443,7 @@
               "comments": 21
             }
           },
-          "code": 269,
+          "code": 273,
           "comments": 30
         }
       },
@@ -4387,16 +4466,16 @@
       {
         "name": "./proptest/src/arbitrary/_alloc/ops.rs",
         "stats": {
-          "blanks": 16,
+          "blanks": 28,
           "blobs": {
             "Markdown": {
               "blanks": 0,
               "blobs": {},
               "code": 0,
-              "comments": 1
+              "comments": 3
             }
           },
-          "code": 91,
+          "code": 141,
           "comments": 8
         }
       },
@@ -4444,7 +4523,7 @@
               "comments": 5
             }
           },
-          "code": 77,
+          "code": 69,
           "comments": 9
         }
       },
@@ -4556,7 +4635,7 @@
               "comments": 6
             }
           },
-          "code": 154,
+          "code": 151,
           "comments": 10
         }
       },
@@ -4620,14 +4699,14 @@
               "comments": 1
             }
           },
-          "code": 66,
+          "code": 63,
           "comments": 8
         }
       },
       {
         "name": "./proptest/src/arbitrary/_core/option.rs",
         "stats": {
-          "blanks": 12,
+          "blanks": 13,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -4636,14 +4715,14 @@
               "comments": 1
             }
           },
-          "code": 42,
+          "code": 64,
           "comments": 9
         }
       },
       {
         "name": "./proptest/src/arbitrary/_core/result.rs",
         "stats": {
-          "blanks": 16,
+          "blanks": 19,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -4652,7 +4731,7 @@
               "comments": 1
             }
           },
-          "code": 88,
+          "code": 125,
           "comments": 11
         }
       },
@@ -4700,7 +4779,7 @@
               "comments": 5
             }
           },
-          "code": 146,
+          "code": 142,
           "comments": 12
         }
       },
@@ -4732,14 +4811,14 @@
               "comments": 6
             }
           },
-          "code": 183,
+          "code": 180,
           "comments": 11
         }
       },
       {
         "name": "./proptest/src/arbitrary/_std/net.rs",
         "stats": {
-          "blanks": 15,
+          "blanks": 17,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -4748,7 +4827,7 @@
               "comments": 1
             }
           },
-          "code": 117,
+          "code": 144,
           "comments": 10
         }
       },
@@ -4844,7 +4923,7 @@
               "comments": 1
             }
           },
-          "code": 39,
+          "code": 37,
           "comments": 13
         }
       },
@@ -4883,7 +4962,7 @@
       {
         "name": "./proptest/src/arbitrary/macros.rs",
         "stats": {
-          "blanks": 9,
+          "blanks": 11,
           "blobs": {
             "Markdown": {
               "blanks": 4,
@@ -4892,7 +4971,7 @@
               "comments": 27
             }
           },
-          "code": 77,
+          "code": 93,
           "comments": 14
         }
       },
@@ -4995,7 +5074,7 @@
               "comments": 115
             }
           },
-          "code": 690,
+          "code": 696,
           "comments": 22
         }
       },
@@ -5027,7 +5106,7 @@
               "comments": 12
             }
           },
-          "code": 460,
+          "code": 470,
           "comments": 9
         }
       },
@@ -5059,7 +5138,7 @@
               "comments": 4
             }
           },
-          "code": 74,
+          "code": 84,
           "comments": 9
         }
       },
@@ -5082,23 +5161,23 @@
       {
         "name": "./proptest/src/num.rs",
         "stats": {
-          "blanks": 208,
+          "blanks": 227,
           "blobs": {
             "Markdown": {
               "blanks": 47,
               "blobs": {},
               "code": 0,
-              "comments": 213
+              "comments": 214
             }
           },
-          "code": 1392,
+          "code": 1545,
           "comments": 34
         }
       },
       {
         "name": "./proptest/src/num/float_samplers.rs",
         "stats": {
-          "blanks": 120,
+          "blanks": 125,
           "blobs": {
             "Markdown": {
               "blanks": 1,
@@ -5107,7 +5186,7 @@
               "comments": 24
             }
           },
-          "code": 887,
+          "code": 1006,
           "comments": 33
         }
       },
@@ -5123,7 +5202,7 @@
               "comments": 42
             }
           },
-          "code": 213,
+          "code": 217,
           "comments": 18
         }
       },
@@ -5225,7 +5304,7 @@
               "blanks": 42,
               "blobs": {},
               "code": 0,
-              "comments": 172
+              "comments": 180
             }
           },
           "code": 585,
@@ -5372,7 +5451,7 @@
               "comments": 23
             }
           },
-          "code": 217,
+          "code": 220,
           "comments": 22
         }
       },
@@ -5388,7 +5467,7 @@
               "comments": 13
             }
           },
-          "code": 143,
+          "code": 145,
           "comments": 38
         }
       },
@@ -5420,7 +5499,7 @@
               "comments": 37
             }
           },
-          "code": 179,
+          "code": 181,
           "comments": 19
         }
       },
@@ -5442,7 +5521,7 @@
                       "comments": 1
                     }
                   },
-                  "code": 32,
+                  "code": 35,
                   "comments": 4
                 }
               },
@@ -5450,7 +5529,7 @@
               "comments": 386
             }
           },
-          "code": 566,
+          "code": 567,
           "comments": 29
         }
       },
@@ -5466,7 +5545,7 @@
               "comments": 115
             }
           },
-          "code": 848,
+          "code": 856,
           "comments": 39
         }
       },
@@ -5498,7 +5577,7 @@
               "comments": 100
             }
           },
-          "code": 587,
+          "code": 585,
           "comments": 31
         }
       },
@@ -5513,15 +5592,15 @@
                 "Rust": {
                   "blanks": 13,
                   "blobs": {},
-                  "code": 120,
+                  "code": 127,
                   "comments": 7
                 }
               },
               "code": 0,
-              "comments": 262
+              "comments": 271
             }
           },
-          "code": 1568,
+          "code": 1567,
           "comments": 42
         }
       },
@@ -5547,13 +5626,13 @@
           "blanks": 64,
           "blobs": {
             "Markdown": {
-              "blanks": 56,
+              "blanks": 57,
               "blobs": {},
               "code": 0,
-              "comments": 239
+              "comments": 243
             }
           },
-          "code": 373,
+          "code": 371,
           "comments": 9
         }
       },
@@ -5569,7 +5648,7 @@
               "comments": 67
             }
           },
-          "code": 325,
+          "code": 323,
           "comments": 8
         }
       },
@@ -5592,7 +5671,7 @@
               "comments": 61
             }
           },
-          "code": 89,
+          "code": 93,
           "comments": 8
         }
       },
@@ -5624,7 +5703,7 @@
               "comments": 83
             }
           },
-          "code": 473,
+          "code": 469,
           "comments": 44
         }
       },
@@ -5672,7 +5751,7 @@
               "comments": 36
             }
           },
-          "code": 223,
+          "code": 221,
           "comments": 20
         }
       },
@@ -5688,7 +5767,7 @@
               "comments": 27
             }
           },
-          "code": 121,
+          "code": 123,
           "comments": 8
         }
       },
@@ -5704,14 +5783,14 @@
               "comments": 117
             }
           },
-          "code": 814,
+          "code": 828,
           "comments": 19
         }
       },
       {
         "name": "./proptest/src/test_runner/runner.rs",
         "stats": {
-          "blanks": 180,
+          "blanks": 179,
           "blobs": {
             "Markdown": {
               "blanks": 24,
@@ -5727,7 +5806,7 @@
               "comments": 182
             }
           },
-          "code": 1371,
+          "code": 1419,
           "comments": 72
         }
       },
@@ -6152,19 +6231,19 @@
     ]
   },
   "TOML": {
-    "blanks": 112,
+    "blanks": 120,
     "children": {},
-    "code": 780,
-    "comments": 152,
+    "code": 805,
+    "comments": 179,
     "inaccurate": false,
     "reports": [
       {
         "name": "./Cargo.toml",
         "stats": {
-          "blanks": 42,
+          "blanks": 43,
           "blobs": {},
-          "code": 332,
-          "comments": 40
+          "code": 334,
+          "comments": 59
         }
       },
       {
@@ -6181,8 +6260,8 @@
         "stats": {
           "blanks": 9,
           "blobs": {},
-          "code": 126,
-          "comments": 40
+          "code": 128,
+          "comments": 44
         }
       },
       {
@@ -6242,10 +6321,10 @@
       {
         "name": "./proptest/Cargo.toml",
         "stats": {
-          "blanks": 20,
+          "blanks": 27,
           "blobs": {},
-          "code": 57,
-          "comments": 23
+          "code": 78,
+          "comments": 27
         }
       },
       {
@@ -6296,7 +6375,7 @@
     ]
   },
   "Total": {
-    "blanks": 8638,
+    "blanks": 8773,
     "children": {
       "Batch": [
         {
@@ -6324,10 +6403,10 @@
         {
           "name": "./AGENTS.md",
           "stats": {
-            "blanks": 39,
+            "blanks": 42,
             "blobs": {},
             "code": 0,
-            "comments": 75
+            "comments": 113
           }
         },
         {
@@ -6531,17 +6610,17 @@
         {
           "name": "./book/src/proptest/no-std.md",
           "stats": {
-            "blanks": 5,
+            "blanks": 8,
             "blobs": {
               "TOML": {
                 "blanks": 2,
                 "blobs": {},
-                "code": 4,
-                "comments": 5
+                "code": 5,
+                "comments": 4
               }
             },
             "code": 0,
-            "comments": 20
+            "comments": 27
           }
         },
         {
@@ -6909,7 +6988,7 @@
             "blanks": 41,
             "blobs": {},
             "code": 0,
-            "comments": 61
+            "comments": 66
           }
         },
         {
@@ -7123,7 +7202,7 @@
             "blanks": 16,
             "blobs": {},
             "code": 0,
-            "comments": 42
+            "comments": 44
           }
         },
         {
@@ -7132,7 +7211,7 @@
             "blanks": 386,
             "blobs": {},
             "code": 0,
-            "comments": 751
+            "comments": 769
           }
         },
         {
@@ -7147,7 +7226,7 @@
         {
           "name": "./proptest/README.md",
           "stats": {
-            "blanks": 77,
+            "blanks": 80,
             "blobs": {
               "Rust": {
                 "blanks": 10,
@@ -7163,7 +7242,7 @@
               }
             },
             "code": 0,
-            "comments": 250
+            "comments": 278
           }
         },
         {
@@ -7187,10 +7266,10 @@
         {
           "name": "./proptest/readme-antelogue.md",
           "stats": {
-            "blanks": 4,
+            "blanks": 7,
             "blobs": {},
             "code": 0,
-            "comments": 9
+            "comments": 37
           }
         },
         {
@@ -7244,7 +7323,7 @@
             "blanks": 13,
             "blobs": {},
             "code": 0,
-            "comments": 30
+            "comments": 31
           }
         },
         {
@@ -7532,7 +7611,7 @@
                 "comments": 156
               }
             },
-            "code": 458,
+            "code": 454,
             "comments": 58
           }
         },
@@ -7548,7 +7627,7 @@
                 "comments": 81
               }
             },
-            "code": 549,
+            "code": 545,
             "comments": 126
           }
         },
@@ -7580,7 +7659,7 @@
                 "comments": 13
               }
             },
-            "code": 323,
+            "code": 321,
             "comments": 12
           }
         },
@@ -7651,7 +7730,7 @@
         {
           "name": "./proptest-derive-internal/src/void.rs",
           "stats": {
-            "blanks": 28,
+            "blanks": 34,
             "blobs": {
               "Markdown": {
                 "blanks": 2,
@@ -7660,7 +7739,7 @@
                 "comments": 17
               }
             },
-            "code": 80,
+            "code": 116,
             "comments": 37
           }
         },
@@ -7713,6 +7792,42 @@
           }
         },
         {
+          "name": "./proptest-derive/tests/compile-fail-nightly/E0003-void-struct.rs",
+          "stats": {
+            "blanks": 9,
+            "blobs": {},
+            "code": 29,
+            "comments": 9
+          }
+        },
+        {
+          "name": "./proptest-derive/tests/compile-fail-nightly/E0004-void-enum.rs",
+          "stats": {
+            "blanks": 5,
+            "blobs": {},
+            "code": 8,
+            "comments": 7
+          }
+        },
+        {
+          "name": "./proptest-derive/tests/compile-fail-nightly/E0005-void-enum.rs",
+          "stats": {
+            "blanks": 5,
+            "blobs": {},
+            "code": 14,
+            "comments": 7
+          }
+        },
+        {
+          "name": "./proptest-derive/tests/compile-fail-nightly/E0006-void-enum.rs",
+          "stats": {
+            "blanks": 8,
+            "blobs": {},
+            "code": 37,
+            "comments": 9
+          }
+        },
+        {
           "name": "./proptest-derive/tests/compile-fail/E0001-lifetime.rs",
           "stats": {
             "blanks": 5,
@@ -7733,36 +7848,36 @@
         {
           "name": "./proptest-derive/tests/compile-fail/E0003-void-struct.rs",
           "stats": {
-            "blanks": 9,
+            "blanks": 8,
             "blobs": {},
-            "code": 29,
+            "code": 28,
             "comments": 9
           }
         },
         {
           "name": "./proptest-derive/tests/compile-fail/E0004-void-enum.rs",
           "stats": {
-            "blanks": 5,
+            "blanks": 4,
             "blobs": {},
-            "code": 8,
+            "code": 7,
             "comments": 7
           }
         },
         {
           "name": "./proptest-derive/tests/compile-fail/E0005-void-enum.rs",
           "stats": {
-            "blanks": 5,
+            "blanks": 4,
             "blobs": {},
-            "code": 14,
+            "code": 13,
             "comments": 7
           }
         },
         {
           "name": "./proptest-derive/tests/compile-fail/E0006-void-enum.rs",
           "stats": {
-            "blanks": 8,
+            "blanks": 7,
             "blobs": {},
-            "code": 37,
+            "code": 36,
             "comments": 9
           }
         },
@@ -8129,7 +8244,7 @@
                 "comments": 8
               }
             },
-            "code": 228,
+            "code": 237,
             "comments": 11
           }
         },
@@ -8262,9 +8377,27 @@
           }
         },
         {
+          "name": "./proptest-derive/tests/run-pass-nightly/skip-never.rs",
+          "stats": {
+            "blanks": 7,
+            "blobs": {},
+            "code": 26,
+            "comments": 7
+          }
+        },
+        {
+          "name": "./proptest-derive/tests/run-pass-nightly/uninhabited-never.rs",
+          "stats": {
+            "blanks": 11,
+            "blobs": {},
+            "code": 38,
+            "comments": 7
+          }
+        },
+        {
           "name": "./proptest-derive/tests/skip.rs",
           "stats": {
-            "blanks": 9,
+            "blanks": 10,
             "blobs": {
               "Markdown": {
                 "blanks": 1,
@@ -8273,7 +8406,7 @@
                 "comments": 5
               }
             },
-            "code": 44,
+            "code": 49,
             "comments": 7
           }
         },
@@ -8312,7 +8445,7 @@
         {
           "name": "./proptest-derive/tests/uninhabited-pass.rs",
           "stats": {
-            "blanks": 17,
+            "blanks": 18,
             "blobs": {
               "Markdown": {
                 "blanks": 1,
@@ -8321,7 +8454,7 @@
                 "comments": 8
               }
             },
-            "code": 99,
+            "code": 104,
             "comments": 11
           }
         },
@@ -8556,7 +8689,7 @@
                 "comments": 13
               }
             },
-            "code": 125,
+            "code": 127,
             "comments": 2
           }
         },
@@ -8636,7 +8769,7 @@
                 "comments": 71
               }
             },
-            "code": 483,
+            "code": 477,
             "comments": 36
           }
         },
@@ -8684,7 +8817,7 @@
                 "comments": 200
               }
             },
-            "code": 948,
+            "code": 940,
             "comments": 99
           }
         },
@@ -8707,7 +8840,7 @@
                 "comments": 78
               }
             },
-            "code": 314,
+            "code": 310,
             "comments": 44
           }
         },
@@ -8723,7 +8856,7 @@
                 "comments": 5
               }
             },
-            "code": 16,
+            "code": 14,
             "comments": 8
           }
         },
@@ -8787,7 +8920,7 @@
                 "comments": 6
               }
             },
-            "code": 19,
+            "code": 16,
             "comments": 12
           }
         },
@@ -8803,8 +8936,24 @@
                 "comments": 6
               }
             },
-            "code": 22,
+            "code": 18,
             "comments": 12
+          }
+        },
+        {
+          "name": "./proptest/src/alt_stable.rs",
+          "stats": {
+            "blanks": 13,
+            "blobs": {
+              "Markdown": {
+                "blanks": 1,
+                "blobs": {},
+                "code": 0,
+                "comments": 17
+              }
+            },
+            "code": 91,
+            "comments": 8
           }
         },
         {
@@ -8835,14 +8984,14 @@
                 "comments": 1
               }
             },
-            "code": 11,
+            "code": 10,
             "comments": 8
           }
         },
         {
           "name": "./proptest/src/arbitrary/_alloc/alloc.rs",
           "stats": {
-            "blanks": 11,
+            "blanks": 19,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -8851,7 +9000,7 @@
                 "comments": 3
               }
             },
-            "code": 36,
+            "code": 79,
             "comments": 24
           }
         },
@@ -8899,7 +9048,7 @@
                 "comments": 8
               }
             },
-            "code": 88,
+            "code": 80,
             "comments": 8
           }
         },
@@ -8915,7 +9064,7 @@
                 "comments": 21
               }
             },
-            "code": 269,
+            "code": 273,
             "comments": 30
           }
         },
@@ -8938,16 +9087,16 @@
         {
           "name": "./proptest/src/arbitrary/_alloc/ops.rs",
           "stats": {
-            "blanks": 16,
+            "blanks": 28,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
                 "blobs": {},
                 "code": 0,
-                "comments": 1
+                "comments": 3
               }
             },
-            "code": 91,
+            "code": 141,
             "comments": 8
           }
         },
@@ -8995,7 +9144,7 @@
                 "comments": 5
               }
             },
-            "code": 77,
+            "code": 69,
             "comments": 9
           }
         },
@@ -9107,7 +9256,7 @@
                 "comments": 6
               }
             },
-            "code": 154,
+            "code": 151,
             "comments": 10
           }
         },
@@ -9171,14 +9320,14 @@
                 "comments": 1
               }
             },
-            "code": 66,
+            "code": 63,
             "comments": 8
           }
         },
         {
           "name": "./proptest/src/arbitrary/_core/option.rs",
           "stats": {
-            "blanks": 12,
+            "blanks": 13,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -9187,14 +9336,14 @@
                 "comments": 1
               }
             },
-            "code": 42,
+            "code": 64,
             "comments": 9
           }
         },
         {
           "name": "./proptest/src/arbitrary/_core/result.rs",
           "stats": {
-            "blanks": 16,
+            "blanks": 19,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -9203,7 +9352,7 @@
                 "comments": 1
               }
             },
-            "code": 88,
+            "code": 125,
             "comments": 11
           }
         },
@@ -9251,7 +9400,7 @@
                 "comments": 5
               }
             },
-            "code": 146,
+            "code": 142,
             "comments": 12
           }
         },
@@ -9283,14 +9432,14 @@
                 "comments": 6
               }
             },
-            "code": 183,
+            "code": 180,
             "comments": 11
           }
         },
         {
           "name": "./proptest/src/arbitrary/_std/net.rs",
           "stats": {
-            "blanks": 15,
+            "blanks": 17,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -9299,7 +9448,7 @@
                 "comments": 1
               }
             },
-            "code": 117,
+            "code": 144,
             "comments": 10
           }
         },
@@ -9395,7 +9544,7 @@
                 "comments": 1
               }
             },
-            "code": 39,
+            "code": 37,
             "comments": 13
           }
         },
@@ -9434,7 +9583,7 @@
         {
           "name": "./proptest/src/arbitrary/macros.rs",
           "stats": {
-            "blanks": 9,
+            "blanks": 11,
             "blobs": {
               "Markdown": {
                 "blanks": 4,
@@ -9443,7 +9592,7 @@
                 "comments": 27
               }
             },
-            "code": 77,
+            "code": 93,
             "comments": 14
           }
         },
@@ -9546,7 +9695,7 @@
                 "comments": 115
               }
             },
-            "code": 690,
+            "code": 696,
             "comments": 22
           }
         },
@@ -9578,7 +9727,7 @@
                 "comments": 12
               }
             },
-            "code": 460,
+            "code": 470,
             "comments": 9
           }
         },
@@ -9610,7 +9759,7 @@
                 "comments": 4
               }
             },
-            "code": 74,
+            "code": 84,
             "comments": 9
           }
         },
@@ -9633,23 +9782,23 @@
         {
           "name": "./proptest/src/num.rs",
           "stats": {
-            "blanks": 208,
+            "blanks": 227,
             "blobs": {
               "Markdown": {
                 "blanks": 47,
                 "blobs": {},
                 "code": 0,
-                "comments": 213
+                "comments": 214
               }
             },
-            "code": 1392,
+            "code": 1545,
             "comments": 34
           }
         },
         {
           "name": "./proptest/src/num/float_samplers.rs",
           "stats": {
-            "blanks": 120,
+            "blanks": 125,
             "blobs": {
               "Markdown": {
                 "blanks": 1,
@@ -9658,7 +9807,7 @@
                 "comments": 24
               }
             },
-            "code": 887,
+            "code": 1006,
             "comments": 33
           }
         },
@@ -9674,7 +9823,7 @@
                 "comments": 42
               }
             },
-            "code": 213,
+            "code": 217,
             "comments": 18
           }
         },
@@ -9776,7 +9925,7 @@
                 "blanks": 42,
                 "blobs": {},
                 "code": 0,
-                "comments": 172
+                "comments": 180
               }
             },
             "code": 585,
@@ -9923,7 +10072,7 @@
                 "comments": 23
               }
             },
-            "code": 217,
+            "code": 220,
             "comments": 22
           }
         },
@@ -9939,7 +10088,7 @@
                 "comments": 13
               }
             },
-            "code": 143,
+            "code": 145,
             "comments": 38
           }
         },
@@ -9971,7 +10120,7 @@
                 "comments": 37
               }
             },
-            "code": 179,
+            "code": 181,
             "comments": 19
           }
         },
@@ -9993,7 +10142,7 @@
                         "comments": 1
                       }
                     },
-                    "code": 32,
+                    "code": 35,
                     "comments": 4
                   }
                 },
@@ -10001,7 +10150,7 @@
                 "comments": 386
               }
             },
-            "code": 566,
+            "code": 567,
             "comments": 29
           }
         },
@@ -10017,7 +10166,7 @@
                 "comments": 115
               }
             },
-            "code": 848,
+            "code": 856,
             "comments": 39
           }
         },
@@ -10049,7 +10198,7 @@
                 "comments": 100
               }
             },
-            "code": 587,
+            "code": 585,
             "comments": 31
           }
         },
@@ -10064,15 +10213,15 @@
                   "Rust": {
                     "blanks": 13,
                     "blobs": {},
-                    "code": 120,
+                    "code": 127,
                     "comments": 7
                   }
                 },
                 "code": 0,
-                "comments": 262
+                "comments": 271
               }
             },
-            "code": 1568,
+            "code": 1567,
             "comments": 42
           }
         },
@@ -10098,13 +10247,13 @@
             "blanks": 64,
             "blobs": {
               "Markdown": {
-                "blanks": 56,
+                "blanks": 57,
                 "blobs": {},
                 "code": 0,
-                "comments": 239
+                "comments": 243
               }
             },
-            "code": 373,
+            "code": 371,
             "comments": 9
           }
         },
@@ -10120,7 +10269,7 @@
                 "comments": 67
               }
             },
-            "code": 325,
+            "code": 323,
             "comments": 8
           }
         },
@@ -10143,7 +10292,7 @@
                 "comments": 61
               }
             },
-            "code": 89,
+            "code": 93,
             "comments": 8
           }
         },
@@ -10175,7 +10324,7 @@
                 "comments": 83
               }
             },
-            "code": 473,
+            "code": 469,
             "comments": 44
           }
         },
@@ -10223,7 +10372,7 @@
                 "comments": 36
               }
             },
-            "code": 223,
+            "code": 221,
             "comments": 20
           }
         },
@@ -10239,7 +10388,7 @@
                 "comments": 27
               }
             },
-            "code": 121,
+            "code": 123,
             "comments": 8
           }
         },
@@ -10255,14 +10404,14 @@
                 "comments": 117
               }
             },
-            "code": 814,
+            "code": 828,
             "comments": 19
           }
         },
         {
           "name": "./proptest/src/test_runner/runner.rs",
           "stats": {
-            "blanks": 180,
+            "blanks": 179,
             "blobs": {
               "Markdown": {
                 "blanks": 24,
@@ -10278,7 +10427,7 @@
                 "comments": 182
               }
             },
-            "code": 1371,
+            "code": 1419,
             "comments": 72
           }
         },
@@ -10698,10 +10847,10 @@
         {
           "name": "./Cargo.toml",
           "stats": {
-            "blanks": 42,
+            "blanks": 43,
             "blobs": {},
-            "code": 332,
-            "comments": 40
+            "code": 334,
+            "comments": 59
           }
         },
         {
@@ -10718,8 +10867,8 @@
           "stats": {
             "blanks": 9,
             "blobs": {},
-            "code": 126,
-            "comments": 40
+            "code": 128,
+            "comments": 44
           }
         },
         {
@@ -10779,10 +10928,10 @@
         {
           "name": "./proptest/Cargo.toml",
           "stats": {
-            "blanks": 20,
+            "blanks": 27,
             "blobs": {},
-            "code": 57,
-            "comments": 23
+            "code": 78,
+            "comments": 27
           }
         },
         {
@@ -10832,8 +10981,8 @@
         }
       ]
     },
-    "code": 34450,
-    "comments": 13223,
+    "code": 35285,
+    "comments": 13471,
     "inaccurate": false,
     "reports": []
   }

@@ -9,6 +9,8 @@
 
 //! Arbitrary implementations for `std::result`.
 
+#[cfg(feature = "alt-stable")]
+use core::convert::Infallible;
 use core::fmt;
 use core::result::IntoIter;
 
@@ -19,6 +21,7 @@ use crate::arbitrary::functor;
 use crate::result::MaybeOk;
 use crate::result::Probability;
 use crate::result::maybe_ok_weighted;
+#[cfg(not(feature = "alt-stable"))]
 use crate::std_facade::string;
 use crate::strategy::BoxedStrategy;
 use crate::strategy::Just;
@@ -26,27 +29,42 @@ use crate::strategy::Strategy;
 use crate::strategy::statics::static_map;
 
 // These are Result with uninhabited type in some variant:
+#[cfg(not(feature = "alt-stable"))]
 arbitrary!([A: Arbitrary] Result<A, string::ParseError>,
     SMapped<A, Self>, A::Parameters;
-    args => static_map(any_with::<A>(args), Ok)
+    args => static_map(any_with::<A>(args), Ok::<A, string::ParseError>)
 );
+#[cfg(feature = "alt-stable")]
+arbitrary!([A: Arbitrary] Result<A, Infallible>,
+    SMapped<A, Self>, A::Parameters;
+    args => static_map(any_with::<A>(args), Ok::<A, Infallible>)
+);
+#[cfg(not(feature = "alt-stable"))]
 arbitrary!([A: Arbitrary] Result<string::ParseError, A>,
     SMapped<A, Self>, A::Parameters;
-    args => static_map(any_with::<A>(args), Err)
+    args => static_map(any_with::<A>(args), Err::<string::ParseError, A>)
 );
-#[cfg(feature = "unstable")]
+#[cfg(feature = "alt-stable")]
+arbitrary!([A: Arbitrary] Result<Infallible, A>,
+    SMapped<A, Self>, A::Parameters;
+    args => static_map(any_with::<A>(args), Err::<Infallible, A>)
+);
+#[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
 arbitrary!([A: Arbitrary] Result<A, !>,
     SMapped<A, Self>, A::Parameters;
     args => static_map(any_with::<A>(args), Ok)
 );
-#[cfg(feature = "unstable")]
+#[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
 arbitrary!([A: Arbitrary] Result<!, A>,
     SMapped<A, Self>, A::Parameters;
     args => static_map(any_with::<A>(args), Err)
 );
 
+#[cfg(not(feature = "alt-stable"))]
 lift1!([] Result<A, string::ParseError>; Ok);
-#[cfg(feature = "unstable")]
+#[cfg(feature = "alt-stable")]
+lift1!([] Result<A, Infallible>; Ok);
+#[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
 lift1!([] Result<A, !>; Ok);
 
 // We assume that `MaybeOk` is canonical as it's the most likely Strategy
@@ -113,4 +131,26 @@ mod test {
       result_a_parse_error => Result<u8, ParseError>,
       result_parse_error_a => Result<ParseError, u8>
   );
+
+  #[cfg(feature = "alt-stable")]
+  #[test]
+  fn result_infallible_variants_generate_only_inhabited_side() -> Result<(), strict_test_support::TestFailure> {
+    use crate::arbitrary::any;
+    use crate::strategy::Strategy as _;
+    use crate::strategy::ValueTree as _;
+    use crate::test_runner::TestRunner;
+
+    let mut runner = TestRunner::deterministic();
+    let ok_tree = strict_test_support::ensure_some(
+      any::<Result<u8, Infallible>>().new_tree(&mut runner).ok(),
+      "Result<T, Infallible> generates a value tree",
+    )?;
+    strict_test_support::ensure(ok_tree.current().is_ok(), "Result<T, Infallible> always generates Ok")?;
+
+    let err_tree = strict_test_support::ensure_some(
+      any::<Result<Infallible, u8>>().new_tree(&mut runner).ok(),
+      "Result<Infallible, T> generates a value tree",
+    )?;
+    strict_test_support::ensure(err_tree.current().is_err(), "Result<Infallible, T> always generates Err")
+  }
 }

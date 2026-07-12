@@ -32,7 +32,9 @@ use crate::arbitrary::functor;
 use crate::collection::BTreeMapStrategy;
 use crate::collection::BTreeSetStrategy;
 use crate::collection::BinaryHeapStrategy;
+#[cfg(feature = "std")]
 use crate::collection::HashMapStrategy;
+#[cfg(feature = "std")]
 use crate::collection::HashSetStrategy;
 use crate::collection::LinkedListStrategy;
 use crate::collection::SizeRange;
@@ -41,7 +43,9 @@ use crate::collection::VecStrategy;
 use crate::collection::binary_heap;
 use crate::collection::btree_map;
 use crate::collection::btree_set;
+#[cfg(feature = "std")]
 use crate::collection::hash_map;
+#[cfg(feature = "std")]
 use crate::collection::hash_set;
 use crate::collection::linked_list;
 use crate::collection::vec;

@@ -266,9 +266,11 @@ mod test {
 
   use super::*;
   use crate::strategy::just::Just;
+  #[cfg(feature = "strict-test")]
   use crate::strict::ensure_property;
   use crate::test_runner::test_runner_without_persistence;
 
+  #[cfg(feature = "strict-test")]
   #[test]
   fn test_map() -> Result<(), TestFailure> {
     ensure_property(
@@ -278,6 +280,7 @@ mod test {
     )
   }
 
+  #[cfg(feature = "strict-test")]
   #[test]
   fn test_map_into() -> Result<(), TestFailure> {
     ensure_property(

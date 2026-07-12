@@ -17,11 +17,9 @@
 //! That is, if we state that a type is uninhabited, it is so for sure.
 //! But we can't state that all uninhabited types are uninhabited.
 
+use syn;
 use syn::punctuated::Punctuated;
 use syn::visit;
-use syn::{
-  self,
-};
 
 use crate::interp;
 use crate::util;
@@ -131,7 +129,10 @@ impl<'ast> visit::Visit<'ast> for Uninhabited {
   // Even if `T` in `<T as Trait>::Item` is uninhabited, the associated item
   // may be inhabited, so we can't say for sure that it is uninhabited.
   fn visit_type_path(&mut self, type_path: &'ast syn::TypePath) {
-    const KNOWN_UNINHABITED: &[&str] = &["std::string::ParseError", "::std::string::ParseError"];
+    const KNOWN_UNINHABITED: &[&str] = &[
+      "std::string::ParseError", "::std::string::ParseError", "core::convert::Infallible", "::core::convert::Infallible",
+      "std::convert::Infallible", "::std::convert::Infallible",
+    ];
 
     if type_path.qself.is_none() && util::match_pathsegs(&type_path.path, KNOWN_UNINHABITED) {
       self.set();
@@ -161,4 +162,45 @@ impl<'ast> visit::Visit<'ast> for Uninhabited {
   // Both of these could be, but type is anonymous:
   fn visit_type_impl_trait(&mut self, _: &'ast syn::TypeImplTrait) {}
   fn visit_type_trait_object(&mut self, _: &'ast syn::TypeTraitObject) {}
+}
+
+#[cfg(test)]
+mod test {
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use syn::Type;
+  use syn::parse_quote;
+
+  use super::IsUninhabited as _;
+
+  #[test]
+  fn literal_never_and_infallible_paths_are_uninhabited() -> Result<(), TestFailure> {
+    let never: Type = parse_quote!(!);
+    let core_infallible: Type = parse_quote!(core::convert::Infallible);
+    let absolute_core_infallible: Type = parse_quote!(::core::convert::Infallible);
+    let std_infallible: Type = parse_quote!(std::convert::Infallible);
+    let absolute_std_infallible: Type = parse_quote!(::std::convert::Infallible);
+
+    ensure(never.is_uninhabited(), "literal never is uninhabited")?;
+    ensure(core_infallible.is_uninhabited(), "core Infallible is uninhabited")?;
+    ensure(absolute_core_infallible.is_uninhabited(), "absolute core Infallible is uninhabited")?;
+    ensure(std_infallible.is_uninhabited(), "std Infallible is uninhabited")?;
+    ensure(absolute_std_infallible.is_uninhabited(), "absolute std Infallible is uninhabited")
+  }
+
+  #[test]
+  fn inhabited_boundaries_are_not_marked_uninhabited() -> Result<(), TestFailure> {
+    let empty_array: Type = parse_quote!([core::convert::Infallible; 0]);
+    let macro_hidden: Type = parse_quote!(tymac!(core::convert::Infallible));
+    let function_signature: Type = parse_quote!(fn(core::convert::Infallible) -> core::convert::Infallible);
+    let projection: Type = parse_quote!(<core::convert::Infallible as Fun>::Prj);
+
+    ensure(!empty_array.is_uninhabited(), "empty arrays are inhabited")?;
+    ensure(!macro_hidden.is_uninhabited(), "macro-hidden types are not inspected")?;
+    ensure(!function_signature.is_uninhabited(), "function signatures are not uninhabited")?;
+    ensure(
+      !projection.is_uninhabited(),
+      "associated projections are not inspected as uninhabited",
+    )
+  }
 }

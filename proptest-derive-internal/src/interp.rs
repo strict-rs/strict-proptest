@@ -6,13 +6,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use syn;
 use syn::BinOp;
 use syn::Expr;
 use syn::Lit;
 use syn::UnOp;
-use syn::{
-  self,
-};
 
 /// Adapted from <https://docs.rs/syn/0.14.2/src/syn/lit.rs.html#943> to accept
 /// u128.

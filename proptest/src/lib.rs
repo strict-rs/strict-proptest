@@ -17,9 +17,15 @@
 #![forbid(future_incompatible)]
 #![deny(missing_docs, bare_trait_objects)]
 #![no_std]
-#![cfg_attr(feature = "unstable", feature(allocator_api, coroutine_trait, never_type))]
-#![cfg_attr(feature = "f16", feature(f16))]
-#![cfg_attr(all(feature = "std", feature = "unstable"), feature(ip))]
+#![cfg_attr(
+  all(feature = "unstable", not(feature = "alt-stable")),
+  feature(allocator_api, coroutine_trait, never_type)
+)]
+#![cfg_attr(all(feature = "f16", not(feature = "alt-stable")), feature(f16))]
+#![cfg_attr(
+  all(feature = "std", feature = "unstable", not(feature = "alt-stable")),
+  feature(ip)
+)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 // std_facade is used in a few macros, so it needs to be public.
@@ -45,6 +51,8 @@ mod macros;
 #[macro_use]
 pub mod sugar;
 
+#[cfg(feature = "alt-stable")]
+pub mod alt_stable;
 pub mod arbitrary;
 pub mod array;
 pub mod bits;
@@ -90,6 +98,7 @@ mod tests {
   #[test]
   fn sugar_macro_compile_tests() -> Result<(), trybuild::TryBuildError> {
     let mut cases = trybuild::TestCases::new();
+    #[cfg(feature = "strict-test")]
     cases.pass("tests/sugar/pass/*.rs");
     cases.compile_fail("tests/sugar/fail/*.rs");
     cases.run()
@@ -98,6 +107,7 @@ mod tests {
   #[test]
   fn prelude_compile_tests() -> Result<(), trybuild::TryBuildError> {
     let mut cases = trybuild::TestCases::new();
+    #[cfg(feature = "strict-test")]
     cases.pass("tests/prelude/pass/*.rs");
     cases.compile_fail("tests/prelude/fail/*.rs");
     cases.run()

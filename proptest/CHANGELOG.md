@@ -13,6 +13,15 @@
 
 ### Bug Fixes
 
+- Stable `--all-features` builds no longer select nightly `#![feature(...)]`
+  gates: exact impls for still-unstable standard-library and language APIs are
+  compiled only with `unstable` when `alt-stable` is not enabled, while
+  `alt-stable` wins in combined feature sets.
+- The `alloc` + `libm` no-`std` build now compiles without `std`: std-only
+  hash collection impls share the same `std` cfg as their strategy
+  constructors, the fallback variable bitset imports its `Vec<bool>` backend
+  locally, no-std float weighting imports the libm `mul_add` trait, and the
+  no-std runner result-cache path maps the actual test result.
 - Fixed a panic when sampling from a single-point inclusive float range like `0.0..=0.0`. ([\#479](https://github.com/proptest-rs/proptest/issues/479))
 - A weighted union whose weights are all zero and a `SampledBitSetStrategy` whose concrete bitset cannot represent the requested bit range now abort generation with an error instead of panicking.
 - Selecting a char from an empty `ranges` list now degrades to the canonical `'a'` shrink target instead of panicking.
@@ -23,6 +32,15 @@
 
 ### New Additions
 
+- Added the `alt-stable` feature for stable substitutes of still-nightly API
+  surfaces: `allocator_api2::alloc::{Global, AllocError}`, `half::f16` through
+  `proptest::num::half_f16`, and
+  `proptest::alt_stable::{CoroutineState, Ipv6MulticastScope}` with
+  `Arbitrary` impls.
+- Stabilized `Arbitrary` coverage that no longer needs nightly on the current
+  MSRV: `alloc::Layout`, `core::iter::StepBy`,
+  `core::num::TryFromIntError`, `char` case-mapping iterator/error types,
+  narrow atomic integer types, and `Rc`/`Arc` wrappers for `CStr` and `OsStr`.
 - Added the `proptest::strict` module behind the new default-on `strict-test` feature (requires `std`): `ensure_property` and `ensure_property_with_config` run a strategy against a closure returning `Result<(), TestFailure>` (`proptest::strict::TestResult`) and map runner outcomes onto `TestFailure::PropertyFalsified` / `TestFailure::PropertyAborted` instead of panicking, with `TestFailure` re-exported from `strict-test-support`. `strict_default_config()` starts from `Config::default()` (ordinary `PROPTEST_*` environment behavior preserved), disables failure persistence, and seeds deterministically from `STRICT_TEST_SEED`: unset or unparseable pins the fixed seed `0x5EED`, `random` opts into OS entropy, and an integer pins that exact seed.
 - Added typed fallible constructors alongside the panicking legacy forms: `Union::try_new_uniform` / `Union::try_new_weighted` / `try_float_to_weight` (with `UnionBuildError`), the `collection::try_vec` family (with `EmptySizeRange` via `SizeRange::ensure_nonempty`), `sample::try_subsequence` / `sample::try_select` / `Index::try_index`, `SampledBitSetStrategy::try_new` (with `SampledBitsError`), `try_range_subset` (with `RangeSubsetError`), and the crate-internal `Seed::try_from_bytes` (with `SeedLengthError`).
 - The typed strategy-construction error types now implement `Copy`: `collection::EmptySizeRange`, `strategy::UnionBuildError`, `sample::EmptySelection`, `sample::SubsequenceError`, `bits::SampledBitsError`, and (feature `std`) `range_subset::RangeSubsetError`.

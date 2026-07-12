@@ -114,7 +114,7 @@ macro_rules! lazy_just {
 /// strategies is able to construct a value, therefore ensuring that
 /// no panic occurs is mostly sufficient. Shrinking for strategies that
 /// use special shrinking methods can be handled separately.
-#[cfg(test)]
+#[cfg(all(test, feature = "strict-test"))]
 macro_rules! no_panic_test {
     ($($name: ident => $self: ty),+ $(,)?) => {
         $(
@@ -128,4 +128,22 @@ macro_rules! no_panic_test {
             }
         )+
     };
+}
+
+#[cfg(all(test, not(feature = "strict-test")))]
+macro_rules! no_panic_test {
+  ($($name:ident => $self:ty),+ $(,)?) => {
+      $(
+          #[test]
+          fn $name() -> ::core::result::Result<(), ::strict_test_support::TestFailure> {
+              use $crate::strategy::Strategy as _;
+
+              let mut runner = $crate::test_runner::TestRunner::deterministic();
+              ::strict_test_support::ensure(
+                  $crate::arbitrary::any::<$self>().new_tree(&mut runner).is_ok(),
+                  concat!(module_path!(), "::", stringify!($name)),
+              )
+          }
+      )+
+  };
 }

@@ -6,6 +6,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![feature(never_type)]
+
 extern crate proptest_derive;
 use proptest_derive::Arbitrary;
 
@@ -39,7 +41,7 @@ enum T2 {
     V0,
     #[proptest(skip)]
     V1,
-    V2(core::convert::Infallible),
+    V2(!),
 }
 
 #[derive(Debug, Arbitrary)] //~ ERROR: [proptest_derive, E0006]
@@ -48,5 +50,5 @@ enum T3 {
     V0,
     #[proptest(skip)]
     V1,
-    V2([core::convert::Infallible; 1 + 2 + (3 / 3) + (1 << 3)]),
+    V2([!; 1 + 2 + (3 / 3) + (1 << 3)]),
 }

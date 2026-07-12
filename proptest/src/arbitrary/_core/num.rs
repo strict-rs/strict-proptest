@@ -13,7 +13,6 @@ use core::num::FpCategory;
 use core::num::ParseFloatError;
 use core::num::ParseIntError;
 use core::num::Saturating;
-#[cfg(feature = "unstable")]
 use core::num::TryFromIntError;
 use core::num::Wrapping;
 
@@ -36,7 +35,6 @@ arbitrary!(ParseIntError; {
     }
 });
 
-#[cfg(feature = "unstable")]
 arbitrary!(TryFromIntError; {
     use core::convert::TryFrom as _;
     loop {
@@ -79,7 +77,6 @@ mod test {
       fp_category => FpCategory
   );
 
-  #[cfg(feature = "unstable")]
   no_panic_test!(
       try_from_int_error => TryFromIntError
   );

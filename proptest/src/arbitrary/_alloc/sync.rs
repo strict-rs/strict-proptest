@@ -10,22 +10,16 @@
 //! Arbitrary implementations for `std::sync`.
 
 use core::sync::atomic::AtomicBool;
-#[cfg(feature = "unstable")]
 use core::sync::atomic::AtomicI8;
-#[cfg(feature = "unstable")]
 use core::sync::atomic::AtomicI16;
-#[cfg(feature = "unstable")]
 use core::sync::atomic::AtomicI32;
-#[cfg(all(feature = "unstable", feature = "atomic64bit"))]
+#[cfg(feature = "atomic64bit")]
 use core::sync::atomic::AtomicI64;
 use core::sync::atomic::AtomicIsize;
-#[cfg(feature = "unstable")]
 use core::sync::atomic::AtomicU8;
-#[cfg(feature = "unstable")]
 use core::sync::atomic::AtomicU16;
-#[cfg(feature = "unstable")]
 use core::sync::atomic::AtomicU32;
-#[cfg(all(feature = "unstable", feature = "atomic64bit"))]
+#[cfg(feature = "atomic64bit")]
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
@@ -56,11 +50,10 @@ macro_rules! atomic {
 // impl_wrap_gen!(AtomicPtr); // We don't have impl Arbitrary for *mut T yet.
 atomic!(AtomicBool, bool; AtomicIsize, isize; AtomicUsize, usize);
 
-#[cfg(feature = "unstable")]
 atomic!(AtomicI8, i8; AtomicI16, i16; AtomicI32, i32;
         AtomicU8, u8; AtomicU16, u16; AtomicU32, u32);
 
-#[cfg(all(feature = "unstable", feature = "atomic64bit"))]
+#[cfg(feature = "atomic64bit")]
 atomic!(AtomicI64, i64; AtomicU64, u64);
 
 arbitrary!(Ordering,
@@ -87,7 +80,6 @@ mod test {
       ordering => Ordering
   );
 
-  #[cfg(feature = "unstable")]
   no_panic_test!(
       atomic_i8  => AtomicI8,
       atomic_i16 => AtomicI16,
@@ -97,7 +89,7 @@ mod test {
       atomic_u32 => AtomicU32
   );
 
-  #[cfg(all(feature = "unstable", feature = "atomic64bit"))]
+  #[cfg(feature = "atomic64bit")]
   no_panic_test!(
       atomic_i64 => AtomicI64,
       atomic_u64 => AtomicU64

@@ -24,22 +24,23 @@ Default set: `["std", "fork", "timeout", "bit-set", "strict-test"]`. The complet
 - `timeout` — per-case time limits; pulls `rusty-fork/timeout` and **requires `fork`**.
 - `bit-set` — bitset strategies; pulls the `bit-set` + `bit-vec` deps (via `dep:` syntax).
 - `attr-macro` — pulls the optional `proptest-macro` dep and re-exports `#[property_test]`.
-- `unstable` — turns on nightly-only language features (gated by `cfg_attr` in `lib.rs`: `allocator_api`, `coroutine_trait`, `never_type`, and `ip` under `std`) and transitively enables `f16`.
-- `f16` — `f16` float strategy support; an empty toggle, but requires nightly because the `f16` type is itself unstable. Enabled implicitly by `unstable`.
-- `hardware-rng` — use an x86 hardware RNG instead of a static seed on x86 `no_std` targets; pulls the `x86` dep.
-- `atomic64bit` — gates `Arbitrary` for the 64-bit atomics (`AtomicI64`/`AtomicU64`, only alongside `unstable`); per its comment, excludable on no_std targets that lack 64-bit atomics.
+- `unstable` — exact nightly-only standard-library and language API support; enables `f16`, but the `cfg_attr` gates in `lib.rs` request `allocator_api`, `coroutine_trait`, `never_type`, and `ip` only when `alt-stable` is not enabled.
+- `f16` — primitive `f16` float strategy support. It requires nightly unless `alt-stable` is also enabled, in which case the stable `half::f16` substitute is selected instead. Enabled implicitly by `unstable`.
+- `alt-stable` — stable substitutes for APIs that are still nightly in `std`/`core`/`alloc`; pulls `allocator-api2` and `half`, and wins over `unstable` in combined feature sets so stable `--all-features` builds do not request nightly crate attributes.
+- `hardware-rng` — use hardware/OS entropy instead of a static seed on supported no-`std` targets; pulls `getrandom`, with OS-less RDRAND consumers selecting getrandom's `rdrand` backend by cfg.
+- `atomic64bit` — gates `Arbitrary` for the 64-bit atomics (`AtomicI64`/`AtomicU64`); per its comment, excludable on no_std targets that lack 64-bit atomics.
 - `handle-panics` — hide intermediate panic spew flowing to stderr during the shrink phase; **requires `std`**.
 - `strict-test` — gates the `strict` module (`proptest::strict`, the Result-returning property harness); pulls the optional `strict-test-support` dep (`TestFailure` and the `ensure*` helpers) and **requires `std`** (enables it explicitly). On by default.
 - `default-code-coverage` — a coverage-friendly mirror of `default` (`std`, `fork`, `timeout`, `bit-set` — without `strict-test`).
 
 ## Dependencies (`Cargo.toml`)
 
-Always on: `bitflags`, `unarray`, `num-traits`, `rand` (with its `alloc` feature), `rand_chacha`, `rand_xorshift`. Optional / feature-gated: `regex-syntax` (`std`), `bit-set` + `bit-vec` (`bit-set`), `rusty-fork` + `tempfile` (`fork`), `x86` (`hardware-rng`), `proptest-macro` (`attr-macro`), `strict-test-support` (`strict-test`). Dev-only: `regex`, `trybuild`, `strict-test-support` (the `ensure*` vocabulary for test targets and trybuild fixtures). Versions are pinned centrally in the workspace `[workspace.dependencies]`.
+Always on: `bitflags`, `unarray`, `num-traits`, `rand` (with its `alloc` feature), `rand_chacha`, `rand_xorshift`. Optional / feature-gated: `regex-syntax` (`std`), `bit-set` + `bit-vec` (`bit-set`), `allocator-api2` + `half` (`alt-stable`), `getrandom` (`hardware-rng`), `rusty-fork` + `tempfile` (`fork`), `proptest-macro` (`attr-macro`), `strict-test-support` (`strict-test`). Dev-only: `regex`, `trybuild`, `strict-test-support` (the `ensure*` vocabulary for test targets and trybuild fixtures). Versions are pinned centrally in the workspace `[workspace.dependencies]`.
 
 ## Generated docs
 
 - `README.md` is **generated — don't hand-edit it.** `gen-readme.sh` concatenates `readme-prologue.md`, the awk-transformed `../book/src/{intro,getting-started,vs-quickcheck,limitations}.md`, and `readme-antelogue.md`. Edit those sources, then regenerate. The repo-root `README.md` is a symlink to this crate's `README.md`.
-- `gen-docs.sh` is a maintainer-only rustdoc publisher (absolute paths into a local GH-Pages checkout); its `nostd` mode builds `--no-default-features --features=libm,alloc,unstable` on nightly. Not part of normal dev.
+- `gen-docs.sh` is a maintainer-only rustdoc publisher (absolute paths into a local GH-Pages checkout); its `nostd` mode builds `--no-default-features --features=libm,alloc,unstable` on nightly. Normal stable no-`std` checks use `--features=libm,alloc` (or add `alt-stable` for substitute APIs). Not part of normal dev.
 - `[package.metadata.docs.rs]` sets `all-features = true` and `rustdoc-args = ["--cfg", "docsrs"]`, which lights up the `#[doc(cfg(...))]` feature badges. `Cargo.toml` also `exclude`s `/gen-*.sh` and `/readme-*.md` from the published crate.
 
 ## Most-used commands
@@ -51,6 +52,7 @@ cargo test  -p proptest                 # whole core suite (inline #[cfg(test)] 
 cargo test  -p proptest simple_example  # filter by name substring
 cargo test  -p proptest --test attr_macro --features attr-macro  # the integration target
 cargo build -p proptest --no-default-features --features std     # a no-`std`-leaning build check
+cargo check -p proptest --no-default-features --features "alloc libm alt-stable"
 ```
 
 ## Gotcha

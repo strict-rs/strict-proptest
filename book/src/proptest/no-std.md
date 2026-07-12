@@ -2,8 +2,8 @@
 
 Proptest has partial support for being used in `no_std` contexts.
 
-You will need a nightly compiler version. In your `Cargo.toml`, adjust the
-Proptest dependency to look something like this:
+In your `Cargo.toml`, adjust the Proptest dependency to look something like
+this:
 
 ```toml
 [dev-dependencies.proptest]
@@ -15,8 +15,7 @@ default-features = false
 # alloc: Use the `alloc` crate directly. Proptest has a hard requirement on
 # memory allocation, so either this or `std` is needed.
 # libm: Use `num-traits`' libm-backed float math without enabling `std`.
-# unstable: Enable use of nightly-only compiler features.
-features = ["libm", "alloc", "unstable"]
+features = ["libm", "alloc"]
 ```
 
 Some APIs are not available in the no-`std` build. This includes functionality
@@ -25,6 +24,17 @@ as features depending on other crates which do not support no-`std` usage, such
 as regex support. Use `default-features = false` for a no-`std` build, add
 `alloc` when allocation-backed APIs are needed, and add `libm` when float math
 from `num-traits` is needed without `std`.
+
+Use `alt-stable` when you want stable substitutes for APIs that are still
+nightly-only in `std`/`core`/`alloc`, such as `half::f16` instead of primitive
+`f16` and `allocator_api2::alloc` types instead of the unstable allocator API:
+
+```toml
+features = ["libm", "alloc", "alt-stable"]
+```
+
+Use `unstable` only on nightly when you want the exact nightly standard-library
+or language API implementations rather than stable substitutes.
 
 The `no_std` build may not have access to an entropy source (one exception are
 x86-64 machines that support rdrand, in this case the library can be compiled

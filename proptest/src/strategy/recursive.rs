@@ -7,6 +7,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#[cfg(all(not(feature = "std"), not(test)))]
+use num_traits::MulAdd as _;
 use num_traits::ToPrimitive as _;
 
 use crate::std_facade::Arc;

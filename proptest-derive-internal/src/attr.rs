@@ -9,6 +9,7 @@
 //! Provides a parser from syn attributes to our logical model.
 
 use quote::ToTokens as _;
+use syn;
 use syn::Attribute;
 use syn::Expr;
 use syn::Ident;
@@ -19,15 +20,10 @@ use syn::Type;
 use syn::parse::Parser as _;
 use syn::parse_quote;
 use syn::punctuated::Punctuated;
-use syn::{
-  self,
-};
 
+use crate::error;
 use crate::error::Ctx;
 use crate::error::DeriveResult;
-use crate::error::{
-  self,
-};
 use crate::interp;
 use crate::util;
 

@@ -8,13 +8,11 @@
 // except according to those terms.
 
 use std::fs;
+use std::io;
 use std::io::BufRead;
 use std::io::Read;
 use std::io::Seek;
 use std::io::Write;
-use std::io::{
-  self,
-};
 use std::path::Path;
 use std::string::String;
 use std::vec::Vec;

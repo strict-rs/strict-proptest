@@ -44,19 +44,15 @@ use crate::ast::pair_value;
 use crate::ast::pair_value_exist;
 use crate::ast::pair_value_exist_self;
 use crate::ast::pair_value_self;
+use crate::attr;
 use crate::attr::ParamsMode;
 use crate::attr::ParsedAttributes;
 use crate::attr::StratMode;
 use crate::attr::TopParamsMode;
-use crate::attr::{
-  self,
-};
+use crate::error;
 use crate::error::Context;
 use crate::error::Ctx;
 use crate::error::DeriveResult;
-use crate::error::{
-  self,
-};
 use crate::use_tracking::UseMarkable as _;
 use crate::use_tracking::UseTracker;
 use crate::util::PayloadFields;

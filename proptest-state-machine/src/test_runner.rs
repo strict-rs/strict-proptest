@@ -10,17 +10,13 @@
 //! Test declaration helpers and runners for abstract state machine testing.
 
 use std::sync::Arc;
+use std::sync::atomic;
 use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::{
-  self,
-};
 
 #[cfg(feature = "std")]
-use proptest::std_facade::fmt::Debug;
+use proptest::std_facade::fmt;
 #[cfg(feature = "std")]
-use proptest::std_facade::fmt::{
-  self,
-};
+use proptest::std_facade::fmt::Debug;
 use proptest::strict::TestFailure;
 use proptest::strict::TestResult;
 use proptest::strict::strict_default_config;

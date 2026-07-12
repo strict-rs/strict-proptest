@@ -23,7 +23,6 @@ use core::iter::Peekable;
 use core::iter::Repeat;
 use core::iter::Rev;
 use core::iter::Skip;
-#[cfg(feature = "unstable")]
 use core::iter::StepBy;
 use core::iter::Take;
 use core::iter::Zip;
@@ -150,7 +149,6 @@ macro_rules! usize_mod {
 usize_mod!(Skip, skip);
 usize_mod!(Take, take);
 
-#[cfg(feature = "unstable")]
 usize_mod!(StepBy, step_by);
 
 #[cfg(test)]
@@ -189,7 +187,6 @@ mod test {
       take      => Take<Repeat<u8>>
   );
 
-  #[cfg(feature = "unstable")]
   no_panic_test!(
       step_by   => StepBy<Repeat<u8>>
   );

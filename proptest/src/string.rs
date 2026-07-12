@@ -18,12 +18,10 @@ use std::error::Error as StdError;
 
 use regex_syntax::Error as ParseError;
 use regex_syntax::ParserBuilder;
+use regex_syntax::hir;
 use regex_syntax::hir::Hir;
 use regex_syntax::hir::HirKind;
 use regex_syntax::hir::Repetition;
-use regex_syntax::hir::{
-  self,
-};
 
 use crate::bool;
 use crate::char;

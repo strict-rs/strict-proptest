@@ -2,7 +2,7 @@
 
 This file provides guidance to coding agents when working with code in this repository.
 
-Scope: `proptest-derive/tests/` — the leaf test suite for `#[derive(Arbitrary)]`: per-feature compile-and-run integration tests (the sibling `*.rs` files) plus a `compile-fail/` UI suite driven by a bespoke `compiletest_rs` harness. The whole thing **requires nightly** (some cases use `#![feature(never_type)]`); run it both ways — `cargo +nightly test -p proptest-derive` and again with `--features boxed_union`. See `../AGENTS.md` for the crate and the workspace-root `AGENTS.md` for shared build/lint conventions.
+Scope: `proptest-derive/tests/` — the leaf test suite for `#[derive(Arbitrary)]`: per-feature compile-and-run integration tests (the sibling `*.rs` files) plus a `compile-fail/` UI suite driven by a bespoke `compiletest_rs` harness. Stable tests use `core::convert::Infallible` for uninhabited-type coverage; exact literal-`!` fixtures use `#![feature(never_type)]` and live in nightly-only compiletest directories. Run full literal-`!` coverage with `cargo +nightly test -p proptest-derive` and again with `--features boxed_union`. See `../AGENTS.md` for the crate and the workspace-root `AGENTS.md` for shared build/lint conventions.
 
 ## Two kinds of test here
 
@@ -27,7 +27,7 @@ Other harness details worth knowing:
 
 - The fingerprint `features` field is itself a JSON-string-encoded array (double-encoded); `parse_feature_set` decodes it with `serde_json`.
 - `path_to_str` asserts artifact paths contain no whitespace — `compiletest` splits the rustc flag string on spaces and cannot represent a path with spaces.
-- `run_mode("compile-fail", "compile-fail")` is the only mode used; it points `src_base` at `tests/compile-fail`.
+- `compile_test()` always runs `run_mode("compile-fail", "compile-fail")`; when `${RUSTC:-rustc} --version` contains `nightly`, it also runs `compile-fail-nightly` in `compile-fail` mode and `run-pass-nightly` in `run-pass` mode.
 - Set the `TESTNAME` env var to filter to a single compile-fail case (`config.filters`).
 - Two `#[test]` self-tests guard the fingerprint logic: `fingerprint_parsing_uses_typed_fields` (typed extraction of `rustc`/`config`/`features`) and `fingerprint_feature_matching_uses_exact_tokens` (feature matching is by exact token — `default-code-coverage` does **not** satisfy a required `default`).
 
@@ -56,7 +56,7 @@ Every `tests/*.rs` follows the same two-part shape, and new cases should match i
 - a `#[test] fn asserting_arbitrary()` containing a local `fn assert_arbitrary<T: Arbitrary>() {}` called once per derived type — a pure compile-time check that the impl and its bounds resolve;
 - one or more `proptest! { … }` blocks that actually generate values and `prop_assert!` the attribute semantics (e.g. that a `value`/`strategy`/`filter`/`regex`/`weight` produced what it should), usually via `any_with::<T>(params)` when params are involved.
 
-The derive is pulled in as `use proptest_derive::Arbitrary;` in every top-level integration test (the raw-rustc `compile-fail/` fixtures still use the `#[macro_use] extern crate proptest_derive;` form). `skip.rs` and `uninhabited-pass.rs` carry `#![feature(never_type)]` — the concrete reason the suite needs nightly.
+The derive is pulled in as `use proptest_derive::Arbitrary;` in every top-level integration test (the raw-rustc `compile-fail/` fixtures still use the `#[macro_use] extern crate proptest_derive;` form). `skip.rs` and `uninhabited-pass.rs` use `core::convert::Infallible` for stable uninhabited coverage; the exact literal-`!` versions live in `run-pass-nightly/`.
 
 Each file targets one attribute / feature area:
 
@@ -70,13 +70,13 @@ Each file targets one attribute / feature area:
 - **params.rs** — container/field `#[proptest(params(T))]` (and `params = "T"`), `no_params`, strategies referencing `params`, and per-field "parallel" params; driven by `any_with`.
 - **filter.rs** — `#[proptest(filter(…))]` at container, variant, and field level in every spelling (closure string, `fn` path, `= "…"`), multiple filters, and combinations with strategy/value/params.
 - **weight.rs** — enum-variant `#[proptest(weight = N)]` / `weight(N)` in both string- and integer-literal forms.
-- **skip.rs** — `#[proptest(skip)]` on enum variants and uninhabited `!` variants (needs `never_type`).
+- **skip.rs** — `#[proptest(skip)]` on enum variants and uninhabited `core::convert::Infallible` variants; exact literal-`!` coverage lives in `run-pass-nightly/skip-never.rs`.
 - **regex.rs** — field `#[proptest(regex = …)]` / `regex(…)` / `regex(fn)` for `String`, `Vec<u8>`, and custom `StrategyFromRegex` impls; raw-string forms; combined with `filter`.
 - **phantom.rs** — `PhantomData<T>` field detection across import spellings, so the phantom type need not be `Arbitrary`.
 - **no_bound.rs** — container `#[proptest(no_bound)]` dropping the generated `Arbitrary` bounds on all type params (per-tyvar `no_bound` is still TODO and commented out).
 - **use_tracker.rs** — type-parameter usage tracking: only params used in real (non-`PhantomData`) fields get the `Arbitrary` bound (exercises `src/use_tracking.rs`).
 - **assoc.rs** — fields whose types are associated-type projections (`<T as Trait>::Out`, `Tyvar::OutB`, nested projections) still infer correct bounds.
-- **uninhabited-pass.rs** — the passing side of uninhabited detection: `!`, `[!; N]` with const-expr lengths, and macro-/projection-hidden fields the derive cannot inspect (needs `never_type`).
+- **uninhabited-pass.rs** — the passing side of uninhabited detection: `core::convert::Infallible`, `[Infallible; N]` with const-expr lengths, and macro-/projection-hidden fields the derive cannot inspect; exact literal-`!` coverage lives in `run-pass-nightly/uninhabited-never.rs`.
 - **misc.rs** — grab-bag of container `params` plus variant-level `value`/`strategy`/`no_params`/`params` combinations not covered elsewhere.
 
 For the derive internals these tests exercise (the `error.rs` codes, `use_tracking.rs`, uninhabited detection in `void.rs`), see `../src/AGENTS.md`.

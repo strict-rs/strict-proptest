@@ -15,7 +15,10 @@ use core::str;
 
 use rand::Rng as _;
 use rand::RngExt as _;
+#[cfg(feature = "std")]
 use rand::SeedableRng;
+#[cfg(not(feature = "std"))]
+use rand::SeedableRng as _;
 use rand::TryRng;
 #[cfg(feature = "std")]
 use rand::rand_core::UnwrapErr;
@@ -328,6 +331,10 @@ impl Seed {
 
   /// Decode a `Seed` from one persistence/replay line, or `None` if
   /// the algorithm key is unknown or its payload is malformed.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "name the persistence-line parser used by the failure-persistence boundary"
+  )]
   pub(crate) fn from_persistence(string: &str) -> Option<Self> {
     fn from_base16(dst: &mut [u8], src: &str) -> Option<()> {
       if dst.len().saturating_mul(2) != src.len() {
@@ -618,7 +625,7 @@ impl TestRng {
       feature = "hardware-rng"
     ))]
     {
-      let _ = seed;
+      let _: config::RngSeed = seed;
       Self::hardware_rng(algorithm)
     }
     #[cfg(all(
@@ -626,7 +633,7 @@ impl TestRng {
       not(all(any(target_arch = "x86", target_arch = "x86_64"), feature = "hardware-rng"))
     ))]
     {
-      let _ = seed;
+      let _: config::RngSeed = seed;
       Self::deterministic_rng(algorithm)
     }
   }
@@ -781,6 +788,7 @@ mod test {
   use std::string::ToString as _;
 
   use rand::Rng as _;
+  #[cfg(feature = "strict-test")]
   use rand::RngExt as _;
   use strict_test_support::TestFailure;
   use strict_test_support::ensure;
@@ -791,12 +799,17 @@ mod test {
   use super::RngAlgorithm;
   use super::Seed;
   use super::TestRng;
+  #[cfg(feature = "strict-test")]
   use crate::arbitrary::any;
   use crate::std_facade::Vec;
+  #[cfg(feature = "strict-test")]
   use crate::std_facade::vec;
+  #[cfg(feature = "strict-test")]
   use crate::strategy::*;
+  #[cfg(feature = "strict-test")]
   use crate::strict::ensure_property;
 
+  #[cfg(feature = "strict-test")]
   #[test]
   fn gen_parse_seeds() -> Result<(), TestFailure> {
     let seeds = prop_oneof![
@@ -837,6 +850,7 @@ mod test {
     )
   }
 
+  #[cfg(feature = "strict-test")]
   #[test]
   fn rngs_dont_clone_self_on_genrng() -> Result<(), TestFailure> {
     let seeds = prop_oneof![

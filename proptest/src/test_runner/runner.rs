@@ -16,11 +16,9 @@ use std::env;
 #[cfg(feature = "fork")]
 use std::fs;
 #[cfg(feature = "std")]
-use std::panic::AssertUnwindSafe;
+use std::panic;
 #[cfg(feature = "std")]
-use std::panic::{
-  self,
-};
+use std::panic::AssertUnwindSafe;
 #[cfg(feature = "fork")]
 use std::path::PathBuf;
 #[cfg(any(feature = "timeout", all(feature = "std", not(target_arch = "wasm32"))))]
@@ -59,6 +57,7 @@ use crate::test_runner::reason::Reason;
 use crate::test_runner::replay;
 use crate::test_runner::result_cache::ResultCache;
 use crate::test_runner::result_cache::ResultCacheKey;
+#[cfg(feature = "fork")]
 use crate::test_runner::rng::Seed;
 use crate::test_runner::rng::TestRng;
 
@@ -96,14 +95,33 @@ macro_rules! verbose_message {
 #[cfg(not(feature = "std"))]
 macro_rules! verbose_message {
     ($runner:expr, $level:expr, $fmt:tt $($arg:tt)*) => {{
-        let _ = &$runner;
-        let _ = $level;
-        let _ = format_args!($fmt $($arg)*);
+        match &$runner {
+            _ => {}
+        }
+        match $level {
+            _ => {}
+        }
+        match format_args!($fmt $($arg)*) {
+            _ => {}
+        }
     }};
 }
 
 /// Per-`Reason` tally of how many inputs were rejected at each site.
 type RejectionDetail = BTreeMap<Reason, u32>;
+/// Result shape for the shrink walk: fork builds can fail while appending
+/// replay output, while no-fork builds cannot.
+#[cfg(feature = "fork")]
+type ShrinkResult = Result<Option<Reason>, Reason>;
+/// Result shape for the shrink walk when no replay file exists.
+#[cfg(not(feature = "fork"))]
+type ShrinkResult = Option<Reason>;
+
+/// Return a shrink result directly when no replay file exists.
+#[cfg(not(feature = "fork"))]
+const fn shrink_result(reason: Option<Reason>) -> ShrinkResult {
+  reason
+}
 
 /// State used when running a proptest test.
 #[derive(Clone)]
@@ -240,32 +258,19 @@ struct ForkOutput;
 
 #[cfg(not(feature = "fork"))]
 impl ForkOutput {
-  /// No-op: there is no replay file without forking.
-  const fn append(&mut self, _result: &TestCaseResult) -> Result<(), Reason> {
-    Ok(())
-  }
-
-  /// No-op progress ping; present only for signature parity.
-  #[cfg(feature = "std")]
-  const fn ping(&mut self) -> Result<(), Reason> {
-    Ok(())
-  }
-
-  /// No-op: there is no replay log to terminate.
-  const fn terminate(&mut self) -> Result<(), Reason> {
-    Ok(())
-  }
   /// The only `ForkOutput` there is without forking.
-  fn empty() -> Self {
-    ForkOutput
+  const fn empty() -> Self {
+    Self
   }
   /// Always `false`: a non-fork build is never inside a fork.
-  fn is_in_fork(&self) -> bool {
+  const fn is_in_fork(&self) -> bool {
+    let _: &Self = self;
     false
   }
 }
 
 /// Backtrack a budget-exhausted shrink walk to the latest known failing case.
+#[cfg(feature = "fork")]
 #[allow(
   clippy::single_call_fn,
   reason = "the shrink budget path must restore the latest failing case before returning"
@@ -275,6 +280,17 @@ fn restore_latest_failing_case<V: ValueTree>(case: &mut V, fork_output: &mut For
     fork_output.append(&Ok(()))?;
   }
   Ok(())
+}
+
+/// Backtrack a budget-exhausted shrink walk to the latest known failing case.
+#[cfg(not(feature = "fork"))]
+#[allow(
+  clippy::single_call_fn,
+  reason = "the shrink budget path must restore the latest failing case before returning"
+)]
+fn restore_latest_failing_case<V: ValueTree>(case: &mut V, fork_output: &mut ForkOutput) {
+  let _: &mut ForkOutput = fork_output;
+  while case.complicate() {}
 }
 
 /// Parent-side replay status after re-reading the shared forkfile.
@@ -374,7 +390,7 @@ fn record_abrupt_child_failure(
 /// and fork-output handling of the `std` path.
 #[cfg(not(feature = "std"))]
 fn call_test<V, F, R>(
-  _runner: &mut TestRunner,
+  _runner: &TestRunner,
   case: V,
   test_fn: &F,
   replay_from_fork: &mut R,
@@ -398,7 +414,7 @@ where
 
   let result = test_fn(case);
   result_cache.put(cache_key, &result);
-  final_result.map(|()| {
+  result.map(|()| {
     if is_from_persisted_seed {
       TestCaseOk::PersistedCaseSuccess
     } else {
@@ -440,7 +456,10 @@ where
   // Now that we're about to start a new test (as far as the replay system is
   // concerned), ping the replay file so the parent process can determine
   // that we made it this far.
+  #[cfg(feature = "fork")]
   fork_output.ping().map_err(TestCaseError::fail)?;
+  #[cfg(not(feature = "fork"))]
+  let _: &mut ForkOutput = fork_output;
 
   verbose_message!(runner, TRACE, "Next test input: {:?}", case);
 
@@ -483,7 +502,10 @@ where
   let final_result = test_result;
 
   result_cache.put(cache_key, &final_result);
+  #[cfg(feature = "fork")]
   fork_output.append(&final_result).map_err(TestCaseError::fail)?;
+  #[cfg(not(feature = "fork"))]
+  let _: &TestCaseResult = &final_result;
 
   match final_result {
     Ok(()) => verbose_message!(runner, TRACE, "Test case passed"),
@@ -643,7 +665,8 @@ impl TestRunner {
   /// is always false, so `run` never routes here.
   #[cfg(not(feature = "fork"))]
   fn run_in_fork<S: Strategy>(&mut self, _: &S, _: impl Fn(S::Value) -> TestCaseResult) -> TestRunResult<S> {
-    unreachable!()
+    let _: &mut Self = self;
+    Err(TestError::Abort(Reason::from("fork support is disabled")))
   }
 
   /// Run the test in a subprocess, coordinating through a shared
@@ -730,7 +753,10 @@ impl TestRunner {
   /// Run the whole test in this process, first loading any fork replay
   /// steps, then delegating to `run_in_process_with_replay`.
   fn run_in_process<S: Strategy>(&mut self, strategy: &S, test_fn: impl Fn(S::Value) -> TestCaseResult) -> TestRunResult<S> {
+    #[cfg(feature = "fork")]
     let (replay_steps, fork_output) = init_replay(&mut self.rng).map_err(TestError::Abort)?;
+    #[cfg(not(feature = "fork"))]
+    let (replay_steps, fork_output) = (iter::empty::<TestCaseResult>(), ForkOutput::empty());
     self.run_in_process_with_replay(strategy, test_fn, replay_steps.into_iter(), fork_output)
   }
 
@@ -783,12 +809,16 @@ impl TestRunner {
         failure_persistence.save_persisted_failure2(source_file, PersistedSeed(seed), shrunken_value);
       }
 
+      #[cfg(feature = "fork")]
       if let Err(error) = result {
         fork_output.terminate().map_err(TestError::Abort)?;
         return Err(error);
       }
+      #[cfg(not(feature = "fork"))]
+      result?;
     }
 
+    #[cfg(feature = "fork")]
     fork_output.terminate().map_err(TestError::Abort)?;
     Ok(())
   }
@@ -876,11 +906,18 @@ impl TestRunner {
     match result {
       Ok(success_type) => Ok(success_type),
       Err(TestCaseError::Fail(failure_reason)) => {
+        #[cfg(feature = "fork")]
         let shrunk_reason = self
           .shrink(
             &mut case, test_fn, replay_from_fork, result_cache, fork_output, is_from_persisted_seed,
           )
           .map_err(TestError::Abort)?
+          .unwrap_or(failure_reason);
+        #[cfg(not(feature = "fork"))]
+        let shrunk_reason = self
+          .shrink(
+            &mut case, test_fn, replay_from_fork, result_cache, fork_output, is_from_persisted_seed,
+          )
           .unwrap_or(failure_reason);
         Err(TestError::Fail(shrunk_reason, case.current()))
       }
@@ -905,11 +942,14 @@ impl TestRunner {
     result_cache: &mut dyn ResultCache,
     fork_output: &mut ForkOutput,
     is_from_persisted_seed: bool,
-  ) -> Result<Option<Reason>, Reason> {
+  ) -> ShrinkResult {
     // exit early if shrink disabled
     if self.config.max_shrink_iters == 0 {
       verbose_message!(self, INFO_LOG, "Shrinking disabled by configuration");
+      #[cfg(feature = "fork")]
       return Ok(None);
+      #[cfg(not(feature = "fork"))]
+      return shrink_result(None);
     }
 
     #[cfg(all(feature = "std", not(target_arch = "wasm32")))]
@@ -920,7 +960,10 @@ impl TestRunner {
     verbose_message!(self, TRACE, "Starting shrinking");
 
     if !case.simplify() {
+      #[cfg(feature = "fork")]
       return Ok(last_failure);
+      #[cfg(not(feature = "fork"))]
+      return shrink_result(last_failure);
     }
 
     loop {
@@ -930,7 +973,10 @@ impl TestRunner {
       let timed_out: Option<u64> = None;
 
       if self.shrink_budget_exhausted(iterations, timed_out) {
+        #[cfg(feature = "fork")]
         restore_latest_failing_case(case, fork_output)?;
+        #[cfg(not(feature = "fork"))]
+        restore_latest_failing_case(case, fork_output);
         break;
       }
 
@@ -961,7 +1007,14 @@ impl TestRunner {
       }
     }
 
-    Ok(last_failure)
+    #[cfg(feature = "fork")]
+    {
+      Ok(last_failure)
+    }
+    #[cfg(not(feature = "fork"))]
+    {
+      shrink_result(last_failure)
+    }
   }
 
   /// How many milliseconds the shrink phase has been running past the
@@ -1137,13 +1190,6 @@ fn init_replay(rng: &mut TestRng) -> Result<(Vec<TestCaseResult>, ForkOutput), R
   )
 }
 
-/// Without the `fork` feature there is never a replay: no steps and an
-/// empty `ForkOutput`.
-#[cfg(not(feature = "fork"))]
-fn init_replay(_rng: &mut TestRng) -> Result<(iter::Empty<TestCaseResult>, ForkOutput), Reason> {
-  Ok((iter::empty(), ForkOutput::empty()))
-}
-
 /// Wait for a fork child to exit, mapping a nonzero exit status into a
 /// synthetic case failure.
 #[cfg(feature = "fork")]
@@ -1250,6 +1296,7 @@ fn await_child(
 }
 
 #[cfg(test)]
+#[cfg(feature = "std")]
 mod test {
   use std::cell::Cell;
   use std::fs;
@@ -1644,7 +1691,7 @@ mod test {
       runner
         .run(&(0_u32..1000), |candidate| {
           if candidate >= 500 {
-            thread::sleep(Duration::from_millis(10_000));
+            thread::sleep(Duration::from_secs(10));
           }
           Ok(())
         })

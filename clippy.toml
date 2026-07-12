@@ -114,8 +114,14 @@ disallowed-methods = [
     { path = "std::process::abort",     reason = "bypasses destructors" },
     { path = "std::env::set_var",       reason = "racy in multi-threaded programs" },
     { path = "std::env::remove_var",    reason = "racy in multi-threaded programs" },
-    { path = "std::io::Error::new",     reason = "ad-hoc error construction; define a typed error (e.g. via thiserror)" },
-    { path = "std::io::Error::other",   reason = "ad-hoc error construction; define a typed error (e.g. via thiserror)" },
+    # Rust 1.97 exposes these constructors on `std::io::Error`; current
+    # nightly exposes the same `Error` type through `core::io`. Keep both
+    # paths so the active toolchain enforces one entry while accepting that
+    # the other path is absent there.
+    { path = "std::io::Error::new",     reason = "ad-hoc error construction; define a typed error (e.g. via thiserror)", allow-invalid = true },
+    { path = "std::io::Error::other",   reason = "ad-hoc error construction; define a typed error (e.g. via thiserror)", allow-invalid = true },
+    { path = "core::io::Error::new",    reason = "ad-hoc error construction; define a typed error (e.g. via thiserror)", allow-invalid = true },
+    { path = "core::io::Error::other",  reason = "ad-hoc error construction; define a typed error (e.g. via thiserror)", allow-invalid = true },
     { path = "std::time::SystemTime::now", reason = "non-deterministic; inject the clock or derive time from the seeded RNG, use chrono::Utc::now" },
     { path = "f64::to_string",          reason = "financial precision" },
     { path = "f32::to_string",          reason = "financial precision" },

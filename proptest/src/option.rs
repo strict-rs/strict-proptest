@@ -38,6 +38,10 @@ use crate::test_runner::TestRunner;
 /// Floating-point inputs are normalized into the inclusive `0.0..=1.0` range;
 /// use [`Probability::try_new`] when out-of-range input should be reported as
 /// a typed error.
+#[allow(
+  clippy::single_call_fn,
+  reason = "public ergonomic constructor names probability normalization at call sites"
+)]
 pub fn prob(from: impl Into<Probability>) -> Probability {
   from.into()
 }

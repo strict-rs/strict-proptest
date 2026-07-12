@@ -8,7 +8,7 @@
 
 ### Bug Fixes
 
-- An invalid `proptest_path = ...` value now surfaces as its intended compile error instead of a proc-macro panic: recoverable option errors are emitted as statement-form `compile_error!` tokens at item position, so the diagnostics also survive builds that cfg-strip the generated `#[test]` fn (rustdoc, trybuild).
+- An invalid `proptest_path = ...` value now surfaces as its intended compile error instead of a proc-macro panic: recoverable option errors are emitted as statement-form `compile_error!` tokens at item position, so the diagnostics also survive builds that cfg-strip the generated `#[test]` fn (rustdoc, trybuild). The diagnostic is attached to the full invalid value expression.
 - An internal code-generation parse failure now falls back to a `compile_error!` diagnostic instead of panicking the proc macro.
 
 ### New Features

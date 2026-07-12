@@ -374,7 +374,7 @@ mod test {
     let mut values = ensure_some(input.new_tree(&mut runner).ok(), "range_subset generates a value tree")?.current();
     values.sort_unstable();
     ensure(
-      Vec::<usize>::from_iter(range) == values,
+      range.collect::<Vec<usize>>() == values,
       "a full-width subset covers the whole range",
     )
   }

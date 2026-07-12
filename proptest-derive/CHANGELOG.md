@@ -10,6 +10,11 @@
 
 ### Other Notes
 
+- Stable derive tests now cover uninhabited fields through
+  `core::convert::Infallible`, while literal `!` derive fixtures live in
+  nightly-only compiletest directories. The internal uninhabited-type detector
+  recognizes the stable `Infallible` paths and keeps parser-level coverage for
+  literal `!`.
 - Split the derive implementation into an internal `proptest-derive-internal` library crate; `proptest-derive` is now a thin proc-macro shim that converts tokens and delegates. No change to the `#[derive(Arbitrary)]` API, the generated code, or the diagnostics — the split lets the pipeline be exercised (and documented) as ordinary library code, and the parse step is now panic-free (a malformed token stream surfaces as a `compile_error!` instead of unwinding).
 - The `value` codegen now produces its `fn() -> T` strategy through a typed `let` coercion (`{ let value_fn: fn() -> _ = || <expr>; value_fn }`) instead of an `as fn() -> _` cast; behavior is identical, and a user item named `value_fn` referenced from the pinned expression still resolves to the user's item (pinned by a regression test).
 - Replaced the crate's `#[macro_use] extern crate syn;` / `#[macro_use] extern crate quote;` globs with per-module `use` imports of `quote!`, `quote_spanned!`, `parse_quote!`, and `Token!`, and spelled out the anonymous lifetime (`Ctx<'_>`) across the internal derive pipeline. No generated-code or diagnostic changes.

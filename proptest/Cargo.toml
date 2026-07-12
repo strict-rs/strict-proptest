@@ -28,11 +28,17 @@ default-code-coverage = ["std", "fork", "timeout", "bit-set"]
 
 attr-macro = ["proptest-macro"]
 
-# Enables unstable features of Rust.
+# Enables exact nightly-only Rust API support.
 unstable = ["f16"]
 
-# Enables f16 support
+# Enables primitive nightly `f16` support. When `alt-stable` is also enabled,
+# the stable `half::f16` substitute is selected instead.
 f16 = []
+
+# Enables stable substitute implementations for APIs that are still nightly in
+# `std`/`core`/`alloc`. This wins over `unstable` when both are enabled, so
+# `--all-features` remains usable on stable Rust.
+alt-stable = ["dep:allocator-api2", "allocator-api2/alloc", "dep:half", "half/num-traits"]
 
 # Enables the use of standard-library dependent features
 std = ["rand/std", "rand/sys_rng", "regex-syntax", "num-traits/std"]
@@ -77,12 +83,14 @@ strict-test = ["std", "dep:strict-test-support"]
 [dependencies]
 bitflags = { workspace = true }
 unarray = { workspace = true }
+allocator-api2 = { workspace = true, optional = true }
 proptest-macro = { workspace = true, optional = true }
 num-traits = { workspace = true }
 regex-syntax = { workspace = true, optional = true }
 bit-set = { workspace = true, optional = true }
 bit-vec = { workspace = true, optional = true }
 getrandom = { workspace = true, optional = true }
+half = { workspace = true, optional = true }
 rand = { workspace = true, features = ["alloc"] }
 rand_xorshift = { workspace = true }
 rand_chacha = { workspace = true }
@@ -98,3 +106,27 @@ rustdoc-args = ["--cfg", "docsrs"]
 regex = { workspace = true }
 trybuild = { workspace = true }
 strict-test-support = { workspace = true }
+
+[[example]]
+name = "config-defaults"
+required-features = ["std"]
+
+[[example]]
+name = "dateparser_v1"
+required-features = ["strict-test"]
+
+[[example]]
+name = "dateparser_v2"
+required-features = ["strict-test"]
+
+[[example]]
+name = "fib"
+required-features = ["timeout", "strict-test"]
+
+[[example]]
+name = "tutorial-simplify-play"
+required-features = ["std"]
+
+[[example]]
+name = "tutorial-strategy-play"
+required-features = ["std"]

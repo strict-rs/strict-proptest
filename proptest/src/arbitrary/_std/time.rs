@@ -18,10 +18,8 @@ use std::time::UNIX_EPOCH;
 use crate::arbitrary::SMapped;
 use crate::arbitrary::any;
 use crate::num;
+use crate::strategy::statics;
 use crate::strategy::statics::static_map;
-use crate::strategy::statics::{
-  self,
-};
 
 arbitrary!(Duration, SMapped<(u64, u32), Self>;
     static_map(any::<(u64, u32)>(), |(secs, nanos)| Duration::new(secs, nanos))

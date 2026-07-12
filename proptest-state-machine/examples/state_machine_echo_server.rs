@@ -17,10 +17,8 @@ use std::io::Result as IoResult;
 use std::mem::take;
 use std::net::ToSocketAddrs;
 use std::string::FromUtf8Error;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
-use std::sync::mpsc::{
-  self,
-};
 use std::thread;
 use std::time::Duration;
 
@@ -432,10 +430,8 @@ pub mod system_under_test {
   use std::net::ToSocketAddrs;
   use std::string::FromUtf8Error;
   use std::sync::Arc;
+  use std::sync::atomic;
   use std::sync::atomic::AtomicBool;
-  use std::sync::atomic::{
-    self,
-  };
   use std::thread::yield_now;
 
   use message_io::network::Endpoint;
@@ -443,12 +439,10 @@ pub mod system_under_test {
   use message_io::network::SendStatus;
   use message_io::network::ToRemoteAddr;
   use message_io::network::Transport;
+  use message_io::node;
   use message_io::node::NodeEvent;
   use message_io::node::NodeHandler;
   use message_io::node::NodeListener;
-  use message_io::node::{
-    self,
-  };
 
   use super::ClientDialerExt;
   use super::ClientListenerExt;

@@ -20,7 +20,7 @@ documentation = "https://docs.rs/proptest/latest/proptest/"
 categories = ["development-tools::testing"]
 edition = "2024"
 rust-version = "1.97"
-version = "1.2.0"
+version = "2.0.0"
 authors = ["The Proptest Developers", "Takumi Shimada <hello@takumi.earth>"]
 publish = false
 
@@ -35,10 +35,12 @@ proptest-derive-internal = { version = "1.2.0", path = "proptest-derive-internal
 bit-set = "0.11.0"
 bit-vec = "0.10.0"
 bitflags = "2.13"
+allocator-api2 = { version = "0.4.0", default-features = false }
 compiletest_rs = "0.11"
 convert_case = "0.11"
 criterion = "0.8"
 getrandom = { version = "0.4.3", default-features = false }
+half = { version = "2.7.1", default-features = false }
 insta = "1"
 message-io = { version = "0.19.0", default-features = false }
 num-traits = { version = "0.2.19", default-features = false }
@@ -398,10 +400,30 @@ infinite_loop                            = "deny"
 
 missing_docs_in_private_items            = "warn"
 
+# Meta: localized `#[allow(clippy::single_call_fn, reason = "...")]` is
+# permitted where a named helper genuinely improves structure. The companion
+# `lint-attrs` xtask still rejects every other `#[allow(...)]` / `#[expect(...)]`.
 allow_attributes                         = "allow"
-allow_attributes_without_reason          = "warn"
+allow_attributes_without_reason          = "deny"
 
+# Branching should usually read as a decision with a clear shape: guard clauses
+# for fast exits, `match` for exhaustive cases, or a helper when the decision
+# deserves a name.
+#
+# This warning catches long, open-ended `else if` ladders that tend to hide
+# missing cases, duplicate work, or control flow that wants to be modelled more
+# directly. It stays at `warn` because a short chain can still be the clearest
+# expression in local context.
 else_if_without_else                     = "warn"
+
+# Extract helpers when the name teaches the reader something important:
+# capturing a domain rule, isolating validation, ending a borrow before
+# `.await`, or turning a dense branch into a readable step.
+#
+# This warning exists to catch the opposite pattern: one-off wrappers that only
+# shuffle code around and make the call graph noisier without adding meaning.
+# It stays at `warn` because a genuinely clarifying helper is still the right
+# move, even if it currently has a single caller.
 single_call_fn                           = "warn"
 
 implicit_return                          = "allow"

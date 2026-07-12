@@ -6,17 +6,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Coverage for the `#[proptest(skip)]` modifier and uninhabited variant
-//! detection, requiring `#![feature(never_type)]`.
+//! Coverage for the `#[proptest(skip)]` modifier and stable uninhabited
+//! variant detection.
 //!
 //! The derived enums mark some variants `#[proptest(skip)]` and give others an
-//! uninhabited `!` payload, and each property confirms only the inhabited,
-//! unskipped variants are ever generated.
-
-#![feature(never_type)]
+//! uninhabited `Infallible` payload, and each property confirms only the
+//! inhabited, unskipped variants are ever generated.
 
 #[cfg(test)]
 mod tests {
+  extern crate core as real_core;
+
   use proptest::prelude::Arbitrary;
   use proptest::prelude::any;
   use proptest::strict::TestResult;
@@ -24,10 +24,16 @@ mod tests {
   use proptest_derive::Arbitrary;
   use strict_test_support::ensure;
 
+  mod core {
+    pub(in crate::tests) mod convert {
+      pub(in crate::tests) use super::super::real_core::convert::Infallible;
+    }
+  }
+
   #[derive(Debug, Arbitrary)]
   enum Ty1 {
     V1,
-    _V2(!),
+    _V2(core::convert::Infallible),
     #[proptest(skip)]
     _V3,
   }

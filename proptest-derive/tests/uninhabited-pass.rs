@@ -9,17 +9,17 @@
 //! Compile-and-run coverage for the passing side of the derive's
 //! uninhabited-field detection.
 //!
-//! Exercises `#[derive(Arbitrary)]` on types whose fields are the never
-//! type `!`, arrays `[!; N]` with const-expression lengths, and
+//! Exercises `#[derive(Arbitrary)]` on types whose fields are
+//! `core::convert::Infallible`, arrays `[Infallible; N]` with const-expression lengths, and
 //! uninhabited types hidden behind a `macro_rules!` call or an
 //! associated-type projection that the derive cannot inspect. Generation
 //! must drop uninhabited enum variants (leaving only the inhabited one)
 //! while still emitting a working `Arbitrary` impl.
 
-#![feature(never_type)]
-
 #[cfg(test)]
 mod tests {
+  extern crate core as real_core;
+
   use proptest::prelude::Arbitrary;
   use proptest::prelude::any;
   use proptest::strict::TestResult;
@@ -27,22 +27,28 @@ mod tests {
   use proptest_derive::Arbitrary;
   use strict_test_support::ensure;
 
+  mod core {
+    pub(in crate::tests) mod convert {
+      pub(in crate::tests) use super::super::real_core::convert::Infallible;
+    }
+  }
+
   // Various arithmetic and basic things.
   #[derive(Debug, Arbitrary)]
   enum Ty1 {
     // Ensure that all of the types below are deemed uninhabited:
-    _V2(!),
-    _V3([!; 1]),
-    _V4([!; 2 - 1]),
-    _V5([!; 2 * 3]),
-    _V6([!; 4 - 2]),
-    _V7([!; 0b10 ^ 0b11]),
-    _V8([!; 0b11 & 0b01]),
-    _V9([!; 0b10 | 0b01]),
-    _V10([!; 0b10 << 1]),
-    _V11([!; 0b10 >> 1]),
-    _V12([!; !0 - 18_446_744_073_709_551_614]),
-    _V13([!; 1 + 2 * (6 - 4)]),
+    _V2(core::convert::Infallible),
+    _V3([core::convert::Infallible; 1]),
+    _V4([core::convert::Infallible; 2 - 1]),
+    _V5([core::convert::Infallible; 2 * 3]),
+    _V6([core::convert::Infallible; 4 - 2]),
+    _V7([core::convert::Infallible; 0b10 ^ 0b11]),
+    _V8([core::convert::Infallible; 0b11 & 0b01]),
+    _V9([core::convert::Infallible; 0b10 | 0b01]),
+    _V10([core::convert::Infallible; 0b10 << 1]),
+    _V11([core::convert::Infallible; 0b10 >> 1]),
+    _V12([core::convert::Infallible; !0 - 18_446_744_073_709_551_614]),
+    _V13([core::convert::Infallible; 1 + 2 * (6 - 4)]),
     V1,
   }
 
@@ -62,37 +68,37 @@ mod tests {
 
   #[derive(Debug, Arbitrary)]
   struct TyMac0 {
-    _field: tymac!(!),
+    _field: tymac!(core::convert::Infallible),
   }
 
   #[derive(Debug, Arbitrary)]
   struct TyMac1 {
-    _baz: tymac!([!; 3 + 4]),
+    _baz: tymac!([core::convert::Infallible; 3 + 4]),
   }
 
   enum _TyMac2 {
     #[deny(dead_code)]
-    V0(tymac!((u8, !, usize))),
+    V0(tymac!((u8, core::convert::Infallible, usize))),
   }
 
   // Can't inspect projections through associated types:
   trait Fun {
     type Prj;
   }
-  impl Fun for ! {
+  impl Fun for core::convert::Infallible {
     type Prj = u8;
   }
-  impl Fun for (!, usize, !) {
+  impl Fun for (core::convert::Infallible, usize, core::convert::Infallible) {
     type Prj = u8;
   }
 
   #[derive(Debug, Arbitrary)]
   enum UsePrj0 {
-    V0(<! as Fun>::Prj),
+    V0(<core::convert::Infallible as Fun>::Prj),
   }
 
   impl UsePrj0 {
-    const fn projection(self) -> <! as Fun>::Prj {
+    const fn projection(self) -> <core::convert::Infallible as Fun>::Prj {
       let Self::V0(payload) = self;
       payload
     }
@@ -100,11 +106,11 @@ mod tests {
 
   #[derive(Debug, Arbitrary)]
   enum UsePrj1 {
-    V0(<(!, usize, !) as Fun>::Prj),
+    V0(<(core::convert::Infallible, usize, core::convert::Infallible) as Fun>::Prj),
   }
 
   impl UsePrj1 {
-    const fn projection(self) -> <(!, usize, !) as Fun>::Prj {
+    const fn projection(self) -> <(core::convert::Infallible, usize, core::convert::Infallible) as Fun>::Prj {
       let Self::V0(payload) = self;
       payload
     }

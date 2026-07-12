@@ -104,8 +104,15 @@ impl From<UniformRangeError> for Reason {
   }
 }
 
-#[cfg(feature = "f16")]
+#[cfg(all(feature = "f16", not(feature = "alt-stable")))]
 impl NumericRangeEndpoint for f16 {
+  fn inclusive_end_from_exclusive(end: Self, _epsilon: Self) -> Self {
+    end
+  }
+}
+
+#[cfg(feature = "alt-stable")]
+impl NumericRangeEndpoint for half::f16 {
   fn inclusive_end_from_exclusive(end: Self, _epsilon: Self) -> Self {
     end
   }
@@ -710,13 +717,23 @@ where
   const MANTISSA_MASK: Self::Bits;
 }
 
-#[cfg(feature = "f16")]
+#[cfg(all(feature = "f16", not(feature = "alt-stable")))]
 impl FloatLayout for f16 {
   type Bits = u16;
 
   const SIGN_MASK: u16 = 0x8000;
   const EXP_MASK: u16 = 0x7c00;
   const EXP_ZERO: u16 = Self::to_bits(1.0);
+  const MANTISSA_MASK: u16 = !(<Self as FloatLayout>::SIGN_MASK | Self::EXP_MASK);
+}
+
+#[cfg(feature = "alt-stable")]
+impl FloatLayout for half::f16 {
+  type Bits = u16;
+
+  const SIGN_MASK: u16 = 0x8000;
+  const EXP_MASK: u16 = 0x7c00;
+  const EXP_ZERO: u16 = Self::ONE.to_bits();
   const MANTISSA_MASK: u16 = !(<Self as FloatLayout>::SIGN_MASK | Self::EXP_MASK);
 }
 
@@ -948,21 +965,21 @@ macro_rules! float_any {
                 // interpreted by the hardware and generate values based on
                 // that.
                 let quiet_or = $typ::NAN.to_bits() &
-                    ($typ::EXP_MASK | ($typ::EXP_MASK >> 1));
-                let signaling_or = (quiet_or ^ ($typ::EXP_MASK >> 1)) |
-                    $typ::EXP_MASK;
+                    (<$typ as FloatLayout>::EXP_MASK | (<$typ as FloatLayout>::EXP_MASK >> 1));
+                let signaling_or = (quiet_or ^ (<$typ as FloatLayout>::EXP_MASK >> 1)) |
+                    <$typ as FloatLayout>::EXP_MASK;
 
                 let (class_mask, class_or, allow_edge_exp, allow_zero_mant) =
                     prop_oneof![
                         weight!(NORMAL, 20) => Just(
-                            ($typ::EXP_MASK | <$typ as FloatLayout>::MANTISSA_MASK, 0,
+                            (<$typ as FloatLayout>::EXP_MASK | <$typ as FloatLayout>::MANTISSA_MASK, 0,
                              false, true)),
                         weight!(SUBNORMAL, 3) => Just(
                             (<$typ as FloatLayout>::MANTISSA_MASK, 0, true, false)),
                         weight!(ZERO, 4) => Just(
                             (0, 0, true, true)),
                         weight!(INFINITE, 2) => Just(
-                            (0, $typ::EXP_MASK, true, true)),
+                            (0, <$typ as FloatLayout>::EXP_MASK, true, true)),
                         weight!(QUIET_NAN, 1) => Just(
                             (<$typ as FloatLayout>::MANTISSA_MASK >> 1, quiet_or,
                              true, false)),
@@ -975,10 +992,10 @@ macro_rules! float_any {
                     runner.rng().random();
                 generated_value &= sign_mask | class_mask;
                 generated_value |= sign_or | class_or;
-                let exp = generated_value & $typ::EXP_MASK;
-                if !allow_edge_exp && (0 == exp || $typ::EXP_MASK == exp) {
-                    generated_value &= !$typ::EXP_MASK;
-                    generated_value |= $typ::EXP_ZERO;
+                let exp = generated_value & <$typ as FloatLayout>::EXP_MASK;
+                if !allow_edge_exp && (0 == exp || <$typ as FloatLayout>::EXP_MASK == exp) {
+                    generated_value &= !<$typ as FloatLayout>::EXP_MASK;
+                    generated_value |= <$typ as FloatLayout>::EXP_ZERO;
                 }
                 if !allow_zero_mant &&
                     0 == generated_value & <$typ as FloatLayout>::MANTISSA_MASK
@@ -1001,13 +1018,22 @@ macro_rules! float_any {
 /// `numeric_api!` range implementations. `$sample_typ` names the custom
 /// uniform sampler from `float_samplers`.
 macro_rules! float_bin_search {
-    ($typ:ident, $sample_typ:ident) => {
+    (
+        module = $module: ident,
+        type = $typ: ident
+        $(, type_path = $type_path:path)?,
+        sample = $sample_typ: ident,
+        zero = $zero: expr,
+        two = $two: expr
+        $(, always_trait = $always_trait:path)?
+        $(, clamped_fn = $clamped_fn:tt)?
+    ) => {
         #[doc = concat!(
             "Strategies and shrinkers for `",
-            stringify!($typ),
+            stringify!($module),
             "` values."
         )]
-        pub mod $typ {
+        pub mod $module {
             use super::float_samplers::$sample_typ;
 
             use core::ops;
@@ -1016,6 +1042,15 @@ macro_rules! float_bin_search {
             use super::{FloatLayout, FloatTypes};
             use crate::strategy::*;
             use crate::test_runner::TestRunner;
+            $(
+                use $type_path as $typ;
+            )?
+            $(
+                use $always_trait as _;
+            )?
+
+            const FLOAT_ZERO: $typ = $zero;
+            const FLOAT_TWO: $typ = $two;
 
             float_any!($typ);
 
@@ -1042,7 +1077,7 @@ macro_rules! float_bin_search {
                 /// Creates a new binary searcher starting at the given value.
                 pub const fn new(start: $typ) -> Self {
                     BinarySearch {
-                        lo: 0.0,
+                        lo: FLOAT_ZERO,
                         curr: start,
                         hi: start,
                         allowed: FloatTypes::all(),
@@ -1052,7 +1087,7 @@ macro_rules! float_bin_search {
                 #[allow(clippy::single_call_fn, reason = "restrict a float BinarySearch shrinker to a caller-chosen subset of FloatTypes")]
                 const fn new_with_types(start: $typ, allowed: FloatTypes) -> Self {
                     BinarySearch {
-                        lo: 0.0,
+                        lo: FLOAT_ZERO,
                         curr: start,
                         hi: start,
                         allowed,
@@ -1062,12 +1097,12 @@ macro_rules! float_bin_search {
                 /// Creates a new binary searcher which will not produce values
                 /// on the other side of `lo` or `hi` from `start`. `lo` is
                 /// inclusive, `hi` is exclusive.
-                const fn new_clamped(lo: $typ, start: $typ, hi: $typ) -> Self {
+                $($clamped_fn)? fn new_clamped(lo: $typ, start: $typ, hi: $typ) -> Self {
                     BinarySearch {
                         lo: if start.is_sign_negative() {
-                            hi.min(0.0)
+                            hi.min(FLOAT_ZERO)
                         } else {
-                            lo.max(0.0)
+                            lo.max(FLOAT_ZERO)
                         },
                         hi: start,
                         curr: start,
@@ -1099,9 +1134,9 @@ macro_rules! float_bin_search {
                         Normal => self.allowed.contains(FloatTypes::NORMAL),
                     };
                     let signum = self.curr.signum();
-                    let sign_allowed = if signum > 0.0 {
+                    let sign_allowed = if signum > FLOAT_ZERO {
                         self.allowed.contains(FloatTypes::POSITIVE)
-                    } else if signum < 0.0 {
+                    } else if signum < FLOAT_ZERO {
                         self.allowed.contains(FloatTypes::NEGATIVE)
                     } else {
                         true
@@ -1122,10 +1157,10 @@ macro_rules! float_bin_search {
                 fn reposition(&mut self) -> bool {
                     let interval = core::ops::Sub::sub(self.hi, self.lo);
                     let interval =
-                        if interval.is_finite() { interval } else { 0.0 };
+                        if interval.is_finite() { interval } else { FLOAT_ZERO };
                     let new_mid = core::ops::Add::add(
                         self.lo,
-                        core::ops::Div::div(interval, 2.0),
+                        core::ops::Div::div(interval, FLOAT_TWO),
                     );
 
                     let midpoint_converged = float_equal(new_mid, self.curr)
@@ -1211,7 +1246,7 @@ macro_rules! float_bin_search {
                 generic,
                 $typ,
                 $sample_typ,
-                0.0,
+                FLOAT_ZERO,
                 sample_uniform,
                 sample_uniform_incl
             );
@@ -1219,23 +1254,51 @@ macro_rules! float_bin_search {
     };
 }
 
-#[cfg(feature = "f16")]
-float_bin_search!(f16, F16U);
-float_bin_search!(f32, F32U);
-float_bin_search!(f64, F64U);
+#[cfg(all(feature = "f16", not(feature = "alt-stable")))]
+float_bin_search!(
+    module = f16,
+    type = f16,
+    sample = F16U,
+    zero = 0.0,
+    two = 2.0
+);
+#[cfg(feature = "alt-stable")]
+float_bin_search!(
+    module = half_f16,
+    type = HalfF16,
+    type_path = half::f16,
+    sample = HalfF16U,
+    zero = HalfF16::ZERO,
+    two = HalfF16::from_f32_const(2.0),
+    always_trait = num_traits::float::Float
+);
+float_bin_search!(
+    module = f32,
+    type = f32,
+    sample = F32U,
+    zero = 0.0,
+    two = 2.0,
+    clamped_fn = const
+);
+float_bin_search!(
+    module = f64,
+    type = f64,
+    sample = F64U,
+    zero = 0.0,
+    two = 2.0,
+    clamped_fn = const
+);
 
 #[cfg(test)]
 mod test {
   use strict_test_support::TestFailure;
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_ok;
   use strict_test_support::ensure_some;
 
   use super::*;
   use crate::bits::u32 as bits_u32;
   use crate::strategy::*;
-  use crate::strict::ensure_property_with_config;
   use crate::test_runner::*;
 
   fn require_inclusive_end<T: PartialEq>(candidate: &T, inclusive_end: &T) -> TestCaseResult {
@@ -1466,10 +1529,44 @@ mod test {
     contract_sanity!(i64, 42, 56);
     contract_sanity!(usize, 42, 56);
     contract_sanity!(isize, 42, 56);
-    #[cfg(feature = "f16")]
+    #[cfg(all(feature = "f16", not(feature = "alt-stable")))]
     contract_sanity!(f16, 42.0, 56.0);
     contract_sanity!(f32, 42.0, 56.0);
     contract_sanity!(f64, 42.0, 56.0);
+
+    #[cfg(feature = "alt-stable")]
+    mod half_f16 {
+      use crate::strategy::check_strategy_sanity;
+      use crate::test_runner::Reason;
+
+      const FORTY_TWO: half::f16 = half::f16::from_f32_const(42.0);
+      const FIFTY_SIX: half::f16 = half::f16::from_f32_const(56.0);
+
+      #[test]
+      fn range() -> Result<(), Reason> {
+        check_strategy_sanity(FORTY_TWO..FIFTY_SIX, None)
+      }
+
+      #[test]
+      fn range_inclusive() -> Result<(), Reason> {
+        check_strategy_sanity(FORTY_TWO..=FIFTY_SIX, None)
+      }
+
+      #[test]
+      fn range_to() -> Result<(), Reason> {
+        check_strategy_sanity(..FIFTY_SIX, None)
+      }
+
+      #[test]
+      fn range_to_inclusive() -> Result<(), Reason> {
+        check_strategy_sanity(..=FIFTY_SIX, None)
+      }
+
+      #[test]
+      fn range_from() -> Result<(), Reason> {
+        check_strategy_sanity(FORTY_TWO.., None)
+      }
+    }
   }
 
   #[test]
@@ -1579,7 +1676,7 @@ mod test {
   /// properties: it evaluates to `Result<(), TestFailure>` so the strict
   /// property closures can return it directly.
   macro_rules! float_generation_test_body {
-    ($strategy:ident, $typ:ident) => {{
+    ($strategy:ident, $module:ident, $value_typ:ty, $zero:expr) => {{
       use std::num::FpCategory;
 
       let strategy = $strategy;
@@ -1615,12 +1712,13 @@ mod test {
           let value = tree.current();
 
           let sign = value.signum(); // So we correctly handle -0
-          if sign < 0.0 {
+          let zero: $value_typ = $zero;
+          if sign < zero {
             ensure(bits.contains(FloatTypes::NEGATIVE), "a negative value implies the NEGATIVE class")?;
             record_seen!(seen_negative, increment);
           }
 
-          if sign > 0.0 {
+          if sign > zero {
             // i.e., not NaN
             ensure(bits.contains(FloatTypes::POSITIVE), "a positive value implies the POSITIVE class")?;
             record_seen!(seen_positive, increment);
@@ -1638,7 +1736,8 @@ mod test {
                 record_seen!(seen_positive, increment);
               }
 
-              let is_quiet = raw & ($typ::EXP_MASK >> 1) == $typ::NAN.to_bits() & ($typ::EXP_MASK >> 1);
+              let is_quiet = raw & (<$value_typ as FloatLayout>::EXP_MASK >> 1)
+                == <$value_typ>::NAN.to_bits() & (<$value_typ as FloatLayout>::EXP_MASK >> 1);
               if is_quiet {
                 // x86/AMD64 turn signalling NaNs into quiet
                 // NaNs quite aggressively depending on what
@@ -1728,50 +1827,84 @@ mod test {
     }};
   }
 
-  /// Run one strict float-class property with the 1024-case config the
-  /// legacy `proptest!` block used.
+  /// Run one float-class property with the 1024-case config the legacy
+  /// `proptest!` block used, without depending on the optional strict
+  /// harness.
   fn run_float_class_property<S, F>(strategy: &S, context: &'static str, property: F) -> Result<(), TestFailure>
   where
     S: Strategy,
     F: Fn(S::Value) -> Result<(), TestFailure>,
   {
-    ensure_property_with_config(
-      strategy,
-      context,
-      Config {
-        failure_persistence: None,
-        ..Config::with_cases(1024)
-      },
-      property,
-    )
+    let result = TestRunner::new(Config {
+      failure_persistence: None,
+      ..Config::with_cases(1024)
+    })
+    .run(strategy, |value| match property(value) {
+      Ok(()) => Ok(()),
+      Err(_) => Err(TestCaseError::fail(context)),
+    });
+    ensure(result.is_ok(), context)
   }
 
-  #[cfg(feature = "f16")]
+  #[cfg(all(feature = "f16", not(feature = "alt-stable")))]
   #[test]
   fn f16_any_generates_desired_values() -> Result<(), TestFailure> {
     run_float_class_property(
       &bits_u32::ANY.prop_map(f16::Any::from_bits),
       "every f16 class combination generates matching values",
-      |strategy| float_generation_test_body!(strategy, f16),
+      |strategy| float_generation_test_body!(strategy, f16, f16, 0.0),
     )
   }
 
-  #[cfg(feature = "f16")]
+  #[cfg(all(feature = "f16", not(feature = "alt-stable")))]
   #[test]
   fn f16_any_sanity() -> Result<(), TestFailure> {
     run_float_class_property(
       &bits_u32::ANY.prop_map(f16::Any::from_bits),
       "every f16 class combination upholds the shrink contract",
       |strategy| {
-        ensure_ok(
+        ensure(
           check_strategy_sanity(
             strategy,
             Some(CheckStrategySanityOptions {
               strict_complicate_after_simplify: false,
               ..CheckStrategySanityOptions::default()
             }),
-          ),
+          )
+          .is_ok(),
           "f16 class strategy upholds the shrink contract",
+        )
+      },
+    )
+  }
+
+  #[cfg(feature = "alt-stable")]
+  #[test]
+  fn half_f16_any_generates_desired_values() -> Result<(), TestFailure> {
+    run_float_class_property(
+      &bits_u32::ANY.prop_map(half_f16::Any::from_bits),
+      "every half::f16 class combination generates matching values",
+      |strategy| float_generation_test_body!(strategy, half_f16, half::f16, half::f16::ZERO),
+    )
+  }
+
+  #[cfg(feature = "alt-stable")]
+  #[test]
+  fn half_f16_any_sanity() -> Result<(), TestFailure> {
+    run_float_class_property(
+      &bits_u32::ANY.prop_map(half_f16::Any::from_bits),
+      "every half::f16 class combination upholds the shrink contract",
+      |strategy| {
+        ensure(
+          check_strategy_sanity(
+            strategy,
+            Some(CheckStrategySanityOptions {
+              strict_complicate_after_simplify: false,
+              ..CheckStrategySanityOptions::default()
+            }),
+          )
+          .is_ok(),
+          "half::f16 class strategy upholds the shrink contract",
         )
       },
     )
@@ -1782,7 +1915,7 @@ mod test {
     run_float_class_property(
       &bits_u32::ANY.prop_map(f32::Any::from_bits),
       "every f32 class combination generates matching values",
-      |strategy| float_generation_test_body!(strategy, f32),
+      |strategy| float_generation_test_body!(strategy, f32, f32, 0.0),
     )
   }
 
@@ -1792,14 +1925,15 @@ mod test {
       &bits_u32::ANY.prop_map(f32::Any::from_bits),
       "every f32 class combination upholds the shrink contract",
       |strategy| {
-        ensure_ok(
+        ensure(
           check_strategy_sanity(
             strategy,
             Some(CheckStrategySanityOptions {
               strict_complicate_after_simplify: false,
               ..CheckStrategySanityOptions::default()
             }),
-          ),
+          )
+          .is_ok(),
           "f32 class strategy upholds the shrink contract",
         )
       },
@@ -1811,7 +1945,7 @@ mod test {
     run_float_class_property(
       &bits_u32::ANY.prop_map(f64::Any::from_bits),
       "every f64 class combination generates matching values",
-      |strategy| float_generation_test_body!(strategy, f64),
+      |strategy| float_generation_test_body!(strategy, f64, f64, 0.0),
     )
   }
 
@@ -1821,14 +1955,15 @@ mod test {
       &bits_u32::ANY.prop_map(f64::Any::from_bits),
       "every f64 class combination upholds the shrink contract",
       |strategy| {
-        ensure_ok(
+        ensure(
           check_strategy_sanity(
             strategy,
             Some(CheckStrategySanityOptions {
               strict_complicate_after_simplify: false,
               ..CheckStrategySanityOptions::default()
             }),
-          ),
+          )
+          .is_ok(),
           "f64 class strategy upholds the shrink contract",
         )
       },
@@ -1886,9 +2021,47 @@ mod test {
     error_on_empty!(i64, 0, 1);
     error_on_empty!(usize, 0, 1);
     error_on_empty!(isize, 0, 1);
-    #[cfg(feature = "f16")]
+    #[cfg(all(feature = "f16", not(feature = "alt-stable")))]
     error_on_empty!(f16, 0.0, 1.0);
     error_on_empty!(f32, 0.0, 1.0);
     error_on_empty!(f64, 0.0, 1.0);
+
+    #[cfg(feature = "alt-stable")]
+    mod half_f16 {
+      use core::ops::RangeInclusive;
+
+      use strict_test_support::TestFailure;
+      use strict_test_support::ensure;
+
+      use crate::strategy::Strategy as _;
+      use crate::test_runner::TestRunner;
+
+      const ZERO: half::f16 = half::f16::ZERO;
+      const ONE: half::f16 = half::f16::ONE;
+
+      #[test]
+      fn range() -> Result<(), TestFailure> {
+        let mut runner = TestRunner::deterministic();
+        let result = (ZERO..ZERO).new_tree(&mut runner);
+        ensure(
+          result
+            .err()
+            .is_some_and(|reason| reason.message() == "Invalid use of empty range."),
+          "an empty half::f16 range returns a generation error",
+        )
+      }
+
+      #[test]
+      fn range_inclusive() -> Result<(), TestFailure> {
+        let mut runner = TestRunner::deterministic();
+        let result = RangeInclusive::new(ONE, ZERO).new_tree(&mut runner);
+        ensure(
+          result
+            .err()
+            .is_some_and(|reason| reason.message() == "Invalid use of empty inclusive range."),
+          "an empty half::f16 inclusive range returns a generation error",
+        )
+      }
+    }
   }
 }

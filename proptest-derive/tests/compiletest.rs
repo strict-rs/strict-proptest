@@ -25,6 +25,7 @@ mod tests {
   use std::fs;
   use std::path::Path;
   use std::path::PathBuf;
+  use std::process::Command;
   use std::time::SystemTime;
 
   use serde_json::Value;
@@ -246,7 +247,15 @@ mod tests {
 
   #[test]
   fn compile_test() -> Result<(), TestFailure> {
-    run_mode("compile-fail", "compile-fail")
+    run_mode("compile-fail", "compile-fail")?;
+    let rustc = env::var("RUSTC").unwrap_or_else(|_| "rustc".to_owned());
+    let output = ensure_ok(Command::new(rustc).arg("--version").output(), "rustc --version executes")?;
+    let version = ensure_ok(String::from_utf8(output.stdout), "rustc --version emits UTF-8")?;
+    if version.contains("nightly") {
+      run_mode("compile-fail-nightly", "compile-fail")?;
+      run_mode("run-pass-nightly", "run-pass")?;
+    }
+    Ok(())
   }
 
   #[test]

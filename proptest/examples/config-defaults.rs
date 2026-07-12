@@ -14,10 +14,8 @@
 //! makes the printed `cases` field read `42`. A quick way to inspect the
 //! runner's effective configuration.
 
+use std::io;
 use std::io::Write as _;
-use std::io::{
-  self,
-};
 
 use proptest::test_runner::Config;
 

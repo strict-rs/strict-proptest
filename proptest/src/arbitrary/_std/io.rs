@@ -59,7 +59,6 @@ use crate::arbitrary::SMapped;
 use crate::arbitrary::any;
 use crate::arbitrary::arbitrary;
 use crate::arbitrary::arbitrary_with;
-use crate::std_facade::String;
 use crate::strategy::Just;
 use crate::strategy::Strategy as _;
 use crate::strategy::TupleUnion;
@@ -187,10 +186,8 @@ arbitrary!(
     ]
 );
 
-arbitrary!(Error, SMapped<(ErrorKind, Option<String>), Self>;
-    static_map(arbitrary(), |(kind, os)|
-        os.map_or_else(|| kind.into(), |message| Error::new(kind, message))
-    )
+arbitrary!(Error, SMapped<ErrorKind, Self>;
+    static_map(arbitrary(), Error::from)
 );
 
 #[cfg(test)]

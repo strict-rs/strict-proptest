@@ -47,16 +47,18 @@ impl Options {
   reason = "validate that a proptest_path value is a bare path to the proptest crate"
 )]
 fn parse_proptest_path(attr_value: &Expr) -> Result<Path, TokenStream> {
-  let bad_path = |span| {
-    quote_spanned!(span =>
-        compile_error!("argument to `proptest_path` must be a path to the proptest crate, e.g. `proptest_path = ::path::to::proptest`");
+  let bad_path = || {
+    syn::Error::new_spanned(
+      attr_value,
+      "argument to `proptest_path` must be a path to the proptest crate, e.g. `proptest_path = ::path::to::proptest`",
     )
+    .to_compile_error()
   };
   let Expr::Path(ref path) = *attr_value else {
-    return Err(bad_path(attr_value.span()));
+    return Err(bad_path());
   };
   if path.qself.is_some() {
-    return Err(bad_path(attr_value.span()));
+    return Err(bad_path());
   }
   Ok(path.path.clone())
 }

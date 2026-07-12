@@ -9,7 +9,6 @@
 
 //! Arbitrary implementations for liballoc.
 
-#[cfg(feature = "unstable")]
 mod alloc;
 mod borrow;
 mod boxed;

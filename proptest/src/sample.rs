@@ -18,12 +18,10 @@ use core::fmt;
 
 use rand::RngExt as _;
 
+use crate::bits;
 use crate::bits::BitSetValueTree;
 use crate::bits::SampledBitSetStrategy;
 use crate::bits::VarBitSet;
-use crate::bits::{
-  self,
-};
 use crate::collection::EmptySizeRange as CollectionEmptySizeRange;
 /// Re-exported to make usage more ergonomic.
 pub use crate::collection::SizeRange;
@@ -356,29 +354,33 @@ pub fn try_select<T: Clone + fmt::Debug + 'static>(values: impl Into<Cow<'static
 /// ```
 /// use proptest::prelude::*;
 ///
+/// # #[cfg(any(feature = "std", feature = "alloc"))]
 /// proptest! {
 ///     # /*
 ///     #[test]
 ///     # */
 ///     fn my_test(
-///         names in prop::collection::vec("[a-z]+", 10..20),
+///         numbers in prop::collection::vec(0_u32..1000, 10..20),
 ///         indices in prop::collection::vec(any::<prop::sample::Index>(), 5..10)
 ///     ) {
-///         // We now have Vec<String> of ten to twenty names, and a Vec<Index>
-///         // of five to ten indices and can combine them however we like.
+///         // We now have ten to twenty numbers, and a Vec<Index> of five to
+///         // ten indices and can combine them however we like.
 ///         for index in &indices {
-///             if let Some(ix) = index.index(names.len()) {
-///                 println!("Accessing item by index: {}", names[ix]);
+///             if let Some(ix) = index.index(numbers.len()) {
+///                 println!("Accessing item by index: {}", numbers[ix]);
 ///             }
-///             if let Some(name) = index.get(&names) {
-///                 println!("Accessing item by convenience method: {}", name);
+///             if let Some(number) = index.get(&numbers) {
+///                 println!("Accessing item by convenience method: {}", number);
 ///             }
 ///         }
 ///         // Test stuff...
 ///     }
 /// }
 /// #
+/// # #[cfg(any(feature = "std", feature = "alloc"))]
 /// # fn main() { my_test(); }
+/// # #[cfg(not(any(feature = "std", feature = "alloc")))]
+/// # fn main() {}
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Index(usize);
@@ -532,22 +534,26 @@ impl IndexStrategy {
 /// ```
 /// use proptest::prelude::*;
 ///
+/// # #[cfg(any(feature = "std", feature = "alloc"))]
 /// proptest! {
 ///     # /*
 ///     #[test]
 ///     # */
 ///     fn my_test(
-///         names in prop::collection::hash_set("[a-z]+", 10..20),
+///         numbers in prop::collection::btree_set(0_u32..1000, 10..20),
 ///         selector in any::<prop::sample::Selector>()
 ///     ) {
-///         if let Some(name) = selector.select(&names) {
-///             println!("Selected name: {}", name);
+///         if let Some(number) = selector.select(&numbers) {
+///             println!("Selected number: {}", number);
 ///         }
 ///         // Test stuff...
 ///     }
 /// }
 /// #
+/// # #[cfg(any(feature = "std", feature = "alloc"))]
 /// # fn main() { my_test(); }
+/// # #[cfg(not(any(feature = "std", feature = "alloc")))]
+/// # fn main() {}
 /// ```
 #[derive(Clone, Debug)]
 pub struct Selector {
@@ -677,6 +683,7 @@ mod test {
   fn strategy_construction_errors_are_copy() {
     use crate::bits::SampledBitsError;
     use crate::collection::EmptySizeRange;
+    #[cfg(feature = "std")]
     use crate::range_subset::RangeSubsetError;
     use crate::strategy::UnionBuildError;
 
@@ -686,6 +693,7 @@ mod test {
     assert_copy::<EmptySelection>();
     assert_copy::<SubsequenceError>();
     assert_copy::<SampledBitsError>();
+    #[cfg(feature = "std")]
     assert_copy::<RangeSubsetError>();
   }
 

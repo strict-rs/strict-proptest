@@ -91,10 +91,8 @@ fn parse_or_warn<T: str::FromStr + fmt::Display>(raw_value: &OsString, dst: &mut
   use std::borrow::ToOwned as _;
   use std::string::ToString as _;
 
+  use crate::test_runner::diagnostics;
   use crate::test_runner::diagnostics::RunnerDiagnostic;
-  use crate::test_runner::diagnostics::{
-    self,
-  };
 
   if let Some(source_text) = raw_value.to_str() {
     if let Ok(parsed) = source_text.parse() {
@@ -147,10 +145,8 @@ fn apply_env_var(env_var: &str, raw_value: &OsString, result: &mut Config) {
     unknown if unknown.starts_with("PROPTEST_") => {
       use std::borrow::ToOwned as _;
 
+      use crate::test_runner::diagnostics;
       use crate::test_runner::diagnostics::RunnerDiagnostic;
-      use crate::test_runner::diagnostics::{
-        self,
-      };
 
       diagnostics::emit(&RunnerDiagnostic::EnvVarUnknown {
         var: unknown.to_owned()
@@ -167,7 +163,7 @@ fn apply_env_var(env_var: &str, raw_value: &OsString, result: &mut Config) {
   clippy::single_call_fn,
   reason = "preserve the public Config environment-overlay API as a no-op without std env access"
 )]
-pub fn contextualize_config(result: Config) -> Config {
+pub const fn contextualize_config(result: Config) -> Config {
   result
 }
 
@@ -594,7 +590,11 @@ impl Config {
   /// syntax:
   ///
   /// ```
-  /// # use proptest::test_runner::{Config, FileFailurePersistence};
+  /// # #[cfg(feature = "std")]
+  /// # {
+  /// use proptest::test_runner::Config;
+  /// use proptest::test_runner::FileFailurePersistence;
+  ///
   /// assert_eq!(
   ///   Config::with_failure_persistence(FileFailurePersistence::WithSource("regressions")),
   ///   Config {
@@ -602,6 +602,7 @@ impl Config {
   ///     ..Config::default()
   ///   }
   /// );
+  /// # }
   /// ```
   pub fn with_failure_persistence<T>(failure_persistence: T) -> Self
   where
@@ -633,6 +634,7 @@ impl Config {
   /// feature is disabled and there is no `fork` field.
   #[cfg(not(feature = "fork"))]
   const fn raw_fork(&self) -> bool {
+    let _: &Self = self;
     false
   }
 
@@ -653,6 +655,7 @@ impl Config {
   #[cfg(not(feature = "timeout"))]
   #[must_use]
   pub const fn timeout(&self) -> u32 {
+    let _: &Self = self;
     0
   }
 

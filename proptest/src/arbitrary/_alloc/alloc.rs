@@ -7,16 +7,22 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Arbitrary implementations for `std::hash`.
+//! Arbitrary implementations for allocator APIs.
 
 use core::cmp;
 use core::ops::Range;
+
+#[cfg(feature = "alt-stable")]
+use allocator_api2::alloc::AllocError as AllocatorApi2AllocError;
+#[cfg(feature = "alt-stable")]
+use allocator_api2::alloc::Global as AllocatorApi2Global;
 
 multiplex_alloc!(::alloc::alloc, ::std::alloc);
 
 use crate::arbitrary::StrategyFor;
 use crate::arbitrary::any;
 use crate::strategy::FilterMap;
+#[cfg(any(all(feature = "unstable", not(feature = "alt-stable")), feature = "alt-stable"))]
 use crate::strategy::Just;
 use crate::strategy::Strategy as _;
 
@@ -25,7 +31,11 @@ type LayoutCandidate = (u8, usize);
 /// Function pointer used by the `Layout` filter-map strategy.
 type LayoutMapper = fn(LayoutCandidate) -> Option<alloc::Layout>;
 
+#[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
 arbitrary!(alloc::Global; alloc::Global);
+
+#[cfg(feature = "alt-stable")]
+arbitrary!(AllocatorApi2Global; AllocatorApi2Global);
 
 // Not Debug.
 // lazy_just!(System, || System);
@@ -53,7 +63,11 @@ arbitrary!(
     }
 );
 
+#[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
 arbitrary!(alloc::AllocError, Just<Self>; Just(alloc::AllocError));
+
+#[cfg(feature = "alt-stable")]
+arbitrary!(AllocatorApi2AllocError, Just<Self>; Just(AllocatorApi2AllocError));
 // 2018-07-28 CollectionAllocErr is not currently available outside of using
 // the `alloc` crate, which would require a different nightly feature. For now,
 // disable.
@@ -64,11 +78,48 @@ arbitrary!(alloc::AllocError, Just<Self>; Just(alloc::AllocError));
 
 #[cfg(test)]
 mod test {
+  #[cfg(feature = "alt-stable")]
+  use allocator_api2::alloc::Layout as AllocatorApi2Layout;
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_some;
+
   use super::*;
+  use crate::strategy::ValueTree as _;
+  use crate::test_runner::TestRunner;
 
   no_panic_test!(
-      layout => alloc::Layout,
-      alloc_err => alloc::AllocError
+      layout => alloc::Layout
       //collection_alloc_err => alloc::collections::CollectionAllocErr
   );
+
+  #[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
+  no_panic_test!(
+      alloc_global => alloc::Global,
+      alloc_err => alloc::AllocError
+  );
+
+  #[cfg(feature = "alt-stable")]
+  no_panic_test!(
+      allocator_api2_global => AllocatorApi2Global,
+      allocator_api2_alloc_error => AllocatorApi2AllocError,
+      allocator_api2_layout => AllocatorApi2Layout
+  );
+
+  #[test]
+  fn generated_layouts_have_valid_alignment_and_size() -> Result<(), TestFailure> {
+    let mut runner = TestRunner::deterministic();
+    let strategy = any::<alloc::Layout>();
+
+    for _ in 0..64 {
+      let layout = ensure_some(strategy.new_tree(&mut runner).ok(), "Layout strategy generates a value tree")?.current();
+      ensure(layout.align().is_power_of_two(), "Layout alignment is a power of two")?;
+      let max_layout_size = usize::try_from(isize::MAX).unwrap_or(usize::MAX);
+      ensure(
+        layout.size() <= max_layout_size,
+        "Layout size remains inside the allocation size bound",
+      )?;
+    }
+    Ok(())
+  }
 }
