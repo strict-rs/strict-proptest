@@ -27,7 +27,7 @@ publish = false
 [workspace.dependencies]
 
 # Internal deps
-proptest = { version = "2", path = "proptest" }
+proptest = { version = "2", path = "proptest", features = ["std", "strict-test"], default-features = false }
 proptest-macro = { version = "2", path = "proptest-macro" }
 proptest-derive-internal = { version = "2", path = "proptest-derive-internal" }
 
@@ -75,7 +75,7 @@ globset = "0.4"
 toml = "1.1"
 toml_edit = "0.25"
 anstyle = "1"
-snapbox = { version = "1.2", default-features = false, features = ["diff"] }
+snapbox = { version = "1.2", features = ["diff"], default-features = false }
 parking_lot = "0.12"
 
 [patch.crates-io]
@@ -112,8 +112,12 @@ tracing-core = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", bran
 
 # patches (comment out if unused, do not remove)
 [patch."ssh://git@github.com/strict-rs/strict-proptest.git"]
-proptest = { version = "2", path = "proptest" }
-proptest-macro = { version = "2", path = "proptest-macro" }
+proptest = { path = "proptest" }
+proptest-macro = { path = "proptest-macro" }
+proptest-derive = { path = "proptest-derive" }
+proptest-derive-internal = { path = "proptest-derive-internal" }
+proptest-state-machine = { path = "proptest-state-machine" }
+xtask = { path = "xtask" }
 
 # patches (comment out if unused, do not remove)
 [patch."https://github.com/estrict-rs/strict-proptest.git"]
@@ -511,3 +515,11 @@ question_mark_used                       = "allow"   # `?` is idiomatic
 pub_use                                  = "allow"   # re-export idiom
 ref_binding_to_reference                 = "allow"   # contradicts pattern_type_mismatch
 blanket_clippy_restriction_lints         = "allow"   # we intentionally enable restriction individually
+
+[patch."https://github.com/strict-rs/strict-proptest"]
+proptest = { path = "proptest" }
+proptest-derive = { path = "proptest-derive" }
+proptest-derive-internal = { path = "proptest-derive-internal" }
+proptest-state-machine = { path = "proptest-state-machine" }
+proptest-macro = { path = "proptest-macro" }
+xtask = { path = "xtask" }
