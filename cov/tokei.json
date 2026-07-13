@@ -6231,19 +6231,19 @@
     ]
   },
   "TOML": {
-    "blanks": 120,
+    "blanks": 124,
     "children": {},
-    "code": 805,
-    "comments": 179,
+    "code": 809,
+    "comments": 256,
     "inaccurate": false,
     "reports": [
       {
         "name": "./Cargo.toml",
         "stats": {
-          "blanks": 43,
+          "blanks": 47,
           "blobs": {},
           "code": 334,
-          "comments": 59
+          "comments": 132
         }
       },
       {
@@ -6355,6 +6355,15 @@
         }
       },
       {
+        "name": "./rust-toolchain.toml",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 4,
+          "comments": 4
+        }
+      },
+      {
         "name": "./rustfmt.toml",
         "stats": {
           "blanks": 4,
@@ -6375,7 +6384,7 @@
     ]
   },
   "Total": {
-    "blanks": 8773,
+    "blanks": 8777,
     "children": {
       "Batch": [
         {
@@ -10847,10 +10856,10 @@
         {
           "name": "./Cargo.toml",
           "stats": {
-            "blanks": 43,
+            "blanks": 47,
             "blobs": {},
             "code": 334,
-            "comments": 59
+            "comments": 132
           }
         },
         {
@@ -10962,6 +10971,15 @@
           }
         },
         {
+          "name": "./rust-toolchain.toml",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 4,
+            "comments": 4
+          }
+        },
+        {
           "name": "./rustfmt.toml",
           "stats": {
             "blanks": 4,
@@ -10981,8 +10999,8 @@
         }
       ]
     },
-    "code": 35285,
-    "comments": 13471,
+    "code": 35289,
+    "comments": 13548,
     "inaccurate": false,
     "reports": []
   }
