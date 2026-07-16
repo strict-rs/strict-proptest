@@ -55,15 +55,13 @@ rusty-fork = { version = "0.3.1", default-features = false }
 tempfile = "3.27"
 unarray = "0.1.4"
 
-# strict-* ecosystem deps (comment out if unused, do not remove)
-agents-md = { version = "0.1.0", git = "ssh://git@github.com/earthlings-dev/agents-md-rs.git", branch = "main" }
-bpaf = { git = "ssh://git@github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10", default-features = false }
-strict-xtask-core = { version = "0.1.0", git = "ssh://git@github.com/earthlings-dev/strict-xtask-core-rs.git", branch = "main" }
-strict-xtask-cargo = { version = "0.1.0", git = "ssh://git@github.com/earthlings-dev/strict-xtask-cargo-rs.git", branch = "main" }
-strict-xtask-agents-md = { version = "0.1.0", git = "ssh://git@github.com/earthlings-dev/strict-xtask-agents-md-rs.git", branch = "main" }
-mutant_fleet = { version = "0.1.0", git = "ssh://git@github.com/earthlings-dev/rust-mutant-fleet.git", branch = "main" }
-strict-test-support = { version = "0.1.0", git = "ssh://git@github.com/earthlings-dev/strict-test-support-rs.git", branch = "main" }
-trybuild = { git = "ssh://git@github.com/strict-rs/strict-trybuild.git", branch = "strict", version = "1" }
+# strict-* ecosystem dependencies.
+bpaf = { git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10", default-features = false }
+mutant_fleet = { version = "0.1.0", git = "https://github.com/earthlings-dev/rust-mutant-fleet.git", branch = "main" }
+strict-test-support = { version = "0.1.0", git = "https://github.com/earthlings-dev/strict-test-support-rs.git", branch = "main" }
+template-core = { version = "0.1.0", git = "https://github.com/earthlings-dev/template-rs.git", branch = "main" }
+template-xtask = { version = "0.1.0", git = "https://github.com/earthlings-dev/template-rs.git", branch = "main" }
+trybuild = { git = "https://github.com/strict-rs/strict-trybuild.git", branch = "strict", version = "1" }
 syn = { version = "2", features = ["full", "visit"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 serde = { version = "1", features = ["derive"] }
@@ -81,64 +79,43 @@ parking_lot = "0.12"
 [patch.crates-io]
 
 # strict-proptest (comment out if unused, do not remove)
-# proptest = { version = "2", git = "ssh://git@github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
-# proptest-macro = { version = "2, git = "ssh://git@github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
-# proptest-state-machine = { version = "2", git = "ssh://git@github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
-# proptest-derive = { version = "2", git = "ssh://git@github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
+# proptest = { version = "2", git = "https://github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
+# proptest-macro = { version = "2, git = "https://github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
+# proptest-state-machine = { version = "2", git = "https://github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
+# proptest-derive = { version = "2", git = "https://github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
 
 # strict-trybuild (comment out if unused, do not remove)
-# trybuild = { git = "ssh://git@github.com/strict-rs/strict-trybuild.git", branch = "strict", version = "1" }
+# trybuild = { git = "https://github.com/strict-rs/strict-trybuild.git", branch = "strict", version = "1" }
 
 # strict-bpaf (comment out if unused, do not remove)
-# bpaf = { git = "ssh://git@github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10" }
-# bpaf_derive = { git = "ssh://git@github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10.0" }
-# bpaf_cauwugo = { git = "ssh://git@github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10.0" }
+# bpaf = { git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10" }
+# bpaf_derive = { git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10.0" }
+# bpaf_cauwugo = { git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10.0" }
 
 # strict-tracing (comment out if unused, do not remove)
-tracing = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.44" }
-# tracing-appender = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.5" }
-# tracing-attributes = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.31" }
-tracing-core = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.36" }
-# tracing-error = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.1" }
-# tracing-flame = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.0" }
-# tracing-futures = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.5" }
-# tracing-journald = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.3.2" }
-# tracing-log = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.0" }
-# tracing-mock = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.0-beta.3" }
-# tracing-serde = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.0" }
-# tracing-subscriber = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.3.23" }
-# tracing-test = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.0" }
-# tracing-tower = { git = "ssh://git@github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.0" }
+tracing = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.44" }
+# tracing-appender = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.5" }
+# tracing-attributes = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.31" }
+tracing-core = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.36" }
+# tracing-error = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.1" }
+# tracing-flame = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.0" }
+# tracing-futures = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.5" }
+# tracing-journald = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.3.2" }
+# tracing-log = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.0" }
+# tracing-mock = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.0-beta.3" }
+# tracing-serde = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.0" }
+# tracing-subscriber = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.3.23" }
+# tracing-test = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.0" }
+# tracing-tower = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.0" }
 
 # patches (comment out if unused, do not remove)
-[patch."ssh://git@github.com/strict-rs/strict-proptest.git"]
+[patch."https://github.com/strict-rs/strict-proptest.git"]
 proptest = { path = "proptest" }
 proptest-macro = { path = "proptest-macro" }
 proptest-derive = { path = "proptest-derive" }
 proptest-derive-internal = { path = "proptest-derive-internal" }
 proptest-state-machine = { path = "proptest-state-machine" }
 xtask = { path = "xtask" }
-
-# patches (comment out if unused, do not remove)
-[patch."https://github.com/estrict-rs/strict-proptest.git"]
-proptest = { version = "2", path = "proptest" }
-proptest-macro = { version = "2", path = "proptest-macro" }
-
-[workspace.metadata.config.layout]
-schema-version = "0.1.0"
-kind = "flat"
-
-# ═════════════════════════════════════════════════════════════════════════════
-# Lint policy — rustc
-# ─────────────────────────────────────────────────────────────────────────────
-# Shared workspace lint levels; members adopt them via `lints.workspace = true`.
-# Levels are calibrated against this workspace: a lint is `deny` only where the
-# whole opted tree actually holds under
-# `cargo +nightly clippy --workspace --all-targets --all-features`, `warn`
-# where documented legacy surfaces (the panicking macro facade, the runner's
-# stderr diagnostics seam, upstream-derived internals) still carry the pattern.
-# `priority = -1` = applied before individual lints, so specific overrides win.
-# ═════════════════════════════════════════════════════════════════════════════
 
 [workspace.lints.rust]
 # ── Absolute prohibitions ────────────────────────────────────────────────
@@ -203,7 +180,7 @@ missing_copy_implementations            = "warn"
 # ─────────────────────────────────────────────────────────────────────────────
 # NOTE: rustdoc lints fire during a DOC BUILD (`cargo doc` / `cargo xdoc`), not
 # during `cargo check` / `clippy` / `test`. The `ci` pipeline runs a doc build
-# (the `doc` phase in `cmd::ci`, reached via `cargo xtask ci`), so these deny
+# (the `doc` phase in the installed `template ci` workflow), so these deny
 # levels are a hard CI gate as well as gating `cargo doc` locally and on docs.rs.
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -479,7 +456,7 @@ missing_docs_in_private_items            = "deny"
 
 # Meta: localized `#[allow(clippy::single_call_fn, reason = "...")]` is
 # permitted where a named helper genuinely improves structure. The companion
-# `lint-attrs` xtask still rejects every other `#[allow(...)]` / `#[expect(...)]`.
+# `template lint-attrs` still rejects every other `#[allow(...)]` / `#[expect(...)]`.
 allow_attributes                         = "allow"
 allow_attributes_without_reason          = "deny"
 
