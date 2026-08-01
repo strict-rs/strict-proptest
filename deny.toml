@@ -55,6 +55,7 @@ allow-git = [
   "https://github.com/strict-rs/strict-bpaf.git",
   "https://github.com/strict-rs/strict-rowan.git",
   "https://github.com/strict-rs/strict-taplo.git",
+  "https://github.com/strict-rs/strict-thiserror.git",
   "https://github.com/strict-rs/strict-tracing.git",
   "https://github.com/strict-rs/strict-trybuild.git",
 ]
