@@ -48,6 +48,8 @@ type DecodedInterruption = Result<(Vec<u8>, Interruption), ReplayError>;
 type RejectedInterruption = (Vec<u8>, ReplayError, DecodedInterruption);
 /// Control-record results and all remaining finalization failures.
 type Controls = (Result<bool, ChannelError>, Result<(), ChannelError>, Vec<ChannelError>);
+/// Ordered control observations and any failures left for finalization.
+type ControlSequence = (Vec<Result<(), ChannelError>>, Vec<ChannelError>);
 /// Rejected frames paired with their replay result and unchanged input.
 type RejectedEvaluation = (Vec<Frame>, Replayed, u32);
 
@@ -192,6 +194,34 @@ fn replay_uses_recorded_budget_and_consumes_backtracking_and_completion() -> Che
     (budget, backtrack, completed),
     "replay uses the child's budget decision and consumes traversal-only records without fabricating evaluations",
     |observed| matches!(observed.0, Ok(true)) && observed.1.is_ok() && observed.2.is_empty(),
+  )
+  .map(drop)
+  .map_err(Box::new)
+}
+
+#[test]
+fn complete_prefix_precedes_tail_and_terminal_failures() -> Check<ControlSequence> {
+  let mut input = journal([control_frame(BACKTRACK)]);
+  input.tail_errors.extend([
+    WireError::Io(Box::new(io::Error::new(io::ErrorKind::BrokenPipe, "the replay stream closed"))),
+    WireError::Protocol(Box::new(ReplayError::Truncated)),
+  ]);
+  let mut codec = NumberCodec::default();
+  let mut channel = ForkChannel::new(&mut codec, input, None, Some(ExecutionError::Transport(CodecFailure::Decode(17))));
+  let observations = (0..5).map(|_| channel.backtrack()).collect();
+  ensure_that(
+    (observations, channel.finish(false)),
+    "complete replay records precede all tail errors, the terminal failure, and parent exhaustion without losing or repeating a failure",
+    |observed: &ControlSequence| {
+      observed.1.is_empty()
+        && matches!(*observed.0.as_slice(), [
+          Ok(()),
+          Err(ExecutionError::Io(ref error)),
+          Err(ExecutionError::Protocol(ReplayError::Truncated)),
+          Err(ExecutionError::Transport(CodecFailure::Decode(17))),
+          Err(ExecutionError::Protocol(ReplayError::Exhausted)),
+        ] if error.kind() == io::ErrorKind::BrokenPipe)
+    },
   )
   .map(drop)
   .map_err(Box::new)

@@ -586,6 +586,10 @@ mod test {
   type CheckedSamples<T, R> = Result<BoundedSamples<T, R>, Box<PredicateFailure<BoundedSamples<T, R>>>>;
   /// A string sample collection and its expected complete diversity set.
   type ExpectedStrings = (RegexSamples<String, Regex>, HashSet<String>);
+  /// Complete matching and diversity checks for the string and byte generators.
+  type RepresentationChecks = (CheckedSamples<String, Regex>, CheckedSamples<Vec<u8>, BytesRegex>);
+  /// Both representations' native sampling outcomes, including either failure.
+  type CheckedRepresentations = Result<RepresentationChecks, Box<PredicateFailure<RepresentationChecks>>>;
 
   /// Observe a bounded simplification walk separately from generation and its wall-clock budget.
   #[allow(
@@ -719,6 +723,24 @@ mod test {
     })
   }
 
+  /// Check both regex representations while retaining each complete sampling outcome.
+  fn check_representations(strings: CheckedSamples<String, Regex>, bytes: CheckedSamples<Vec<u8>, BytesRegex>) -> CheckedRepresentations {
+    ensure_that(
+      (strings, bytes),
+      "every regex representation satisfies its sampling contract",
+      |observed| observed.0.is_ok() && observed.1.is_ok(),
+    )
+    .map_err(Box::new)
+  }
+
+  /// Exercise the same pattern and diversity bounds through both public generators.
+  fn do_test_both(pattern: &str, min_distinct: usize, max_distinct: usize, iterations: usize) -> CheckedRepresentations {
+    check_representations(
+      do_test(pattern, min_distinct, max_distinct, iterations),
+      do_test_bytes(pattern, min_distinct, max_distinct, iterations),
+    )
+  }
+
   #[test]
   fn regex_generator_value_tree_is_debug() -> Result<(), impl fmt::Debug> {
     let result = string_regex("[a-z]+").map(|strategy| {
@@ -760,15 +782,7 @@ mod test {
 
   #[test]
   fn test_literal() -> Result<(), impl fmt::Debug> {
-    let result_1 = do_test("foo", 1, 1, 8);
-    let result_2 = do_test_bytes("foo", 1, 1, 8);
-    ensure_that(
-      (result_1, result_2),
-      "every regex representation satisfies its sampling contract",
-      |observed| observed.0.is_ok() && observed.1.is_ok(),
-    )
-    .map(drop)
-    .map_err(Box::new)
+    do_test_both("foo", 1, 1, 8).map(drop)
   }
 
   #[test]
@@ -778,93 +792,37 @@ mod test {
 
   #[test]
   fn test_alternation() -> Result<(), impl fmt::Debug> {
-    let result_1 = do_test("foo|bar|baz", 3, 3, 16);
-    let result_2 = do_test_bytes("foo|bar|baz", 3, 3, 16);
-    ensure_that(
-      (result_1, result_2),
-      "every regex representation satisfies its sampling contract",
-      |observed| observed.0.is_ok() && observed.1.is_ok(),
-    )
-    .map(drop)
-    .map_err(Box::new)
+    do_test_both("foo|bar|baz", 3, 3, 16).map(drop)
   }
 
   #[test]
   fn test_repetition() -> Result<(), impl fmt::Debug> {
-    let result_1 = do_test("a{0,8}", 9, 9, 64);
-    let result_2 = do_test_bytes("a{0,8}", 9, 9, 64);
-    ensure_that(
-      (result_1, result_2),
-      "every regex representation satisfies its sampling contract",
-      |observed| observed.0.is_ok() && observed.1.is_ok(),
-    )
-    .map(drop)
-    .map_err(Box::new)
+    do_test_both("a{0,8}", 9, 9, 64).map(drop)
   }
 
   #[test]
   fn test_question() -> Result<(), impl fmt::Debug> {
-    let result_1 = do_test("a?", 2, 2, 16);
-    let result_2 = do_test_bytes("a?", 2, 2, 16);
-    ensure_that(
-      (result_1, result_2),
-      "every regex representation satisfies its sampling contract",
-      |observed| observed.0.is_ok() && observed.1.is_ok(),
-    )
-    .map(drop)
-    .map_err(Box::new)
+    do_test_both("a?", 2, 2, 16).map(drop)
   }
 
   #[test]
   fn test_star() -> Result<(), impl fmt::Debug> {
-    let result_1 = do_test("a*", 33, 33, 256);
-    let result_2 = do_test_bytes("a*", 33, 33, 256);
-    ensure_that(
-      (result_1, result_2),
-      "every regex representation satisfies its sampling contract",
-      |observed| observed.0.is_ok() && observed.1.is_ok(),
-    )
-    .map(drop)
-    .map_err(Box::new)
+    do_test_both("a*", 33, 33, 256).map(drop)
   }
 
   #[test]
   fn test_plus() -> Result<(), impl fmt::Debug> {
-    let result_1 = do_test("a+", 32, 32, 256);
-    let result_2 = do_test_bytes("a+", 32, 32, 256);
-    ensure_that(
-      (result_1, result_2),
-      "every regex representation satisfies its sampling contract",
-      |observed| observed.0.is_ok() && observed.1.is_ok(),
-    )
-    .map(drop)
-    .map_err(Box::new)
+    do_test_both("a+", 32, 32, 256).map(drop)
   }
 
   #[test]
   fn test_n_to_range() -> Result<(), impl fmt::Debug> {
-    let result_1 = do_test("a{4,}", 4, 4, 64);
-    let result_2 = do_test_bytes("a{4,}", 4, 4, 64);
-    ensure_that(
-      (result_1, result_2),
-      "every regex representation satisfies its sampling contract",
-      |observed| observed.0.is_ok() && observed.1.is_ok(),
-    )
-    .map(drop)
-    .map_err(Box::new)
+    do_test_both("a{4,}", 4, 4, 64).map(drop)
   }
 
   #[test]
   fn test_concatenation() -> Result<(), impl fmt::Debug> {
-    let result_1 = do_test("(foo|bar)(xyzzy|plugh)", 4, 4, 32);
-    let result_2 = do_test_bytes("(foo|bar)(xyzzy|plugh)", 4, 4, 32);
-    ensure_that(
-      (result_1, result_2),
-      "every regex representation satisfies its sampling contract",
-      |observed| observed.0.is_ok() && observed.1.is_ok(),
-    )
-    .map(drop)
-    .map_err(Box::new)
+    do_test_both("(foo|bar)(xyzzy|plugh)", 4, 4, 32).map(drop)
   }
 
   #[test]
@@ -884,15 +842,7 @@ mod test {
 
   #[test]
   fn test_dot_s() -> Result<(), impl fmt::Debug> {
-    let result_1 = do_test("(?s).", 200, 65536, 256);
-    let result_2 = do_test_bytes("(?s-u).", 256, 256, 2048);
-    ensure_that(
-      (result_1, result_2),
-      "every regex representation satisfies its sampling contract",
-      |observed| observed.0.is_ok() && observed.1.is_ok(),
-    )
-    .map(drop)
-    .map_err(Box::new)
+    check_representations(do_test("(?s).", 200, 65536, 256), do_test_bytes("(?s-u).", 256, 256, 2048)).map(drop)
   }
 
   #[test]

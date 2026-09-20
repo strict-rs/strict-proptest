@@ -314,67 +314,23 @@ fn words(payload: &[u8]) -> Result<Vec<u64>, CodecError> {
   Ok(chunks.iter().copied().map(u64::from_le_bytes).collect())
 }
 
-/// Reconstruct an encoding failure from the exact native length that caused it.
-#[allow(
-  clippy::single_call_fn,
-  reason = "length-error decoding validates the original conversion independently of record decoding"
-)]
-fn decode_length_error(payload: &[u8]) -> Result<CodecError, CodecError> {
-  let (&[encoded], &[]) = payload.as_chunks::<{ size_of::<usize>() }>() else {
+/// Reconstruct a native integer-conversion failure only from a complete word that actually fails.
+fn decode_conversion_error<const WIDTH: usize, Original: Copy, Target>(
+  payload: &[u8],
+  decode: fn([u8; WIDTH]) -> Original,
+  failure: impl FnOnce(Original, TryFromIntError) -> CodecError,
+) -> Result<CodecError, CodecError>
+where
+  Target: TryFrom<Original, Error = TryFromIntError>,
+{
+  let Ok(encoded) = payload.try_into() else {
     return Err(CodecError::Malformed);
   };
-  let value = usize::from_le_bytes(encoded);
-  u64::try_from(value).map_or_else(
-    |source| {
-      Ok(CodecError::Length {
-        value,
-        source,
-      })
-    },
-    |_| Err(CodecError::Malformed),
-  )
-}
-
-/// Reconstruct the native narrowing error from its original model-state word.
-#[allow(
-  clippy::single_call_fn,
-  reason = "state-error decoding replays the exact failed checked conversion"
-)]
-fn decode_state_error(payload: &[u8]) -> Result<CodecError, CodecError> {
-  let (&[encoded], &[]) = payload.as_chunks::<8>() else {
-    return Err(CodecError::Malformed);
-  };
-  let value = u64::from_le_bytes(encoded);
-  u32::try_from(value).map_or_else(
-    |source| {
-      Ok(CodecError::State {
-        value,
-        source,
-      })
-    },
-    |_| Err(CodecError::Malformed),
-  )
-}
-
-/// Reconstruct the native receiving-platform length error from its wire word.
-#[allow(
-  clippy::single_call_fn,
-  reason = "count-error decoding preserves the original native-width conversion failure"
-)]
-fn decode_count_error(payload: &[u8]) -> Result<CodecError, CodecError> {
-  let (&[encoded], &[]) = payload.as_chunks::<8>() else {
-    return Err(CodecError::Malformed);
-  };
-  let value = u64::from_le_bytes(encoded);
-  usize::try_from(value).map_or_else(
-    |source| {
-      Ok(CodecError::Count {
-        value,
-        source,
-      })
-    },
-    |_| Err(CodecError::Malformed),
-  )
+  let original = decode(encoded);
+  match Target::try_from(original) {
+    Err(source) => Ok(failure(original, source)),
+    Ok(_) => Err(CodecError::Malformed),
+  }
 }
 
 impl PropertyTransport<Case, StateMachineEvidence<FailsAtThree>, Box<StateMachineFailure<FailsAtThree>>> for CountingCodec {
@@ -448,9 +404,20 @@ impl PropertyTransport<Case, StateMachineEvidence<FailsAtThree>, Box<StateMachin
       [0] => Ok(CodecError::Malformed),
       [2] => Ok(CodecError::CaseMismatch),
       [3] => Ok(CodecError::Context),
-      [1, ref encoded @ ..] => decode_length_error(encoded),
-      [4, ref encoded @ ..] => decode_state_error(encoded),
-      [5, ref encoded @ ..] => decode_count_error(encoded),
+      [1, ref encoded @ ..] => {
+        decode_conversion_error::<{ size_of::<usize>() }, _, u64>(encoded, usize::from_le_bytes, |value, source| CodecError::Length {
+          value,
+          source,
+        })
+      }
+      [4, ref encoded @ ..] => decode_conversion_error::<8, _, u32>(encoded, u64::from_le_bytes, |value, source| CodecError::State {
+        value,
+        source,
+      }),
+      [5, ref encoded @ ..] => decode_conversion_error::<8, _, usize>(encoded, u64::from_le_bytes, |value, source| CodecError::Count {
+        value,
+        source,
+      }),
       _ => Err(CodecError::Malformed),
     }
   }

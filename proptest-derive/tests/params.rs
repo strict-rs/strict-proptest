@@ -145,28 +145,29 @@ mod tests {
 
   #[test]
   fn parallel_params() -> Checked<Parallel> {
-    ensure_property(
-      &any_with::<Parallel>(("[0-9]", 3)),
-      "parallel per-field params drive each field",
-      |generated| {
-        ensure_that(generated, "parallel per-field params drive each field", |sample| {
-          (0..3).contains(&sample.int) && sample.string.chars().next().is_some_and(|character| character.is_ascii_digit())
-        })
-      },
-    )
+    check_parallel_params("parallel per-field params drive each field", |sample: &Parallel| {
+      (&sample.string, sample.int)
+    })
   }
 
   #[test]
   fn parallel_params2() -> Checked<Parallel2> {
-    ensure_property(
-      &any_with::<Parallel2>(("[0-9]", 3)),
-      "string-spelled parallel params drive each field",
-      |generated| {
-        ensure_that(generated, "string-spelled parallel params drive each field", |sample| {
-          (0..3).contains(&sample.int) && sample.string.chars().next().is_some_and(|character| character.is_ascii_digit())
-        })
-      },
-    )
+    check_parallel_params("string-spelled parallel params drive each field", |sample: &Parallel2| {
+      (&sample.string, sample.int)
+    })
+  }
+
+  /// Both parameter spellings preserve the generated subject while checking its fields.
+  fn check_parallel_params<T>(context: &'static str, fields: impl Fn(&T) -> (&str, i64)) -> Checked<T>
+  where
+    T: Arbitrary<Parameters = (&'static str, u8)>,
+  {
+    ensure_property(&any_with::<T>(("[0-9]", 3)), context, |generated| {
+      ensure_that(generated, context, |sample| {
+        let (string, int) = fields(sample);
+        (0..3).contains(&int) && string.chars().next().is_some_and(|character| character.is_ascii_digit())
+      })
+    })
   }
 
   #[test]

@@ -422,6 +422,22 @@ mapfn! {
 #[derive(Debug, Clone, Copy)]
 struct MinSize(usize);
 
+/// Collect generated elements and reject collections whose duplicate keys
+/// reduce their length below the source strategy's minimum size.
+fn distinct_collection<T, F>(
+  source: VecStrategy<T>,
+  collect: F,
+  reason: &'static str,
+) -> statics::Filter<statics::Map<VecStrategy<T>, F>, MinSize>
+where
+  T: Strategy,
+  F: statics::MapFn<Vec<T::Value>>,
+  MinSize: statics::FilterFn<F::Output>,
+{
+  let minimum = MinSize(source.size.start());
+  statics::Filter::new(statics::Map::new(source, collect), reason.into(), minimum)
+}
+
 #[cfg(feature = "std")]
 impl<T: Eq + Hash> statics::FilterFn<HashSet<T>> for MinSize {
   fn apply(&self, set: &HashSet<T>) -> bool {
@@ -458,12 +474,7 @@ pub fn hash_set<T: Strategy>(element: T, size: impl Into<SizeRange>) -> HashSetS
 where
   T::Value: Hash + Eq,
 {
-  let size_range = size.into();
-  HashSetStrategy(statics::Filter::new(
-    statics::Map::new(vec(element, size_range.clone()), VecToHashSet),
-    "HashSet minimum size".into(),
-    MinSize(size_range.start()),
-  ))
+  HashSetStrategy(distinct_collection(vec(element, size), VecToHashSet, "HashSet minimum size"))
 }
 
 /// Fallible form of [`hash_set`]: returns a typed [`EmptySizeRange`] error
@@ -483,11 +494,10 @@ pub fn try_hash_set<T: Strategy>(element: T, size: impl Into<SizeRange>) -> Resu
 where
   T::Value: Hash + Eq,
 {
-  let size_range = size.into();
-  Ok(HashSetStrategy(statics::Filter::new(
-    statics::Map::new(try_vec(element, size_range.clone())?, VecToHashSet),
-    "HashSet minimum size".into(),
-    MinSize(size_range.start()),
+  Ok(HashSetStrategy(distinct_collection(
+    try_vec(element, size)?,
+    VecToHashSet,
+    "HashSet minimum size",
   )))
 }
 
@@ -529,12 +539,7 @@ pub fn btree_set<T: Strategy>(element: T, size: impl Into<SizeRange>) -> BTreeSe
 where
   T::Value: Ord,
 {
-  let size_range = size.into();
-  BTreeSetStrategy(statics::Filter::new(
-    statics::Map::new(vec(element, size_range.clone()), VecToBTreeSet),
-    "BTreeSet minimum size".into(),
-    MinSize(size_range.start()),
-  ))
+  BTreeSetStrategy(distinct_collection(vec(element, size), VecToBTreeSet, "BTreeSet minimum size"))
 }
 
 /// Fallible form of [`btree_set`]: returns a typed [`EmptySizeRange`] error
@@ -552,11 +557,10 @@ pub fn try_btree_set<T: Strategy>(element: T, size: impl Into<SizeRange>) -> Res
 where
   T::Value: Ord,
 {
-  let size_range = size.into();
-  Ok(BTreeSetStrategy(statics::Filter::new(
-    statics::Map::new(try_vec(element, size_range.clone())?, VecToBTreeSet),
-    "BTreeSet minimum size".into(),
-    MinSize(size_range.start()),
+  Ok(BTreeSetStrategy(distinct_collection(
+    try_vec(element, size)?,
+    VecToBTreeSet,
+    "BTreeSet minimum size",
   )))
 }
 
@@ -610,11 +614,10 @@ pub fn hash_map<K: Strategy, V: Strategy>(key: K, value_strategy: V, size: impl 
 where
   K::Value: Hash + Eq,
 {
-  let size_range = size.into();
-  HashMapStrategy(statics::Filter::new(
-    statics::Map::new(vec((key, value_strategy), size_range.clone()), VecToHashMap),
-    "HashMap minimum size".into(),
-    MinSize(size_range.start()),
+  HashMapStrategy(distinct_collection(
+    vec((key, value_strategy), size),
+    VecToHashMap,
+    "HashMap minimum size",
   ))
 }
 
@@ -639,11 +642,10 @@ pub fn try_hash_map<K: Strategy, V: Strategy>(
 where
   K::Value: Hash + Eq,
 {
-  let size_range = size.into();
-  Ok(HashMapStrategy(statics::Filter::new(
-    statics::Map::new(try_vec((key, value_strategy), size_range.clone())?, VecToHashMap),
-    "HashMap minimum size".into(),
-    MinSize(size_range.start()),
+  Ok(HashMapStrategy(distinct_collection(
+    try_vec((key, value_strategy), size)?,
+    VecToHashMap,
+    "HashMap minimum size",
   )))
 }
 
@@ -691,11 +693,10 @@ pub fn btree_map<K: Strategy, V: Strategy>(key: K, value_strategy: V, size: impl
 where
   K::Value: Ord,
 {
-  let size_range = size.into();
-  BTreeMapStrategy(statics::Filter::new(
-    statics::Map::new(vec((key, value_strategy), size_range.clone()), VecToBTreeMap),
-    "BTreeMap minimum size".into(),
-    MinSize(size_range.start()),
+  BTreeMapStrategy(distinct_collection(
+    vec((key, value_strategy), size),
+    VecToBTreeMap,
+    "BTreeMap minimum size",
   ))
 }
 
@@ -718,11 +719,10 @@ pub fn try_btree_map<K: Strategy, V: Strategy>(
 where
   K::Value: Ord,
 {
-  let size_range = size.into();
-  Ok(BTreeMapStrategy(statics::Filter::new(
-    statics::Map::new(try_vec((key, value_strategy), size_range.clone())?, VecToBTreeMap),
-    "BTreeMap minimum size".into(),
-    MinSize(size_range.start()),
+  Ok(BTreeMapStrategy(distinct_collection(
+    try_vec((key, value_strategy), size)?,
+    VecToBTreeMap,
+    "BTreeMap minimum size",
   )))
 }
 
@@ -897,6 +897,7 @@ mod test {
   use crate::bits;
   use crate::std_facade::Box;
   use crate::strategy::BoxedStrategy;
+  use crate::strategy::Just;
   use crate::strategy::check_strategy_sanity;
   use crate::strategy::trace_shrink_steps;
   use crate::test_runner::TestCaseError;
@@ -906,16 +907,17 @@ mod test {
 
   /// Native assertion subjects stay concrete and allocated on failure.
   type Check<S> = Result<(), Box<PredicateFailure<S>>>;
-  /// Native integer-range map strategies retain key and value generation contracts.
-  type OrderedMap = BTreeMapStrategy<Range<u8>, Range<u8>>;
-  /// Native hashed map strategies retain key and value generation contracts.
+  /// Helpers retain their complete checked subjects on success as well as failure.
+  type Checked<S> = Result<S, Box<PredicateFailure<S>>>;
+  /// Native ordered maps share a strategy type for keys and values.
+  type OrderedMap<S = Range<u8>> = BTreeMapStrategy<S, S>;
+  /// Native hashed maps share a strategy type for keys and values.
   #[cfg(feature = "std")]
-  type HashedMap = HashMapStrategy<Range<u8>, Range<u8>>;
+  type HashedMap<S = Range<u8>> = HashMapStrategy<S, S>;
   /// A collection constructor retains its concrete strategy or size error.
   type Construction<S> = Result<S, EmptySizeRange>;
-  /// Deterministic generation preserves every native tree or reason.
-  #[cfg(feature = "std")]
-  type Samples<S> = Vec<NewTree<S>>;
+  /// Deterministic generation preserves every native tree, shrink value, or reason.
+  type Samples<S> = Vec<Result<(<S as Strategy>::Tree, Vec<<S as Strategy>::Value>), Reason>>;
   /// A constructed strategy and its native generation result.
   type Constructed<S> = Result<(S, NewTree<S>), EmptySizeRange>;
   /// All collection constructors retain their concrete strategy and error types.
@@ -1143,41 +1145,87 @@ mod test {
     .map_err(Box::new)
   }
 
-  #[cfg(feature = "std")]
-  #[test]
-  fn test_map() -> Check<Samples<HashMapStrategy<&'static str, &'static str>>> {
-    let input = hash_map("[ab]{3}", "a", 2..3);
+  /// Check collection cardinality throughout generation and shrinking while
+  /// retaining every reached tree and value, including generation failures.
+  fn check_collection_sizes<S: Strategy>(input: &S, expected_size: usize, length: impl Fn(&S::Value) -> usize) -> Checked<Samples<S>>
+  where
+    S::Tree: fmt::Debug,
+  {
     let mut runner = TestRunner::deterministic();
-    let observed = (0..256).map(|_| input.new_tree(&mut runner)).collect();
+    let observed = (0..256).map(|_| input.new_tree(&mut runner).map(trace_shrink_steps)).collect();
     ensure_that(
       observed,
-      "maps keep their requested size despite duplicate generated keys",
-      |subjects: &Samples<HashMapStrategy<&str, &str>>| {
-        subjects
-          .iter()
-          .all(|result| result.as_ref().is_ok_and(|tree| tree.current().len() == 2))
+      "collections preserve their requested cardinality through generation and shrinking despite duplicate keys",
+      |subjects: &Samples<S>| {
+        subjects.iter().all(|result| {
+          result
+            .as_ref()
+            .is_ok_and(|walk| length(&walk.0.current()) == expected_size && walk.1.iter().all(|value| length(value) == expected_size))
+        })
       },
     )
-    .map(drop)
+    .map_err(Box::new)
+  }
+
+  /// A strategy with one possible key cannot satisfy a two-key minimum;
+  /// preserve its generation result when the local rejection budget is exhausted.
+  fn check_collision_exhaustion<S: Strategy>(input: &S) -> Checked<NewTree<S>>
+  where
+    S::Tree: fmt::Debug,
+  {
+    let mut runner = TestRunner::new(Config {
+      max_local_rejects: 4,
+      ..Config::default()
+    });
+    ensure_that(
+      input.new_tree(&mut runner),
+      "duplicate keys cannot satisfy the collection minimum and exhaust the local rejection budget",
+      |observed| observed.as_ref().err() == Some(&Reason::from("Too many local rejects")),
+    )
     .map_err(Box::new)
   }
 
   #[cfg(feature = "std")]
   #[test]
+  fn test_map() -> Check<Samples<HashMapStrategy<&'static str, &'static str>>> {
+    check_collection_sizes(&hash_map("[ab]{3}", "a", 2..3), 2, HashMap::len).map(drop)
+  }
+
+  #[cfg(feature = "std")]
+  #[test]
   fn test_set() -> Check<Samples<HashSetStrategy<&'static str>>> {
-    let input = hash_set("[ab]{3}", 2..3);
-    let mut runner = TestRunner::deterministic();
-    let observed = (0..256).map(|_| input.new_tree(&mut runner)).collect();
-    ensure_that(
-      observed,
-      "sets keep their requested size despite duplicate generated values",
-      |subjects: &Samples<HashSetStrategy<&str>>| {
-        subjects
-          .iter()
-          .all(|result| result.as_ref().is_ok_and(|tree| tree.current().len() == 2))
-      },
-    )
-    .map(drop)
-    .map_err(Box::new)
+    check_collection_sizes(&hash_set("[ab]{3}", 2..3), 2, HashSet::len).map(drop)
+  }
+
+  #[test]
+  fn ordered_map_preserves_size_while_shrinking() -> Check<Samples<OrderedMap>> {
+    check_collection_sizes(&btree_map(0_u8..8, 0_u8..4, 2..3), 2, BTreeMap::len).map(drop)
+  }
+
+  #[test]
+  fn ordered_set_preserves_size_while_shrinking() -> Check<Samples<BTreeSetStrategy<Range<u8>>>> {
+    check_collection_sizes(&btree_set(0_u8..8, 2..3), 2, BTreeSet::len).map(drop)
+  }
+
+  #[test]
+  fn ordered_map_rejects_unavoidable_key_collisions() -> Check<NewTree<OrderedMap<Just<u8>>>> {
+    check_collision_exhaustion(&btree_map(Just(1_u8), Just(2_u8), 2)).map(drop)
+  }
+
+  #[test]
+  fn ordered_set_rejects_unavoidable_key_collisions() -> Check<NewTree<BTreeSetStrategy<Just<u8>>>> {
+    check_collision_exhaustion(&btree_set(Just(1_u8), 2)).map(drop)
+  }
+
+  #[cfg(feature = "std")]
+  #[test]
+  fn hashed_map_rejects_unavoidable_key_collisions() -> Check<NewTree<HashedMap<Just<u8>>>> {
+    check_collision_exhaustion(&hash_map(Just(1_u8), Just(2_u8), 2)).map(drop)
+  }
+
+  #[cfg(feature = "std")]
+  #[test]
+  fn hashed_set_rejects_unavoidable_key_collisions() -> Check<NewTree<HashSetStrategy<Just<u8>>>> {
+    check_collision_exhaustion(&hash_set(Just(1_u8), 2)).map(drop)
   }
 }

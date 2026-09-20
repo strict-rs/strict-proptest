@@ -515,6 +515,38 @@ pub(super) mod tests {
     }
   }
 
+  /// Check a codec failure against the complete child prefix and retained pair.
+  fn check_codec_failure(
+    config: Config,
+    codec: NumberCodec,
+    expected: &CodecFailure,
+  ) -> Result<Observation, Box<PredicateFailure<Observation>>> {
+    ensure_that(
+      observe(config, codec, threshold),
+      "a codec failure preserves passing and failing child evidence, the established pair, and successful finalization",
+      |observed| {
+        let Err(ref report) = observed.0 else {
+          return false;
+        };
+        let Some(ref established) = report.established_failure else {
+          return false;
+        };
+        observed.1 == 0
+          && matches!(report.cause, PropertyCause::Engine(ExecutionError::Transport(ref actual)) if actual == expected)
+          && report.finalization.is_empty()
+          && established.counterexample > 5
+          && report.run.evaluations.iter().any(
+            |record| matches!(record.outcome, EvaluationOutcome::Returned(Ok(ref subject)) if subject.value < 5 && subject.process != id()),
+          )
+          && report.run.evaluations.get(established.evaluation.0).is_some_and(|record| {
+            matches!(record.outcome, EvaluationOutcome::Returned(Err(ref subject))
+              if subject.value == established.counterexample && subject.process != id())
+          })
+      },
+    )
+    .map_err(Box::new)
+  }
+
   #[test]
   fn transports_successes_without_parent_invocation() -> Check {
     let config = Config {
@@ -604,35 +636,12 @@ pub(super) mod tests {
       reject_encode: Some(5),
       ..NumberCodec::default()
     };
-    let result = observe(
+    check_codec_failure(
       configuration(concat!(module_path!(), "::retains_prefix_and_established_pair_on_codec_failure")),
       codec,
-      threshold,
-    );
-    ensure_that(
-      result,
-      "codec failure preserves decoded evaluations and the last established pair",
-      |observed| {
-        let Err(ref report) = observed.0 else {
-          return false;
-        };
-        let Some(ref established) = report.established_failure else {
-          return false;
-        };
-        observed.1 == 0
-          && matches!(
-            report.cause,
-            PropertyCause::Engine(ExecutionError::Transport(CodecFailure::Encode(5)))
-          )
-          && established.counterexample > 5
-          && report.run.evaluations.get(established.evaluation.0).is_some_and(|record| {
-            matches!(record.outcome, EvaluationOutcome::Returned(Err(ref subject))
-              if subject.value == established.counterexample)
-          })
-      },
+      &CodecFailure::Encode(5),
     )
     .map(drop)
-    .map_err(Box::new)
   }
 
   #[test]
@@ -641,39 +650,12 @@ pub(super) mod tests {
       reject_decode: Some(5),
       ..NumberCodec::default()
     };
-    let result = observe(
+    check_codec_failure(
       configuration(concat!(module_path!(), "::decoding_failure_retains_the_established_native_pair")),
       codec,
-      threshold,
-    );
-    ensure_that(
-      result,
-      "a parent decoding failure preserves both passing and failing child evidence and the last established pair",
-      |observed| {
-        let Err(ref report) = observed.0 else {
-          return false;
-        };
-        let Some(ref established) = report.established_failure else {
-          return false;
-        };
-        observed.1 == 0
-          && matches!(
-            report.cause,
-            PropertyCause::Engine(ExecutionError::Transport(CodecFailure::Decode(5)))
-          )
-          && report.finalization.is_empty()
-          && established.counterexample > 5
-          && report.run.evaluations.iter().any(
-            |record| matches!(record.outcome, EvaluationOutcome::Returned(Ok(ref subject)) if subject.value < 5 && subject.process != id()),
-          )
-          && report.run.evaluations.get(established.evaluation.0).is_some_and(|record| {
-            matches!(record.outcome, EvaluationOutcome::Returned(Err(ref subject))
-              if subject.value == established.counterexample && subject.process != id())
-          })
-      },
+      &CodecFailure::Decode(5),
     )
     .map(drop)
-    .map_err(Box::new)
   }
 
   #[test]

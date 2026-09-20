@@ -1124,12 +1124,37 @@ mod test {
   use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_that;
 
+  use super::Strategy;
   use crate::strict::ensure_property;
   use crate::test_runner::PropertyCause;
   use crate::test_runner::PropertyResult;
 
   /// Checked range values together with their native runner evidence.
   type ReferenceRun = PropertyResult<u32, u32, PredicateFailure<u32>>;
+  /// A checked reference run retains the original property outcome.
+  type CheckedReferenceRun = Result<ReferenceRun, PredicateFailure<ReferenceRun>>;
+
+  /// Exercise the selected reference implementation with a bounded property.
+  fn reference_run<S: Strategy<Value = u32>>(strategy: &S, limit: u32, context: &'static str, bound_context: &'static str) -> ReferenceRun {
+    ensure_property(strategy, context, |value| {
+      ensure_that(value, bound_context, |subject| *subject < limit)
+    })
+  }
+
+  /// Check that shrinking retains the minimal counterexample and original subject.
+  fn check_reference_failure<S: Strategy<Value = u32>>(
+    strategy: &S,
+    context: &'static str,
+    shrink_context: &'static str,
+  ) -> CheckedReferenceRun {
+    let result = reference_run(strategy, 1, context, "the value stays below one");
+    ensure_that(result, shrink_context, |run| {
+      run.as_ref().is_err_and(|report| {
+        matches!(report.cause,
+        PropertyCause::Falsified { counterexample: 1, ref failure, .. } if failure.subject == 1)
+      })
+    })
+  }
 
   // Passing &by_ref / &by_mut selects the reference itself as Strategy,
   // exercising each blanket implementation's generation and shrink delegation.
@@ -1137,39 +1162,34 @@ mod test {
   fn shared_reference_strategy_generates_through_the_blanket_impl() -> ReferenceRun {
     let base = 0_u32..10;
     let by_ref = &base;
-    ensure_property(&by_ref, "a shared reference generates like the pointee", |value| {
-      ensure_that(value, "the generated value keeps the bound", |subject| *subject < 10)
-    })
+    reference_run(
+      &by_ref,
+      10,
+      "a shared reference generates like the pointee",
+      "the generated value keeps the bound",
+    )
   }
 
   #[test]
   fn mut_reference_strategy_generates_through_the_blanket_impl() -> ReferenceRun {
     let mut base = 0_u32..10;
     let by_mut = &mut base;
-    ensure_property(&by_mut, "a mutable reference generates like the pointee", |value| {
-      ensure_that(value, "the generated value keeps the bound", |subject| *subject < 10)
-    })
-  }
-
-  /// The minimal counterexample and original failed subject must agree.
-  fn minimal_reference_failure(result: &ReferenceRun) -> bool {
-    result.as_ref().is_err_and(|report| {
-      matches!(report.cause,
-      PropertyCause::Falsified { counterexample: 1, ref failure, .. } if failure.subject == 1)
-    })
+    reference_run(
+      &by_mut,
+      10,
+      "a mutable reference generates like the pointee",
+      "the generated value keeps the bound",
+    )
   }
 
   #[test]
   fn shared_reference_strategy_falsifies_and_shrinks() -> Result<(), PredicateFailure<ReferenceRun>> {
     let base = 1_u32..32;
     let by_ref = &base;
-    let result = ensure_property(&by_ref, "a false property through a shared reference falsifies", |value| {
-      ensure_that(value, "the value stays below one", |subject| *subject < 1)
-    });
-    ensure_that(
-      result,
+    check_reference_failure(
+      &by_ref,
+      "a false property through a shared reference falsifies",
       "shrinking through the shared reference retains the failure at one",
-      minimal_reference_failure,
     )
     .map(drop)
   }
@@ -1178,13 +1198,10 @@ mod test {
   fn mut_reference_strategy_falsifies_and_shrinks() -> Result<(), PredicateFailure<ReferenceRun>> {
     let mut base = 1_u32..32;
     let by_mut = &mut base;
-    let result = ensure_property(&by_mut, "a false property through a mutable reference falsifies", |value| {
-      ensure_that(value, "the value stays below one", |subject| *subject < 1)
-    });
-    ensure_that(
-      result,
+    check_reference_failure(
+      &by_mut,
+      "a false property through a mutable reference falsifies",
       "shrinking through the mutable reference retains the failure at one",
-      minimal_reference_failure,
     )
     .map(drop)
   }

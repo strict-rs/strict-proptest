@@ -21,6 +21,7 @@ use core::ops::Range;
 use rand::RngExt as _;
 
 use crate::bits::BitSetLike as _;
+use crate::bits::BitSetValueTree;
 use crate::bits::VarBitSet;
 use crate::collection::EmptySizeRange;
 use crate::num::sample_uniform_incl;
@@ -186,14 +187,11 @@ where
       values.push(vj);
     }
 
-    let included_values = VarBitSet::saturated(count);
+    let included_values = BitSetValueTree::new(VarBitSet::saturated(count), min_size, 0);
 
     Ok(RangeSubsetValueTree {
       values,
       included_values,
-      shrink: 0,
-      prev_shrink: None,
-      min_size,
     })
   }
 }
@@ -203,14 +201,8 @@ where
 pub struct RangeSubsetValueTree<T> {
   /// Sampled indices in the order the Fisher-Yates shuffle drew them.
   values:          Vec<T>,
-  /// Which positions in `values` remain part of the current subset.
-  included_values: VarBitSet,
-  /// Next position in `values` to try excluding while simplifying.
-  shrink:          usize,
-  /// Position excluded by the last `simplify`, restored by `complicate`.
-  prev_shrink:     Option<usize>,
-  /// Lower size bound; shrinking never drops below this many elements.
-  min_size:        usize,
+  /// The current selection and its minimum-size-aware shrink state.
+  included_values: BitSetValueTree<VarBitSet>,
 }
 
 impl<T> ValueTree for RangeSubsetValueTree<T>
@@ -225,37 +217,16 @@ where
       .values
       .iter()
       .enumerate()
-      .filter_map(|(index, sampled)| self.included_values.test(index).then_some(*sampled))
+      .filter_map(|(index, sampled)| self.included_values.bits().test(index).then_some(*sampled))
       .collect()
   }
 
   fn simplify(&mut self) -> bool {
-    if self.included_values.len() <= self.min_size {
-      return false;
-    }
-
-    while self.shrink < self.values.len() && !self.included_values.test(self.shrink) {
-      self.shrink = self.shrink.saturating_add(1);
-    }
-
-    if self.shrink >= self.values.len() {
-      self.prev_shrink = None;
-      false
-    } else {
-      self.prev_shrink = Some(self.shrink);
-      self.included_values.clear(self.shrink);
-      self.shrink = self.shrink.saturating_add(1);
-      true
-    }
+    self.included_values.simplify()
   }
 
   fn complicate(&mut self) -> bool {
-    if let Some(shrink) = self.prev_shrink.take() {
-      self.included_values.set(shrink);
-      true
-    } else {
-      false
-    }
+    self.included_values.complicate()
   }
 }
 
@@ -265,7 +236,9 @@ mod test {
   use strict_test_support::ensure_that;
 
   use super::*;
+  use crate::sample::subset_frequencies;
   use crate::std_facade::BTreeSet;
+  use crate::strategy::trace_shrink_steps;
 
   /// An assertion retains its complete concrete input.
   type Check<S> = Result<(), PredicateFailure<S>>;
@@ -277,6 +250,49 @@ mod test {
   type SubsetSamples = Vec<Result<Vec<usize>, Reason>>;
   /// Fallible construction followed by the native generation result.
   type ConstructedSubset = Result<(RangeSubset<usize>, Result<Vec<usize>, Reason>), RangeSubsetError>;
+
+  /// A complete shrink walk, stop attempt, and one-step restoration.
+  type SubsetShrink = (RangeSubsetValueTree<usize>, Vec<Vec<usize>>, bool, bool, Vec<usize>, bool);
+
+  #[test]
+  fn shrinking_respects_minimum_size_and_restores_last_removal() -> Check<Vec<Result<SubsetShrink, Reason>>> {
+    let mut runner = TestRunner::deterministic();
+    let strategy = range_subset(0_usize..8, 3..7);
+    let observations = (0..64)
+      .map(|_| {
+        strategy.new_tree(&mut runner).map(|generated| {
+          let (mut tree, values) = trace_shrink_steps(generated);
+          let stopped = tree.simplify();
+          let restored = tree.complicate();
+          let restored_values = tree.current();
+          let restored_again = tree.complicate();
+          (tree, values, stopped, restored, restored_values, restored_again)
+        })
+      })
+      .collect();
+    let respects_minimum = |sample: &Result<SubsetShrink, Reason>| {
+      let Ok(ref reached) = *sample else {
+        return false;
+      };
+      let expected_previous = reached.1.iter().nth_back(1);
+      reached.1.last().is_some_and(|last| last.len() == 3)
+        && reached.1.array_windows::<2>().all(|pair| {
+          let [before, after] = pair.each_ref();
+          before.get(1..) == Some(after.as_slice())
+        })
+        && !reached.2
+        && reached.3 == expected_previous.is_some()
+        && expected_previous.or_else(|| reached.1.last()) == Some(&reached.4)
+        && !reached.5
+        && reached.0.current() == reached.4
+    };
+    ensure_that(
+      observations,
+      "subsets stop at their minimum size and can restore only the last removed element",
+      |observed: &Vec<Result<SubsetShrink, Reason>>| observed.iter().all(respects_minimum),
+    )
+    .map(drop)
+  }
 
   #[test]
   fn sample_range() -> Check<SubsetSamples> {
@@ -296,25 +312,7 @@ mod test {
     ensure_that(
       samples,
       "subsets preserve distinct in-range indices and the requested size and sampling frequencies",
-      |observed| {
-        observed.iter().all(valid_subset)
-          && (3..7).all(|size| {
-            (256..1024).contains(
-              &observed
-                .iter()
-                .filter(|sample| sample.as_ref().is_ok_and(|values| values.len() == size))
-                .count(),
-            )
-          })
-          && (0..8).all(|index| {
-            (1024..1500).contains(
-              &observed
-                .iter()
-                .filter(|sample| sample.as_ref().is_ok_and(|values| values.contains(&index)))
-                .count(),
-            )
-          })
-      },
+      |observed| observed.iter().all(valid_subset) && subset_frequencies(observed, 3..7, 0..8, 256..1024, 1024..1500),
     )
     .map(drop)
   }

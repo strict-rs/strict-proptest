@@ -19,12 +19,12 @@ cd proptest/test-persistence-location && ./run-tests.sh   # run-tests.bat on Win
 
 ## What it checks
 
-Each project's `src/submodule/code.rs` defines a `proptest!` test that *always* `panic!()`s. The failure is the entire point: a failing case is what makes proptest persist a regression seed, so the harness deliberately provokes one and then asserts the seed landed at the expected path:
+Each project's `src/submodule/code.rs` runs a property through `TestRunner::run_typed` that returns the generated value as `Err(value)`. The test returns the native `PropertyResult`, so Cargo reports the expected failure without a panic or a lint suppression. `Config::with_source_file(file!())` keeps default persistence enabled and anchors the regression seed to that fixture's source path:
 
 - `single-crate/` → `single-crate/proptest-regressions/submodule/code.txt`
 - `workspace/` → `workspace/member/proptest-regressions/submodule/code.txt`
 
-The path *is* the property under test. Two invariants must hold: the `submodule/code` nesting mirrors the failing test's source path (`src/submodule/code.rs` → `proptest-regressions/submodule/code.txt`), and the `proptest-regressions/` root sits at the **crate** directory — in the workspace case that is `member/`, not the workspace root. That crate-root-vs-workspace-root anchoring is precisely what regresses if path-resolution logic changes, so re-run this harness after touching `proptest/src/test_runner/failure_persistence/`.
+The path *is* the property under test. Two invariants must hold: the `submodule/code` nesting mirrors the failing test's source path (`src/submodule/code.rs` → `proptest-regressions/submodule/code.txt`), and the `proptest-regressions/` root sits at the **crate** directory — in the workspace case that is `member/`, not the workspace root. Keep the two source fixtures separate and evaluate `file!()` in each fixture; moving that invocation into a shared helper would change the location being tested. That crate-root-vs-workspace-root anchoring is precisely what regresses if path-resolution logic changes, so re-run this harness after touching `proptest/src/test_runner/failure_persistence/`.
 
 ## run-tests.sh vs run-tests.bat
 

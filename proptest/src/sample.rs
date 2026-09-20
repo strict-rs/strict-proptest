@@ -15,6 +15,8 @@
 
 use core::error::Error;
 use core::fmt;
+#[cfg(test)]
+use core::ops::Range;
 
 use rand::RngExt as _;
 
@@ -37,6 +39,8 @@ use crate::strategy::Strategy;
 use crate::strategy::ValueTree;
 #[cfg(test)]
 use crate::strategy::check_strategy_sanity;
+#[cfg(test)]
+use crate::strategy::sample_count_in_range;
 use crate::strategy::statics;
 use crate::test_runner::Reason;
 use crate::test_runner::TestRng;
@@ -667,6 +671,20 @@ impl Selector {
   }
 }
 
+/// Inspect the size and member frequencies of native subset samples without
+/// excluding failed generation outcomes from the checks.
+#[cfg(test)]
+pub(crate) fn subset_frequencies<T: PartialEq>(
+  samples: &[Result<Vec<T>, Reason>],
+  mut sizes: Range<usize>,
+  mut members: impl Iterator<Item = T>,
+  size_counts: Range<usize>,
+  member_counts: Range<usize>,
+) -> bool {
+  sizes.all(|size| sample_count_in_range(samples, size_counts.clone(), |values| values.len() == size))
+    && members.all(|member| sample_count_in_range(samples, member_counts.clone(), |values| values.contains(&member)))
+}
+
 #[cfg(test)]
 mod test {
   use strict_test_support::PredicateFailure;
@@ -677,9 +695,12 @@ mod test {
   use crate::std_facade::BTreeSet;
   use crate::std_facade::Box;
   use crate::std_facade::vec;
+  use crate::strategy::trace_shrink_steps;
 
   /// Complete concrete assertion subjects stay allocated on failure.
   type Check<S> = Result<(), Box<PredicateFailure<S>>>;
+  /// Helpers retain their successful native observations until the test ends.
+  type Checked<S> = Result<S, Box<PredicateFailure<S>>>;
 
   /// Native values produced by sampling, retaining each generation error.
   type Samples<T> = Vec<Result<T, Reason>>;
@@ -702,35 +723,48 @@ mod test {
   type SelectionWalks<T, V> = Vec<Result<SelectionWalk<T, V>, Reason>>;
   /// A selection tree and every native value and selection it produced.
   type SelectionWalk<T, V> = (T, Vec<(V, Option<&'static str>)>);
+  /// Checked selection walks preserve all native generation and shrink evidence.
+  type CheckedSelections<T, V> = Checked<SelectionWalks<T, V>>;
 
-  /// Exercise selection through every simplification while retaining the tree.
-  fn selection_walk<T: ValueTree>(mut tree: T, select_value: impl Fn(&T::Value) -> Option<&'static str>) -> SelectionWalk<T, T::Value> {
-    let mut observations = Vec::new();
-    loop {
-      let current = tree.current();
-      let selected = select_value(&current);
-      observations.push((current, selected));
-      if !tree.simplify() {
-        break;
-      }
-    }
-    (tree, observations)
-  }
-
-  /// Check selection coverage and the minimal selected element from native walks.
-  fn selection_contract<T, V>(walks: &SelectionWalks<T, V>, first: &str, mut expected: impl Iterator<Item = &'static str>) -> bool {
-    walks.iter().all(|walk| {
-      let Ok(ref reached) = *walk else {
-        return false;
-      };
+  /// Run deterministic selection and shrinking for either collection access
+  /// method, retaining every tree, candidate, and selected value.
+  fn check_selection<S: Strategy>(
+    input: S,
+    select_value: impl Fn(&S::Value) -> Option<&'static str>,
+    first: &str,
+    mut expected: impl Iterator<Item = &'static str>,
+    context: &'static str,
+  ) -> CheckedSelections<S::Tree, S::Value>
+  where
+    S::Tree: fmt::Debug,
+  {
+    let walk_selection = |tree| {
+      let (reached, values) = trace_shrink_steps(tree);
+      let observations = values
+        .into_iter()
+        .map(|current| {
+          let selected = select_value(&current);
+          (current, selected)
+        })
+        .collect();
+      (reached, observations)
+    };
+    let mut runner = TestRunner::deterministic();
+    let walks: SelectionWalks<S::Tree, S::Value> = (0..16).map(|_| input.new_tree(&mut runner).map(&walk_selection)).collect();
+    let minimal_selection = |reached: &SelectionWalk<S::Tree, S::Value>| {
       reached.1.iter().all(|step| step.1.is_some()) && reached.1.last().is_some_and(|step| step.1 == Some(first))
-    }) && expected.all(|value| {
-      walks.iter().any(|walk| {
-        walk
-          .as_ref()
-          .is_ok_and(|reached| reached.1.first().is_some_and(|step| step.1 == Some(value)))
-      })
+    };
+    ensure_that(walks, context, |observed| {
+      observed.iter().all(|walk| walk.as_ref().is_ok_and(minimal_selection))
+        && expected.all(|value| {
+          observed
+            .iter()
+            .filter_map(|walk| walk.as_ref().ok())
+            .filter_map(|reached| reached.1.first())
+            .any(|step| step.1 == Some(value))
+        })
     })
+    .map_err(Box::new)
   }
 
   /// Draw native values without discarding failed generation outcomes.
@@ -835,25 +869,7 @@ mod test {
     ensure_that(
       sample_values(subsequence(VALUES, 3..7), 2048),
       "subsequences preserve source order, distinct values, and the requested size and sampling frequencies",
-      |samples| {
-        samples.iter().all(valid_subsequence)
-          && (3..7).all(|size| {
-            (256..1024).contains(
-              &samples
-                .iter()
-                .filter(|sample| sample.as_ref().is_ok_and(|values| values.len() == size))
-                .count(),
-            )
-          })
-          && VALUES.iter().all(|value| {
-            (1024..1500).contains(
-              &samples
-                .iter()
-                .filter(|sample| sample.as_ref().is_ok_and(|values| values.contains(value)))
-                .count(),
-            )
-          })
-      },
+      |samples| samples.iter().all(valid_subsequence) && subset_frequencies(samples, 3..7, VALUES.iter().copied(), 256..1024, 1024..1500),
     )
     .map(drop)
     .map_err(Box::new)
@@ -935,43 +951,27 @@ mod test {
 
   #[test]
   fn index_works() -> Check<SelectionWalks<IndexValueTree, Index>> {
-    let mut runner = TestRunner::deterministic();
-    let input = any::<Index>();
     let collection = ["foo", "bar", "baz"];
-    let walks = (0..16)
-      .map(|_| {
-        input
-          .new_tree(&mut runner)
-          .map(|tree| selection_walk(tree, |candidate| candidate.get(&collection).copied()))
-      })
-      .collect::<SelectionWalks<IndexValueTree, Index>>();
-    ensure_that(
-      walks,
+    check_selection(
+      any::<Index>(),
+      |candidate| candidate.get(&collection).copied(),
+      "foo",
+      collection.iter().copied(),
       "indices visit every source value and each shrinks to the first element",
-      |observed| selection_contract(observed, "foo", collection.iter().copied()),
     )
     .map(drop)
-    .map_err(Box::new)
   }
 
   #[test]
   fn selector_works() -> Check<SelectionWalks<SelectorValueTree, Selector>> {
-    let mut runner = TestRunner::deterministic();
-    let input = any::<Selector>();
     let collection: BTreeSet<_> = ["foo", "bar", "baz"].into_iter().collect();
-    let walks = (0..16)
-      .map(|_| {
-        input
-          .new_tree(&mut runner)
-          .map(|tree| selection_walk(tree, |candidate| candidate.select(&collection).copied()))
-      })
-      .collect::<SelectionWalks<SelectorValueTree, Selector>>();
-    ensure_that(
-      walks,
+    check_selection(
+      any::<Selector>(),
+      |candidate| candidate.select(&collection).copied(),
+      "bar",
+      collection.iter().copied(),
       "selectors visit every value and each shrinks to the first ordered element",
-      |observed| selection_contract(observed, "bar", collection.iter().copied()),
     )
     .map(drop)
-    .map_err(Box::new)
   }
 }

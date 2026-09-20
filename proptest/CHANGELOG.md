@@ -16,6 +16,7 @@
 
 ### Bug Fixes
 
+- Range-subset shrinking respects the requested minimum size with either variable-bitset backend and preserves one-step restoration after reaching that minimum.
 - Standalone features include their build prerequisites: `attr-macro` enables `strict-test`; `libm` enables `alloc`; `alt-stable` enables `libm`; and `atomic64bit`, `bit-set`, `hardware-rng`, and `f16` enable `alloc`. `unstable` inherits allocation through `f16`. Native `f16` and `unstable` APIs continue to require nightly unless `alt-stable` selects the stable substitutes.
 - Uninhabited `Option` and `Result` strategies share their `Infallible` implementations across feature configurations, covering `string::ParseError` and current-nightly `!` without conflicting trait implementations or an obsolete `never_type` gate.
 - Stable `--all-features` builds no longer select nightly `#![feature(...)]`

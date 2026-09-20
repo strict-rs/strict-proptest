@@ -238,94 +238,15 @@ small_array!(32 uniform32);
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::PredicateFailure;
-  use strict_test_support::ensure_that;
+  use core::ops::Range;
 
   use super::*;
-  use crate::num::i32::BinarySearch;
-  use crate::std_facade::Vec;
-  use crate::std_facade::vec;
-
-  /// A reached native tree and every candidate observed along its shrink walk.
-  type ShrinkWalk = Result<(ArrayValueTree<[BinarySearch; 2]>, Vec<[i32; 2]>), Reason>;
-
-  #[allow(
-    clippy::single_call_fn,
-    reason = "names the array strategy's complete minimal-failing shrink walk"
-  )]
-  fn shrink_to_minimal_failing_array<V, P>(mut case: V, pass: P) -> (V, Vec<[i32; 2]>)
-  where
-    V: ValueTree<Value = [i32; 2]>,
-    P: Fn([i32; 2]) -> bool,
-  {
-    let mut values = vec![case.current()];
-    if pass(case.current()) {
-      return (case, values);
-    }
-    loop {
-      let advanced = if pass(case.current()) {
-        case.complicate()
-      } else {
-        case.simplify()
-      };
-      values.push(case.current());
-      if !advanced {
-        break;
-      }
-    }
-    (case, values)
-  }
-
-  /// Check successful generation and the minimal failing boundary of the complete walk.
-  #[allow(
-    clippy::single_call_fn,
-    reason = "the shrink-walk predicate names minimality separately from the sampling requirement"
-  )]
-  fn minimal_walk(walk: &ShrinkWalk, pass: impl Fn([i32; 2]) -> bool) -> bool {
-    let Ok(reached) = walk.as_ref() else {
-      return false;
-    };
-    let Some(&initial) = reached.1.first() else {
-      return false;
-    };
-    if pass(initial) {
-      return reached.1.len() == 1;
-    }
-    let [left, right] = reached.0.current();
-    !pass([left, right]) && pass([left.saturating_sub(1), right]) && pass([left, right.saturating_sub(1)])
-  }
+  use crate::strategy::ProductShrinkCheck;
+  use crate::strategy::check_product_shrinking;
 
   #[test]
-  fn shrinks_fully_ltr() -> Result<(), PredicateFailure<Vec<ShrinkWalk>>> {
-    fn pass([left, right]: [i32; 2]) -> bool {
-      left.saturating_mul(right) <= 9
-    }
-    let input = [0_i32..32, 0_i32..32];
-    let mut runner = TestRunner::deterministic();
-    let walks = (0..256)
-      .map(|_| {
-        input
-          .new_tree(&mut runner)
-          .map(|case| shrink_to_minimal_failing_array(case, pass))
-      })
-      .collect();
-    ensure_that(
-      walks,
-      "failing arrays shrink minimally left to right, with enough generated failures",
-      |subjects: &Vec<ShrinkWalk>| {
-        subjects.iter().all(|walk| minimal_walk(walk, pass))
-          && subjects
-            .iter()
-            .filter(|walk| {
-              walk
-                .as_ref()
-                .is_ok_and(|reached| reached.1.first().is_some_and(|initial| !pass(*initial)))
-            })
-            .count()
-            > 32
-      },
-    )
-    .map(drop)
+  fn shrinks_fully_ltr() -> ProductShrinkCheck<[Range<i32>; 2]> {
+    check_product_shrinking(&[0_i32..32, 0_i32..32], &mut TestRunner::deterministic(), |&pair| pair.into()).map(drop)
   }
 
   #[test]

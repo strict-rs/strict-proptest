@@ -19,6 +19,34 @@ use crate::strategy::traits::ValueTree;
 use crate::test_runner::Reason;
 use crate::test_runner::TestRunner;
 
+/// Generate until the predicate accepts, charging every rejected value to
+/// the runner's existing local-rejection budget.
+pub(super) fn new_filtered_tree<S: Strategy>(
+  source: &S,
+  whence: &Reason,
+  accepts: impl Fn(&S::Value) -> bool,
+  runner: &mut TestRunner,
+) -> NewTree<S> {
+  loop {
+    let tree = source.new_tree(runner)?;
+    if accepts(&tree.current()) {
+      return Ok(tree);
+    }
+    runner.reject_local(whence.clone())?;
+  }
+}
+
+/// Recover an accepted source candidate by complicating without adding
+/// generation attempts or consuming the runner's rejection budget.
+pub(super) fn recover_filtered_value<T: ValueTree>(source: &mut T, accepts: impl Fn(&T::Value) -> bool) -> bool {
+  while !accepts(&source.current()) {
+    if !source.complicate() {
+      return false;
+    }
+  }
+  true
+}
+
 /// `Strategy` and `ValueTree` filter adaptor.
 ///
 /// See `Strategy::prop_filter()`.
@@ -74,36 +102,20 @@ impl<S: Strategy, F: Fn(&S::Value) -> bool> Strategy for Filter<S, F> {
   type Value = S::Value;
 
   fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-    loop {
-      let source_tree = self.source.new_tree(runner)?;
-      if (self.fun)(&source_tree.current()) {
-        return Ok(Filter {
-          source: source_tree,
-          whence: self.whence.clone(),
-          fun:    Arc::clone(&self.fun),
-        });
-      }
-      runner.reject_local(self.whence.clone())?;
-    }
+    new_filtered_tree(&self.source, &self.whence, |candidate| (self.fun)(candidate), runner).map(|source| Filter {
+      source,
+      whence: self.whence.clone(),
+      fun: Arc::clone(&self.fun),
+    })
   }
 }
 
 impl<S: ValueTree, F: Fn(&S::Value) -> bool> Filter<S, F> {
-  /// Return whether the current source value passes this filter.
-  fn accepts_current(&self) -> bool {
-    (self.fun)(&self.source.current())
-  }
-
   /// After the source shrinks, `complicate()` it back until the predicate
   /// accepts the current value again. If no accepted value can be recovered,
   /// report that this shrink step produced no usable change.
   fn ensure_acceptable(&mut self) -> bool {
-    while !self.accepts_current() {
-      if !self.source.complicate() {
-        return false;
-      }
-    }
-    true
+    recover_filtered_value(&mut self.source, |candidate| (self.fun)(candidate))
   }
 }
 
@@ -128,8 +140,12 @@ mod test {
   use strict_test_support::ensure_that;
 
   use super::*;
+  use crate::std_facade::Box;
   use crate::std_facade::Vec;
+  use crate::strategy::Just;
+  use crate::strategy::statics;
   use crate::strategy::traits::trace_simplifications;
+  use crate::test_runner::Config;
   use crate::test_runner::test_runner_without_persistence;
 
   #[test]
@@ -167,5 +183,50 @@ mod test {
         ..CheckStrategySanityOptions::default()
       }),
     )
+  }
+
+  #[test]
+  fn both_filter_forms_stop_at_the_local_rejection_limit() -> Result<(), impl fmt::Debug> {
+    #[derive(Clone, Copy, Debug)]
+    struct Reject;
+
+    impl statics::FilterFn<i32> for Reject {
+      fn apply(&self, _: &i32) -> bool {
+        false
+      }
+    }
+
+    let config = Config {
+      max_local_rejects: 0,
+      failure_persistence: None,
+      ..Config::default()
+    };
+    let mut closure_runner = TestRunner::new(config.clone());
+    let mut static_runner = TestRunner::new(config);
+    let closure_filter = Just(1_i32).prop_filter("closure rejection", |_| false);
+    let static_filter = statics::Filter::new(Just(1_i32), "static rejection".into(), Reject);
+    let closure_result = closure_filter.new_tree(&mut closure_runner);
+    let static_result = static_filter.new_tree(&mut static_runner);
+    ensure_that(
+      (
+        (closure_runner, closure_filter, closure_result),
+        (static_runner, static_filter, static_result),
+      ),
+      "both predicate representations return the runner's rejection-budget failure",
+      |observed| {
+        observed
+          .0
+          .2
+          .as_ref()
+          .is_err_and(|error| error.message() == "Too many local rejects")
+          && observed
+            .1
+            .2
+            .as_ref()
+            .is_err_and(|error| error.message() == "Too many local rejects")
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

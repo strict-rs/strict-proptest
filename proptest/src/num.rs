@@ -159,7 +159,13 @@ pub fn sample_uniform_incl<X: SampleUniform>(run: &mut TestRunner, start: X, end
 /// sample directly.
 macro_rules! sample_uniform {
   ($name:ident, $incl:ident, $from:ty, $to:ty) => {
-    fn $name(run: &mut TestRunner, start: $to, end: $to) -> Result<$to, UniformRangeError> {
+    sample_uniform!(@functions $from, $to;
+      $name, new, half_open;
+      $incl, new_inclusive, inclusive;
+    );
+  };
+  (@functions $from:ty, $to:ty; $($name:ident, $constructor:ident, $error:ident;)+) => {
+    $(fn $name(run: &mut TestRunner, start: $to, end: $to) -> Result<$to, UniformRangeError> {
       let start = match <$from>::try_from(start) {
         Ok(value) => value,
         Err(_error) => <$from>::MAX,
@@ -168,32 +174,14 @@ macro_rules! sample_uniform {
         Ok(value) => value,
         Err(_error) => <$from>::MAX,
       };
-      let sample = Uniform::<$from>::new(start, end)
-        .map_err(|_error| UniformRangeError::half_open())?
+      let sample = Uniform::<$from>::$constructor(start, end)
+        .map_err(|_error| UniformRangeError::$error())?
         .sample(run.rng());
       Ok(match <$to>::try_from(sample) {
         Ok(value) => value,
         Err(_error) => <$to>::MAX,
       })
-    }
-
-    fn $incl(run: &mut TestRunner, start: $to, end: $to) -> Result<$to, UniformRangeError> {
-      let start = match <$from>::try_from(start) {
-        Ok(value) => value,
-        Err(_error) => <$from>::MAX,
-      };
-      let end = match <$from>::try_from(end) {
-        Ok(value) => value,
-        Err(_error) => <$from>::MAX,
-      };
-      let sample = Uniform::<$from>::new_inclusive(start, end)
-        .map_err(|_error| UniformRangeError::inclusive())?
-        .sample(run.rng());
-      Ok(match <$to>::try_from(sample) {
-        Ok(value) => value,
-        Err(_error) => <$to>::MAX,
-      })
-    }
+    })+
   };
 }
 
@@ -1199,6 +1187,20 @@ macro_rules! float_bin_search {
 
                     self.reposition()
                 }
+
+                /// Keep an allowed step or restore the preceding candidate
+                /// when no permitted value remains reachable from it.
+                fn accept_step(&mut self, previous: Self, changed: bool) -> bool {
+                    if !changed {
+                        return false;
+                    }
+                    if self.ensure_acceptable() {
+                        true
+                    } else {
+                        *self = previous;
+                        false
+                    }
+                }
             }
             impl ValueTree for BinarySearch {
                 type Value = $typ;
@@ -1214,30 +1216,14 @@ macro_rules! float_bin_search {
 
                     let previous = *self;
                     self.hi = self.curr;
-                    if self.reposition() {
-                        if self.ensure_acceptable() {
-                            true
-                        } else {
-                            *self = previous;
-                            false
-                        }
-                    } else {
-                        false
-                    }
+                    let changed = self.reposition();
+                    self.accept_step(previous, changed)
                 }
 
                 fn complicate(&mut self) -> bool {
                     let previous = *self;
-                    if self.complicate_once() {
-                        if self.ensure_acceptable() {
-                            true
-                        } else {
-                            *self = previous;
-                            false
-                        }
-                    } else {
-                        false
-                    }
+                    let changed = self.complicate_once();
+                    self.accept_step(previous, changed)
                 }
             }
 
@@ -1293,6 +1279,7 @@ float_bin_search!(
 mod test {
   use core::cmp::Ordering;
   use core::ops::Range;
+  use core::ops::RangeBounds;
   use core::ops::RangeFrom;
   use core::ops::RangeTo;
 
@@ -1302,6 +1289,8 @@ mod test {
   use crate::strict::strict_default_config;
   /// Assertions retain their native subject without a deeply nested return signature.
   type Check<S> = Result<(), PredicateFailure<S>>;
+  /// Helpers preserve the complete subject on both success and failure.
+  type Checked<S> = Result<S, PredicateFailure<S>>;
   use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_that;
 
@@ -1342,8 +1331,9 @@ mod test {
 
   /// Native candidate and legacy one-case outcome for inclusion tests.
   type Inclusion<T> = Vec<Result<(T, Result<bool, TestError<T>>), Reason>>;
-  /// Observe the upper endpoint using the public one-case runner.
-  fn inclusive_samples<S: Strategy>(strategy: S, end: &S::Value) -> Inclusion<S::Value>
+  /// Check endpoint inclusion through the public one-case runner while retaining every candidate
+  /// and run.
+  fn check_inclusive_end<S: Strategy>(strategy: S, end: &S::Value, context: &'static str) -> Checked<Inclusion<S::Value>>
   where
     S::Value: PartialEq,
   {
@@ -1355,7 +1345,7 @@ mod test {
         Err(TestCaseError::fail("not the inclusive end"))
       }
     };
-    (0..20)
+    let samples = (0..20)
       .map(|_| {
         strategy.new_tree(&mut runner).map(|tree| {
           let initial = tree.current();
@@ -1363,26 +1353,19 @@ mod test {
           (initial, result)
         })
       })
-      .collect()
+      .collect();
+    ensure_that(samples, context, |observed: &Inclusion<S::Value>| {
+      observed.iter().all(Result::is_ok) && observed.iter().filter(|result| matches!(result, Ok((_, Ok(_))))).count() > 1
+    })
   }
 
   #[test]
   fn u8_inclusive_end_included() -> Check<Inclusion<i32>> {
-    ensure_that(
-      inclusive_samples(0..=1_i32, &1),
-      "the inclusive endpoint is generated more than once",
-      |samples| samples.iter().all(Result::is_ok) && samples.iter().filter(|result| matches!(result, Ok((_, Ok(_))))).count() > 1,
-    )
-    .map(drop)
+    check_inclusive_end(0..=1_i32, &1, "the inclusive endpoint is generated more than once").map(drop)
   }
   #[test]
   fn u8_inclusive_to_end_included() -> Check<Inclusion<u8>> {
-    ensure_that(
-      inclusive_samples(..=1_u8, &1),
-      "the inclusive-to endpoint is generated more than once",
-      |samples| samples.iter().all(Result::is_ok) && samples.iter().filter(|result| matches!(result, Ok((_, Ok(_))))).count() > 1,
-    )
-    .map(drop)
+    check_inclusive_end(..=1_u8, &1, "the inclusive-to endpoint is generated more than once").map(drop)
   }
 
   /// Complete convergence trace and observed adjacent-point classifications.
@@ -1475,76 +1458,52 @@ mod test {
     .map(drop)
   }
 
+  /// Check every integer shrink candidate against its source range and target.
+  fn check_integer_range<S>(strategy: S, target: &S::Value, context: &'static str) -> Checked<RangeObservation<S>>
+  where
+    S: Strategy + RangeBounds<S::Value>,
+    S::Value: Ord,
+  {
+    ensure_that(range_walks(strategy), context, |observed| {
+      observed.1.iter().all(|result| {
+        result
+          .as_ref()
+          .is_ok_and(|walk| walk.values.iter().all(|value| observed.0.contains(value)) && walk.tree.current() == *target)
+      })
+    })
+  }
+
   #[test]
   fn signed_integer_range_including_zero_converges_to_zero() -> Check<RangeObservation<Range<i32>>> {
-    ensure_that(
-      range_walks(-42_i32..64),
-      "every candidate stays in range and every tree converges to zero",
-      |observed| {
-        observed.1.iter().all(|result| {
-          result
-            .as_ref()
-            .is_ok_and(|walk| walk.values.iter().all(|value| observed.0.contains(value)) && walk.tree.current() == 0)
-        })
-      },
-    )
-    .map(drop)
+    check_integer_range(-42_i32..64, &0, "every candidate stays in range and every tree converges to zero").map(drop)
   }
   #[test]
   fn negative_integer_range_stays_in_bounds() -> Check<RangeObservation<RangeTo<i32>>> {
-    ensure_that(
-      range_walks(..-42_i32),
+    check_integer_range(
+      ..-42_i32,
+      &-43,
       "every negative candidate stays in range and converges to the upper bound",
-      |observed| {
-        observed.1.iter().all(|result| {
-          result
-            .as_ref()
-            .is_ok_and(|walk| walk.values.iter().all(|value| observed.0.contains(value)) && walk.tree.current() == -43)
-        })
-      },
     )
     .map(drop)
   }
   #[test]
   fn positive_signed_integer_range_stays_in_bounds() -> Check<RangeObservation<RangeFrom<i32>>> {
-    ensure_that(
-      range_walks(42_i32..),
-      "every positive candidate stays in range and converges to its base",
-      |observed| {
-        observed.1.iter().all(|result| {
-          result
-            .as_ref()
-            .is_ok_and(|walk| walk.values.iter().all(|value| observed.0.contains(value)) && walk.tree.current() == 42)
-        })
-      },
-    )
-    .map(drop)
+    check_integer_range(42_i32.., &42, "every positive candidate stays in range and converges to its base").map(drop)
   }
   #[test]
   fn unsigned_integer_range_stays_in_bounds() -> Check<RangeObservation<Range<u32>>> {
-    ensure_that(
-      range_walks(42_u32..56),
-      "every unsigned candidate stays in range and converges to its base",
-      |observed| {
-        observed.1.iter().all(|result| {
-          result
-            .as_ref()
-            .is_ok_and(|walk| walk.values.iter().all(|value| observed.0.contains(value)) && walk.tree.current() == 42)
-        })
-      },
-    )
-    .map(drop)
+    check_integer_range(42_u32..56, &42, "every unsigned candidate stays in range and converges to its base").map(drop)
   }
 
   mod contract_sanity {
     macro_rules! contract_sanity {
-      ($t:tt, $forty_two:expr, $fifty_six:expr) => {
+      ($t:ident, $value:ty, $forty_two:expr, $fifty_six:expr) => {
         mod $t {
           use crate::strategy::check_strategy_sanity;
           use crate::test_runner::Reason;
 
-          const FORTY_TWO: $t = $forty_two;
-          const FIFTY_SIX: $t = $fifty_six;
+          const FORTY_TWO: $value = $forty_two;
+          const FIFTY_SIX: $value = $fifty_six;
 
           #[test]
           fn range() -> Result<(), Reason> {
@@ -1573,54 +1532,28 @@ mod test {
         }
       };
     }
-    contract_sanity!(u8, 42, 56);
-    contract_sanity!(i8, 42, 56);
-    contract_sanity!(u16, 42, 56);
-    contract_sanity!(i16, 42, 56);
-    contract_sanity!(u32, 42, 56);
-    contract_sanity!(i32, 42, 56);
-    contract_sanity!(u64, 42, 56);
-    contract_sanity!(i64, 42, 56);
-    contract_sanity!(usize, 42, 56);
-    contract_sanity!(isize, 42, 56);
+    contract_sanity!(u8, u8, 42, 56);
+    contract_sanity!(i8, i8, 42, 56);
+    contract_sanity!(u16, u16, 42, 56);
+    contract_sanity!(i16, i16, 42, 56);
+    contract_sanity!(u32, u32, 42, 56);
+    contract_sanity!(i32, i32, 42, 56);
+    contract_sanity!(u64, u64, 42, 56);
+    contract_sanity!(i64, i64, 42, 56);
+    contract_sanity!(usize, usize, 42, 56);
+    contract_sanity!(isize, isize, 42, 56);
     #[cfg(all(feature = "f16", not(feature = "alt-stable")))]
-    contract_sanity!(f16, 42.0, 56.0);
-    contract_sanity!(f32, 42.0, 56.0);
-    contract_sanity!(f64, 42.0, 56.0);
+    contract_sanity!(f16, f16, 42.0, 56.0);
+    contract_sanity!(f32, f32, 42.0, 56.0);
+    contract_sanity!(f64, f64, 42.0, 56.0);
 
     #[cfg(feature = "alt-stable")]
-    mod half_f16 {
-      use crate::strategy::check_strategy_sanity;
-      use crate::test_runner::Reason;
-
-      const FORTY_TWO: half::f16 = half::f16::from_f32_const(42.0);
-      const FIFTY_SIX: half::f16 = half::f16::from_f32_const(56.0);
-
-      #[test]
-      fn range() -> Result<(), Reason> {
-        check_strategy_sanity(FORTY_TWO..FIFTY_SIX, None)
-      }
-
-      #[test]
-      fn range_inclusive() -> Result<(), Reason> {
-        check_strategy_sanity(FORTY_TWO..=FIFTY_SIX, None)
-      }
-
-      #[test]
-      fn range_to() -> Result<(), Reason> {
-        check_strategy_sanity(..FIFTY_SIX, None)
-      }
-
-      #[test]
-      fn range_to_inclusive() -> Result<(), Reason> {
-        check_strategy_sanity(..=FIFTY_SIX, None)
-      }
-
-      #[test]
-      fn range_from() -> Result<(), Reason> {
-        check_strategy_sanity(FORTY_TWO.., None)
-      }
-    }
+    contract_sanity!(
+      half_f16,
+      half::f16,
+      half::f16::from_f32_const(42.0),
+      half::f16::from_f32_const(56.0)
+    );
   }
 
   #[test]
@@ -1956,7 +1889,7 @@ mod test {
     // These tests pin the strict generation-error contract of empty
     // numeric ranges.
     macro_rules! error_on_empty {
-      ($t:tt, $zero:expr, $one:expr) => {
+      ($t:ident, $value:ty, $zero:expr, $one:expr) => {
         mod $t {
           use strict_test_support::PredicateFailure;
           use strict_test_support::ensure_that;
@@ -1968,8 +1901,8 @@ mod test {
           use crate::strategy::Strategy;
           use crate::test_runner::TestRunner;
 
-          const ZERO: $t = $zero;
-          const ONE: $t = $one;
+          const ZERO: $value = $zero;
+          const ONE: $value = $one;
 
           #[test]
           fn range() -> Result<(), PredicateFailure<Outcome>> {
@@ -1992,58 +1925,22 @@ mod test {
         }
       };
     }
-    error_on_empty!(u8, 0, 1);
-    error_on_empty!(i8, 0, 1);
-    error_on_empty!(u16, 0, 1);
-    error_on_empty!(i16, 0, 1);
-    error_on_empty!(u32, 0, 1);
-    error_on_empty!(i32, 0, 1);
-    error_on_empty!(u64, 0, 1);
-    error_on_empty!(i64, 0, 1);
-    error_on_empty!(usize, 0, 1);
-    error_on_empty!(isize, 0, 1);
+    error_on_empty!(u8, u8, 0, 1);
+    error_on_empty!(i8, i8, 0, 1);
+    error_on_empty!(u16, u16, 0, 1);
+    error_on_empty!(i16, i16, 0, 1);
+    error_on_empty!(u32, u32, 0, 1);
+    error_on_empty!(i32, i32, 0, 1);
+    error_on_empty!(u64, u64, 0, 1);
+    error_on_empty!(i64, i64, 0, 1);
+    error_on_empty!(usize, usize, 0, 1);
+    error_on_empty!(isize, isize, 0, 1);
     #[cfg(all(feature = "f16", not(feature = "alt-stable")))]
-    error_on_empty!(f16, 0.0, 1.0);
-    error_on_empty!(f32, 0.0, 1.0);
-    error_on_empty!(f64, 0.0, 1.0);
+    error_on_empty!(f16, f16, 0.0, 1.0);
+    error_on_empty!(f32, f32, 0.0, 1.0);
+    error_on_empty!(f64, f64, 0.0, 1.0);
 
     #[cfg(feature = "alt-stable")]
-    mod half_f16 {
-      use core::ops::RangeInclusive;
-
-      use strict_test_support::PredicateFailure;
-      use strict_test_support::ensure_that;
-
-      use super::empty_inclusive_range_error;
-      use super::empty_range_error;
-      use crate::num::half_f16::BinarySearch;
-      use crate::test_runner::Reason;
-      type Outcome = Result<BinarySearch, Reason>;
-
-      use crate::strategy::Strategy as _;
-      use crate::test_runner::TestRunner;
-
-      const ZERO: half::f16 = half::f16::ZERO;
-      const ONE: half::f16 = half::f16::ONE;
-
-      #[test]
-      fn range() -> Result<(), PredicateFailure<Outcome>> {
-        let mut runner = TestRunner::deterministic();
-        let result = (ZERO..ZERO).new_tree(&mut runner);
-        ensure_that(result, "an empty half::f16 range returns a generation error", empty_range_error).map(drop)
-      }
-
-      #[test]
-      fn range_inclusive() -> Result<(), PredicateFailure<Outcome>> {
-        let mut runner = TestRunner::deterministic();
-        let result = RangeInclusive::new(ONE, ZERO).new_tree(&mut runner);
-        ensure_that(
-          result,
-          "an empty half::f16 inclusive range returns a generation error",
-          empty_inclusive_range_error,
-        )
-        .map(drop)
-      }
-    }
+    error_on_empty!(half_f16, half::f16, half::f16::ZERO, half::f16::ONE);
   }
 }

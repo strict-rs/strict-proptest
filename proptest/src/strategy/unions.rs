@@ -298,44 +298,53 @@ impl<T: Strategy> ValueTree for UnionValueTree<T> {
   }
 
   fn simplify(&mut self) -> bool {
-    if self.current.simplify() {
-      self.prev = None;
-      return true;
-    }
-
-    if self.pick <= self.min_pick {
-      return false;
-    }
-
-    let mut next_pick = self.pick;
-    while next_pick > self.min_pick {
-      next_pick = next_pick.saturating_sub(1);
-      let Some(option) = self.options.get_mut(next_pick) else {
-        continue;
-      };
+    simplify_union(&mut self.current, &mut self.pick, self.min_pick, &mut self.prev, |next_pick| {
+      let option = self.options.get_mut(next_pick)?;
       option.maybe_init();
-      let Some(next) = option.take_initialized() else {
-        continue;
-      };
-
-      let previous = mem::replace(&mut self.current, next);
-      self.prev = Some((self.pick, previous));
-      self.pick = next_pick;
-      return true;
-    }
-
-    false
+      option.take_initialized()
+    })
   }
 
   fn complicate(&mut self) -> bool {
-    if let Some((pick, previous)) = self.prev.take() {
-      self.current = previous;
-      self.pick = pick;
-      self.min_pick = pick;
-      true
-    } else {
-      self.current.complicate()
-    }
+    complicate_union(&mut self.current, &mut self.pick, &mut self.min_pick, &mut self.prev)
+  }
+}
+
+/// Shrink within the active branch, then lazily search earlier branches.
+fn simplify_union<V: ValueTree>(
+  current: &mut V,
+  pick: &mut usize,
+  min_pick: usize,
+  prev: &mut Option<(usize, V)>,
+  mut take_branch: impl FnMut(usize) -> Option<V>,
+) -> bool {
+  if current.simplify() {
+    *prev = None;
+    return true;
+  }
+  let mut next_pick = *pick;
+  while next_pick > min_pick {
+    next_pick = next_pick.saturating_sub(1);
+    let Some(next) = take_branch(next_pick) else {
+      continue;
+    };
+    let previous = mem::replace(current, next);
+    *prev = Some((*pick, previous));
+    *pick = next_pick;
+    return true;
+  }
+  false
+}
+
+/// Restore the last active branch before delegating further complication to it.
+fn complicate_union<V: ValueTree>(current: &mut V, pick: &mut usize, min_pick: &mut usize, prev: &mut Option<(usize, V)>) -> bool {
+  if let Some((previous_pick, previous)) = prev.take() {
+    *current = previous;
+    *pick = previous_pick;
+    *min_pick = previous_pick;
+    true
+  } else {
+    current.complicate()
   }
 }
 
@@ -708,40 +717,13 @@ where
   }
 
   fn simplify(&mut self) -> bool {
-    if self.active.simplify() {
-      self.prev = None;
-      return true;
-    }
-
-    if self.pick <= self.min_pick {
-      return false;
-    }
-
-    let mut next_pick = self.pick;
-    while next_pick > self.min_pick {
-      next_pick = next_pick.saturating_sub(1);
-      let Some(next) = self.options.take_active_at(next_pick) else {
-        continue;
-      };
-
-      let previous = mem::replace(&mut self.active, next);
-      self.prev = Some((self.pick, previous));
-      self.pick = next_pick;
-      return true;
-    }
-
-    false
+    simplify_union(&mut self.active, &mut self.pick, self.min_pick, &mut self.prev, |next_pick| {
+      self.options.take_active_at(next_pick)
+    })
   }
 
   fn complicate(&mut self) -> bool {
-    if let Some((pick, previous)) = self.prev.take() {
-      self.active = previous;
-      self.pick = pick;
-      self.min_pick = pick;
-      true
-    } else {
-      self.active.complicate()
-    }
+    complicate_union(&mut self.active, &mut self.pick, &mut self.min_pick, &mut self.prev)
   }
 }
 
@@ -813,13 +795,78 @@ mod test {
   use crate::strategy::CheckStrategySanityOptions;
   use crate::strategy::check_strategy_sanity;
   use crate::strategy::just::Just;
+  use crate::test_runner::Config;
   #[cfg(feature = "std")]
   use crate::test_runner::TestCaseError;
   #[cfg(feature = "std")]
   use crate::test_runner::TestError;
+  use crate::test_runner::runner_test_config;
 
   /// Concrete assertion failures retain the complete observation.
   type Check<S> = Result<(), Box<PredicateFailure<S>>>;
+
+  /// The generator, tree, initial value, and each simplify/complicate observation.
+  type BranchRun<T> = (TestRunner, Result<(T, u32, [(bool, u32); 4]), Reason>);
+  /// A complete branch walk retained on both assertion paths.
+  type BranchCheck<T> = Result<BranchRun<T>, Box<PredicateFailure<BranchRun<T>>>>;
+
+  /// The middle branch rejects generation; shrinking can still reach the first.
+  fn filtered_branches() -> [impl Strategy<Value = u32, Tree: fmt::Debug>; 3] {
+    [Just(1_u32), Just(100), Just(9)].map(|source| source.prop_filter("values below ten", |&value| value < 10))
+  }
+
+  /// A passing earlier branch must backtrack once, then remain excluded.
+  fn check_branch_backtracking<S: Strategy<Value = u32>>(strategy: &S) -> BranchCheck<S::Tree>
+  where
+    S::Tree: fmt::Debug,
+  {
+    let mut runner = TestRunner::new(Config {
+      max_local_rejects: 1,
+      ..runner_test_config()
+    });
+    let walk = strategy.new_tree(&mut runner).map(|mut tree| {
+      let initial = tree.current();
+      let mut step = |operation: fn(&mut S::Tree) -> bool| {
+        let changed = operation(&mut tree);
+        (changed, tree.current())
+      };
+      let steps = [
+        step(ValueTree::simplify),
+        step(ValueTree::complicate),
+        step(ValueTree::simplify),
+        step(ValueTree::complicate),
+      ];
+      (tree, initial, steps)
+    });
+    ensure_that(
+      (runner, walk),
+      "shrinking skips a rejected branch, backtracks, and does not revisit the earlier passing branch",
+      |observed| {
+        observed
+          .1
+          .as_ref()
+          .is_ok_and(|trace| trace.1 == 9 && trace.2 == [(true, 1), (true, 9), (false, 9), (false, 9)])
+      },
+    )
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn dynamic_union_backtracks_over_rejected_branches() -> Result<(), impl fmt::Debug> {
+    let [earlier, rejected, initial] = filtered_branches();
+    check_branch_backtracking(&Union::new_weighted(vec![(0, earlier), (0, rejected), (1, initial)])).map(drop)
+  }
+
+  #[test]
+  fn tuple_union_backtracks_over_rejected_branches() -> Result<(), impl fmt::Debug> {
+    let [earlier, rejected, initial] = filtered_branches();
+    check_branch_backtracking(&TupleUnion::new((
+      (0, Rc::new(earlier)),
+      (0, Rc::new(rejected)),
+      (1, Rc::new(initial)),
+    )))
+    .map(drop)
+  }
 
   /// Every generation and native runner outcome in a union shrink experiment.
   #[cfg(feature = "std")]

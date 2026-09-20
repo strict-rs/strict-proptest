@@ -388,6 +388,31 @@ macro_rules! float_sampler {
                 inclusive: bool,
             }
 
+            impl FloatUniform {
+                /// Validate bounds and retain the selected endpoint semantics.
+                fn from_bounds(low: $typ, high: $typ, inclusive: bool) -> Result<Self, rand::distr::uniform::Error> {
+                    if !(low.is_finite() && high.is_finite()) {
+                        return Err(rand::distr::uniform::Error::NonFinite);
+                    }
+                    let empty = if inclusive {
+                        low > high
+                    } else {
+                        !float_greater(core::ops::Sub::sub(high, low), ZERO)
+                    };
+                    if empty {
+                        return Err(rand::distr::uniform::Error::EmptyRange);
+                    }
+                    // Equal inclusive bounds preserve the exact lower value,
+                    // including its sign when the endpoints are signed zeros.
+                    let intervals = if inclusive && float_equal(low, high) {
+                        None
+                    } else {
+                        Some(split_interval([low, high]))
+                    };
+                    Ok(Self { low, high, intervals, inclusive })
+                }
+            }
+
             impl UniformSampler for FloatUniform {
 
                 type X = $wrapper;
@@ -397,20 +422,7 @@ macro_rules! float_sampler {
                     B1: SampleBorrow<Self::X> + Sized,
                     B2: SampleBorrow<Self::X> + Sized,
                 {
-                    let low = low.borrow().0;
-                    let high = high.borrow().0;
-                    if !(low.is_finite() && high.is_finite()) {
-                        return Err(rand::distr::uniform::Error::NonFinite);
-                    }
-                    if !float_greater(core::ops::Sub::sub(high, low), ZERO) {
-                        return Err(rand::distr::uniform::Error::EmptyRange);
-                    }
-                    Ok(FloatUniform {
-                        low,
-                        high,
-                        intervals: Some(split_interval([low, high])),
-                        inclusive: false,
-                    })
+                    Self::from_bounds(low.borrow().0, high.borrow().0, false)
                 }
 
                 fn new_inclusive<B1, B2>(low: B1, high: B2) -> Result<Self, rand::distr::uniform::Error>
@@ -418,28 +430,7 @@ macro_rules! float_sampler {
                     B1: SampleBorrow<Self::X> + Sized,
                     B2: SampleBorrow<Self::X> + Sized,
                 {
-                    let low = low.borrow().0;
-                    let high = high.borrow().0;
-                    if !(low.is_finite() && high.is_finite()) {
-                        return Err(rand::distr::uniform::Error::NonFinite);
-                    }
-                    if low > high {
-                        return Err(rand::distr::uniform::Error::EmptyRange);
-                    }
-
-                    // A single-point inclusive range is well-defined and yields `low`.
-                    let intervals = if float_equal(low, high) {
-                        None
-                    } else {
-                        Some(split_interval([low, high]))
-                    };
-
-                    Ok(FloatUniform {
-                        low,
-                        high,
-                        intervals,
-                        inclusive: true,
-                    })
+                    Self::from_bounds(low.borrow().0, high.borrow().0, true)
                 }
 
                 fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Self::X {
@@ -600,6 +591,8 @@ macro_rules! float_sampler {
                 type Constructor = Result<FloatUniform, rand::distr::uniform::Error>;
                 /// The sampler remains available alongside every native sample.
                 type Samples = Result<(FloatUniform, Vec<$typ>), rand::distr::uniform::Error>;
+                /// Requested endpoints paired with their constructed sampler and samples.
+                type SampledRange = (($typ, $typ), Samples);
                 /// Typed outcomes of the float properties using whole-subject predicates.
                 #[cfg(feature = "strict-test")]
                 type Property<V, A> = PropertyResult<V, A, Box<PredicateFailure<A>>>;
@@ -694,11 +687,16 @@ macro_rules! float_sampler {
                 }
 
                 #[test]
-                fn inclusive_range_single_point() -> Check<Samples> {
-                    ensure_that(samples(FloatUniform::new_inclusive($wrapper(ZERO), $wrapper(ZERO)), 16),
-                        "a single-point range always yields its point", |result| result.as_ref().is_ok_and(|observed| {
-                            observed.1.iter().all(|value| float_bits_equal(*value, ZERO))
-                        })).map_err(Box::new).map(drop)
+                fn inclusive_range_single_point() -> Check<[SampledRange; 3]> {
+                    let negative_zero = core::ops::Neg::neg(ZERO);
+                    let observed = [(ZERO, ZERO), (negative_zero, ZERO), (ZERO, negative_zero)]
+                        .map(|bounds| (bounds, samples(FloatUniform::new_inclusive($wrapper(bounds.0), $wrapper(bounds.1)), 16)));
+                    ensure_that(observed,
+                        "a single-point range preserves the exact lower value, including signed zero", |results| {
+                            results.iter().all(|&(ref bounds, ref result)| result.as_ref().is_ok_and(|samples| {
+                                samples.1.iter().all(|value| float_bits_equal(*value, bounds.0))
+                            }))
+                        }).map_err(Box::new).map(drop)
                 }
 
                 #[test]

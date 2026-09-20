@@ -461,24 +461,9 @@ fn derive_variant_with_fields<C>(
 
   let base_pair = match attrs.params {
     // Parameters were not set on the variant:
-    ParamsMode::Passthrough => match attrs.strategy {
-      // Specific strategy - use the given expr and erase the type:
-      StratMode::Strategy(strat) => {
-        deny_all_attrs_on_fields(ctx, fields)?;
-        pair_existential_self(strat)
-      }
-      // Specific value - use the given expr:
-      StratMode::Value(value_expr) => {
-        deny_all_attrs_on_fields(ctx, fields)?;
-        pair_value_self(value_expr)
-      }
-      StratMode::Regex(regex) => {
-        deny_all_attrs_on_fields(ctx, fields)?;
-        pair_regex_self(regex)
-      }
-      // No explicit strategy, use strategies for variant fields instead:
-      StratMode::Arbitrary => variant_no_explicit_strategy(ctx, ut, v_path, fields, acc)?,
-    },
+    ParamsMode::Passthrough => derive_variant_strategy(ctx, attrs.strategy, fields, |context, payload| {
+      variant_no_explicit_strategy(context, ut, v_path, payload, acc)
+    })?,
     // no_params set on the variant:
     ParamsMode::Default => variant_handle_default_params(ctx, ut, v_path, attrs, fields)?,
     // params(<type>) set on the variant:
@@ -553,7 +538,20 @@ fn variant_handle_default_params(
   attrs: ParsedAttributes,
   fields: Vec<Field>,
 ) -> DeriveResult<StratPair> {
-  let pair = match attrs.strategy {
+  derive_variant_strategy(ctx, attrs.strategy, fields, |context, payload| {
+    derive_product_has_params(context, ut, error::ENUM_VARIANT_FIELD, map_closure(v_path, &payload), payload)
+  })
+}
+
+/// Select an explicit variant strategy or delegate automatic field derivation to its parameter
+/// policy.
+fn derive_variant_strategy(
+  ctx: Ctx<'_>,
+  strategy: StratMode,
+  fields: Vec<Field>,
+  arbitrary: impl FnOnce(Ctx<'_>, Vec<Field>) -> DeriveResult<StratPair>,
+) -> DeriveResult<StratPair> {
+  let pair = match strategy {
     // Specific strategy - use the given expr and erase the type:
     StratMode::Strategy(strat) => {
       deny_all_attrs_on_fields(ctx, fields)?;
@@ -568,12 +566,7 @@ fn variant_handle_default_params(
       deny_all_attrs_on_fields(ctx, fields)?;
       pair_regex_self(regex)
     }
-    // Use Arbitrary for the factors (fields) of variant:
-    StratMode::Arbitrary =>
-    // Fields are not allowed to specify params.
-    {
-      derive_product_has_params(ctx, ut, error::ENUM_VARIANT_FIELD, map_closure(v_path, &fields), fields)?
-    }
+    StratMode::Arbitrary => arbitrary(ctx, fields)?,
   };
 
   Ok(pair)

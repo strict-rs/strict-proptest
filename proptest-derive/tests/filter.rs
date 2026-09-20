@@ -216,104 +216,79 @@ mod tests {
     even(&foo) && rem3(&foo) && !even(&bar) && !even(&baz) && baz < 100 && even(&quux) && quux == 42 && wibble > 2 && wibble <= 100
   }
 
+  /// Check the complete generated subject against the filters for its fixture type.
+  fn check_filters<T: Arbitrary>(context: &'static str, predicate: impl Fn(&T) -> bool) -> Checked<T> {
+    ensure_property(&any::<T>(), context, |generated| ensure_that(generated, context, &predicate))
+  }
+
   #[test]
   fn t0_test() -> Checked<T0> {
-    ensure_property(&any::<T0>(), "every filter spelling holds on a named struct", |generated| {
-      ensure_that(generated, "every filter spelling holds on a named struct", |sample| {
-        satisfies_composed_filters(sample.foo, sample.bar, sample.baz, sample.quux, sample.wibble)
-      })
+    check_filters("every filter spelling holds on a named struct", |sample: &T0| {
+      satisfies_composed_filters(sample.foo, sample.bar, sample.baz, sample.quux, sample.wibble)
     })
   }
 
   #[test]
   fn t1_test() -> Checked<T1> {
-    ensure_property(&any::<T1>(), "every filter spelling holds under container params", |generated| {
-      ensure_that(generated, "every filter spelling holds under container params", |sample| {
-        satisfies_composed_filters(sample.foo, sample.bar, sample.baz, sample.quux, sample.wibble)
-      })
+    check_filters("every filter spelling holds under container params", |sample: &T1| {
+      satisfies_composed_filters(sample.foo, sample.bar, sample.baz, sample.quux, sample.wibble)
     })
   }
 
   #[test]
   fn t2_test() -> Checked<T2> {
-    ensure_property(&any::<T2>(), "every filter spelling holds on a tuple struct", |generated| {
-      ensure_that(generated, "every filter spelling holds on a tuple struct", |sample| {
-        satisfies_composed_filters(sample.0, sample.1, sample.2, sample.3, sample.4)
-      })
+    check_filters("every filter spelling holds on a tuple struct", |sample: &T2| {
+      satisfies_composed_filters(sample.0, sample.1, sample.2, sample.3, sample.4)
     })
   }
 
   #[test]
   fn t3_test() -> Checked<T3> {
-    ensure_property(&any::<T3>(), "the duplicate tuple-struct spelling holds", |generated| {
-      ensure_that(generated, "the duplicate tuple-struct spelling holds", |sample| {
-        satisfies_composed_filters(sample.0, sample.1, sample.2, sample.3, sample.4)
-      })
+    check_filters("the duplicate tuple-struct spelling holds", |sample: &T3| {
+      satisfies_composed_filters(sample.0, sample.1, sample.2, sample.3, sample.4)
     })
   }
 
   #[test]
   fn t4_test() -> Checked<T4> {
-    ensure_property(&any::<T4>(), "only V0 with an even field survives the filters", |generated| {
-      ensure_that(
-        generated,
-        "only V0 with an even field survives the filters",
-        |sample| match *sample {
-          T4::V0 {
-            field,
-          } => even(&field),
-          T4::V1 => false,
-        },
-      )
+    check_filters("only V0 with an even field survives the filters", |sample| match *sample {
+      T4::V0 {
+        field,
+      } => even(&field),
+      T4::V1 => false,
     })
   }
 
   #[test]
   fn t5_test() -> Checked<T5> {
-    ensure_property(
-      &any::<T5>(),
+    check_filters(
       "variant and field filters compose with the explicit strategy",
-      |generated| {
-        ensure_that(
-          generated,
-          "variant and field filters compose with the explicit strategy",
-          |sample| match *sample {
-            T5::V0 {
-              field,
-            } => rem3(&field) && even(&field),
-            T5::V1(field) => field < 1000 && field.is_multiple_of(5),
-          },
-        )
+      |sample| match *sample {
+        T5::V0 {
+          field,
+        } => rem3(&field) && even(&field),
+        T5::V1(field) => field < 1000 && field.is_multiple_of(5),
       },
     )
   }
 
   #[test]
   fn t6_test() -> Checked<T6> {
-    ensure_property(
-      &any::<T6>(),
+    check_filters(
       "variant and field filters compose with the params strategy",
-      |generated| {
-        ensure_that(
-          generated,
-          "variant and field filters compose with the params strategy",
-          |sample| match *sample {
-            T6::V0 {
-              field,
-            } => rem3(&field) && even(&field),
-            T6::V1(field) => field < 100 && field.is_multiple_of(5),
-          },
-        )
+      |sample| match *sample {
+        T6::V0 {
+          field,
+        } => rem3(&field) && even(&field),
+        T6::V1(field) => field < 100 && field.is_multiple_of(5),
       },
     )
   }
 
   #[test]
   fn t7_test() -> Checked<T7> {
-    ensure_property(&any::<T7>(), "both accumulated field filters hold", |generated| {
-      ensure_that(generated, "both accumulated field filters hold", |sample| {
-        even(&sample.foo) && rem3(&sample.foo)
-      })
+    check_filters("both accumulated field filters hold", |sample: &T7| {
+      even(&sample.foo) && rem3(&sample.foo)
     })
   }
 

@@ -1428,6 +1428,10 @@ mod test {
   /// Complete legacy runner outcome for a scalar input.
   type ScalarRun = Result<(), TestError<u32>>;
 
+  /// The configured fork runner and its complete scalar outcome.
+  #[cfg(feature = "fork")]
+  type ForkRun = (TestRunner, ScalarRun);
+
   #[test]
   fn gives_up_after_too_many_rejections() -> Check<(TestRunner, u32, ScalarRun)> {
     let mut runner = TestRunner::new(runner_test_config());
@@ -1508,8 +1512,17 @@ mod test {
 
   #[test]
   fn persisted_cases_do_not_count_towards_total_cases() -> Check<Capture> {
+    check_persistence_child(
+      PERSISTED_COUNTING_CHILD,
+      b"proptest: Saving this and future failures in persistence-test-counting.txt",
+    )
+    .map(drop)
+  }
+
+  /// Retain the child execution while checking its persistence diagnostic.
+  fn check_persistence_child(child: &str, diagnostic: &[u8]) -> Result<Capture, Box<PredicateFailure<Capture>>> {
     ensure_that(
-      capture_ignored_test(PERSISTED_COUNTING_CHILD),
+      capture_ignored_test(child),
       "the persistence child passes and emits its save diagnostic",
       |capture| {
         capture.as_ref().is_ok_and(|captured| {
@@ -1518,11 +1531,10 @@ mod test {
               .output
               .stderr
               .split(|&byte| byte == b'\n')
-              .any(|line| line.starts_with(b"proptest: Saving this and future failures in persistence-test-counting.txt"))
+              .any(|line| line.starts_with(diagnostic))
         })
       },
     )
-    .map(drop)
     .map_err(Box::new)
   }
 
@@ -1567,22 +1579,11 @@ mod test {
 
   #[test]
   fn failing_cases_persisted_and_reloaded() -> Check<Capture> {
-    ensure_that(
-      capture_ignored_test(PERSISTED_RELOAD_CHILD),
-      "the persistence child passes and emits its save diagnostic",
-      |capture| {
-        capture.as_ref().is_ok_and(|captured| {
-          captured.output.status.success()
-            && captured
-              .output
-              .stderr
-              .split(|&byte| byte == b'\n')
-              .any(|line| line.starts_with(b"proptest: Saving this and future failures in persistence-test-reload.txt"))
-        })
-      },
+    check_persistence_child(
+      PERSISTED_RELOAD_CHILD,
+      b"proptest: Saving this and future failures in persistence-test-reload.txt",
     )
     .map(drop)
-    .map_err(Box::new)
   }
 
   #[test]
@@ -1687,24 +1688,44 @@ mod test {
 
   #[cfg(feature = "fork")]
   #[test]
-  fn normal_failure_in_fork_results_in_correct_failure() -> Check<ScalarRun> {
-    let mut runner = TestRunner::new(Config {
-      fork: true,
-      test_name: Some(concat!(module_path!(), "::normal_failure_in_fork_results_in_correct_failure")),
-      ..runner_test_config()
-    });
-
-    let result = runner.run(&(0_u32..1000), |candidate| {
-      if candidate < 500 {
-        Ok(())
-      } else {
-        Err(TestCaseError::fail("value reached 500"))
-      }
-    });
-    ensure_that(result, "the forked failure minimizes to 500 without aborting", |observed| {
-      matches!(*observed, Err(TestError::Fail(_, 500)))
-    })
+  fn normal_failure_in_fork_results_in_correct_failure() -> Check<ForkRun> {
+    check_fork_failure(
+      fork_config(concat!(module_path!(), "::normal_failure_in_fork_results_in_correct_failure")),
+      |candidate| fails_at_boundary(candidate, "value reached 500"),
+    )
     .map(drop)
+  }
+
+  /// Enable process isolation for the exact test entry point.
+  #[cfg(feature = "fork")]
+  fn fork_config(test_name: &'static str) -> Config {
+    Config {
+      fork: true,
+      test_name: Some(test_name),
+      ..runner_test_config()
+    }
+  }
+
+  /// A returned callback failure separates the passing and failing halves of the range.
+  #[cfg(feature = "fork")]
+  fn fails_at_boundary(candidate: u32, reason: &'static str) -> TestCaseResult {
+    if candidate < 500 {
+      Ok(())
+    } else {
+      Err(TestCaseError::fail(reason))
+    }
+  }
+
+  /// Keep the runner and native outcome while checking cross-process shrinking.
+  #[cfg(feature = "fork")]
+  fn check_fork_failure(config: Config, property: impl Fn(u32) -> TestCaseResult) -> Result<ForkRun, Box<PredicateFailure<ForkRun>>> {
+    let mut runner = TestRunner::new(config);
+    let result = runner.run(&(0_u32..1000), property);
+    ensure_that(
+      (runner, result),
+      "the forked failure minimizes to 500 without aborting",
+      |observed| matches!(observed.1, Err(TestError::Fail(_, 500))),
+    )
     .map_err(Box::new)
   }
 
@@ -1712,102 +1733,68 @@ mod test {
   // it through the fork boundary.
   #[cfg(feature = "fork")]
   #[test]
-  fn nonsuccessful_exit_finds_correct_failure() -> Check<ScalarRun> {
-    let mut runner = TestRunner::new(Config {
-      fork: true,
-      test_name: Some(concat!(module_path!(), "::nonsuccessful_exit_finds_correct_failure")),
-      ..runner_test_config()
-    });
-
-    let result = runner.run(&(0_u32..1000), |candidate| {
-      if candidate >= 500 {
-        return Err(TestCaseError::fail("child reported a failure"));
-      }
-      Ok(())
-    });
-    ensure_that(result, "the forked failure minimizes to 500 without aborting", |observed| {
-      matches!(*observed, Err(TestError::Fail(_, 500)))
-    })
+  fn nonsuccessful_exit_finds_correct_failure() -> Check<ForkRun> {
+    check_fork_failure(
+      fork_config(concat!(module_path!(), "::nonsuccessful_exit_finds_correct_failure")),
+      |candidate| fails_at_boundary(candidate, "child reported a failure"),
+    )
     .map(drop)
-    .map_err(Box::new)
   }
 
   // Fork-surface test: the child reports a failure after earlier cases
   // pass, so the parent still has to shrink across process isolation.
   #[cfg(feature = "fork")]
   #[test]
-  fn spurious_exit_finds_correct_failure() -> Check<ScalarRun> {
-    let mut runner = TestRunner::new(Config {
-      fork: true,
-      test_name: Some(concat!(module_path!(), "::spurious_exit_finds_correct_failure")),
-      ..runner_test_config()
-    });
-
-    let result = runner.run(&(0_u32..1000), |candidate| {
-      if candidate >= 500 {
-        return Err(TestCaseError::fail("child reported a late failure"));
-      }
-      Ok(())
-    });
-    ensure_that(result, "the forked failure minimizes to 500 without aborting", |observed| {
-      matches!(*observed, Err(TestError::Fail(_, 500)))
-    })
+  fn spurious_exit_finds_correct_failure() -> Check<ForkRun> {
+    check_fork_failure(
+      fork_config(concat!(module_path!(), "::spurious_exit_finds_correct_failure")),
+      |candidate| fails_at_boundary(candidate, "child reported a late failure"),
+    )
     .map(drop)
-    .map_err(Box::new)
   }
 
   #[cfg(feature = "timeout")]
   #[test]
-  fn long_sleep_timeout_finds_correct_failure() -> Check<ScalarRun> {
-    let mut runner = TestRunner::new(Config {
-      fork: true,
-      timeout: 500,
-      test_name: Some(concat!(module_path!(), "::long_sleep_timeout_finds_correct_failure")),
-      ..runner_test_config()
-    });
-
-    let result = runner.run(&(0_u32..1000), |candidate| {
-      if candidate >= 500 {
-        thread::sleep(Duration::from_secs(10));
-      }
-      Ok(())
-    });
-    ensure_that(result, "the forked failure minimizes to 500 without aborting", |observed| {
-      matches!(*observed, Err(TestError::Fail(_, 500)))
-    })
+  fn long_sleep_timeout_finds_correct_failure() -> Check<ForkRun> {
+    check_fork_failure(
+      Config {
+        timeout: 500,
+        ..fork_config(concat!(module_path!(), "::long_sleep_timeout_finds_correct_failure"))
+      },
+      |candidate| {
+        if candidate >= 500 {
+          thread::sleep(Duration::from_secs(10));
+        }
+        Ok(())
+      },
+    )
     .map(drop)
-    .map_err(Box::new)
   }
 
   #[cfg(feature = "timeout")]
   #[test]
-  fn mid_sleep_timeout_finds_correct_failure() -> Check<ScalarRun> {
-    let mut runner = TestRunner::new(Config {
-      fork: true,
-      timeout: 500,
-      test_name: Some(concat!(module_path!(), "::mid_sleep_timeout_finds_correct_failure")),
-      ..runner_test_config()
-    });
-
-    let result = runner.run(&(0_u32..1000), |candidate| {
-      if candidate >= 500 {
-        // Sleep a little longer than the timeout. This means that
-        // sometimes the test case itself will return before the parent
-        // process has noticed the child is timing out, so it's up to
-        // the child to mark it as a failure.
-        thread::sleep(Duration::from_millis(600));
-      } else {
-        // Sleep a bit so that the parent and child timing don't stay
-        // in sync.
-        thread::sleep(Duration::from_millis(100));
-      }
-      Ok(())
-    });
-    ensure_that(result, "the forked failure minimizes to 500 without aborting", |observed| {
-      matches!(*observed, Err(TestError::Fail(_, 500)))
-    })
+  fn mid_sleep_timeout_finds_correct_failure() -> Check<ForkRun> {
+    check_fork_failure(
+      Config {
+        timeout: 500,
+        ..fork_config(concat!(module_path!(), "::mid_sleep_timeout_finds_correct_failure"))
+      },
+      |candidate| {
+        if candidate >= 500 {
+          // Sleep a little longer than the timeout. This means that
+          // sometimes the test case itself will return before the parent
+          // process has noticed the child is timing out, so it's up to
+          // the child to mark it as a failure.
+          thread::sleep(Duration::from_millis(600));
+        } else {
+          // Sleep a bit so that the parent and child timing don't stay
+          // in sync.
+          thread::sleep(Duration::from_millis(100));
+        }
+        Ok(())
+      },
+    )
     .map(drop)
-    .map_err(Box::new)
   }
 
   #[test]

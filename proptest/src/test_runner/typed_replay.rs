@@ -354,19 +354,27 @@ impl<'a, C, T> ForkChannel<'a, C, T> {
     }
   }
 
-  /// Emit or replay one control record without creating evaluation evidence.
-  fn control(&mut self, kind: u8) -> Result<(), ExecutionError<T>> {
+  /// Consume the complete prefix before reporting tail and terminal failures.
+  fn next_frame(&mut self) -> Result<Option<Frame>, ExecutionError<T>> {
     if let Some(frame) = self.journal.frames.pop_front() {
-      if frame.kind != kind || frame.id != self.next || !frame.payload.is_empty() {
-        return Err(ExecutionError::Protocol(ReplayError::Identity));
-      }
-      return Ok(());
+      return Ok(Some(frame));
     }
     if let Some(error) = self.journal.tail_errors.pop_front() {
       return Err(error.into());
     }
     if let Some(error) = self.terminal.take() {
       return Err(error);
+    }
+    Ok(None)
+  }
+
+  /// Emit or replay one control record without creating evaluation evidence.
+  fn control(&mut self, kind: u8) -> Result<(), ExecutionError<T>> {
+    if let Some(frame) = self.next_frame()? {
+      if frame.kind != kind || frame.id != self.next || !frame.payload.is_empty() {
+        return Err(ExecutionError::Protocol(ReplayError::Identity));
+      }
+      return Ok(());
     }
     let output = self.output.as_mut().ok_or(ExecutionError::Protocol(ReplayError::Exhausted))?;
     Frame {
@@ -458,13 +466,7 @@ where
 
   fn replay(&mut self, id: EvaluationId, case: &mut V, origin: CaseOrigin) -> ReplayOutcome<A, E, C::Error> {
     self.next = id;
-    let Some(start) = self.journal.frames.pop_front() else {
-      if let Some(error) = self.journal.tail_errors.pop_front() {
-        return Err(error.into());
-      }
-      if let Some(error) = self.terminal.take() {
-        return Err(error);
-      }
+    let Some(start) = self.next_frame()? else {
       if self.output.is_none() {
         return Err(ExecutionError::Protocol(ReplayError::Exhausted));
       }
@@ -493,13 +495,7 @@ where
     if start.kind != START {
       return Err(ExecutionError::Protocol(ReplayError::Identity));
     }
-    let Some(returned) = self.journal.frames.pop_front() else {
-      if let Some(error) = self.journal.tail_errors.pop_front() {
-        return Err(error.into());
-      }
-      if let Some(error) = self.terminal.take() {
-        return Err(error);
-      }
+    let Some(returned) = self.next_frame()? else {
       if self.output.is_none() {
         return Err(ExecutionError::Protocol(ReplayError::Exhausted));
       }

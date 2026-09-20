@@ -14,7 +14,6 @@ use core::error::Error;
 use core::fmt;
 use core::marker::PhantomData;
 
-use crate::std_facade::Rc;
 use crate::strategy::LazyValueTree;
 use crate::strategy::NewTree;
 use crate::strategy::Strategy;
@@ -23,9 +22,9 @@ use crate::strategy::TupleUnionActive2;
 use crate::strategy::TupleUnionValueTree;
 use crate::strategy::ValueTree;
 use crate::strategy::WeightedStrategy;
+use crate::strategy::binary_union;
 #[cfg(test)]
 use crate::strategy::check_strategy_sanity;
-use crate::strategy::float_to_weight;
 use crate::strategy::statics;
 use crate::test_runner::TestRunner;
 
@@ -273,25 +272,22 @@ pub fn of<T: Strategy>(strategy: T) -> OptionStrategy<T> {
 /// `Some` is chosen with a probability given by `probability_of_some`, which
 /// must be between 0.0 and 1.0, both exclusive.
 pub fn weighted<T: Strategy>(probability_of_some: impl Into<Probability>, strategy: T) -> OptionStrategy<T> {
-  let prob = probability_of_some.into().into();
-  let (weight_some, weight_none) = float_to_weight(prob);
-
-  OptionStrategy(TupleUnion::new((
-    (weight_none, Rc::new(NoneStrategy(PhantomData))),
-    (weight_some, Rc::new(statics::Map::new(strategy, WrapSome))),
-  )))
+  OptionStrategy(binary_union(
+    probability_of_some.into().into(),
+    NoneStrategy(PhantomData),
+    statics::Map::new(strategy, WrapSome),
+  ))
 }
 
 #[cfg(test)]
 mod test {
-  use core::ops::Range;
-
   use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_that;
 
   use super::*;
   use crate::std_facade::Vec;
   use crate::strategy::Just;
+  use crate::strategy::sample_count_in_range;
   use crate::test_runner::Reason;
 
   /// Native generation outcomes underlying the sampled Some frequency.
@@ -302,22 +298,12 @@ mod test {
     (0..1000).map(|_| strategy.new_tree(&mut runner)).collect()
   }
 
-  fn has_some_count(samples: &OptionSamples, expected: Range<usize>) -> bool {
-    samples.iter().all(Result::is_ok)
-      && expected.contains(
-        &samples
-          .iter()
-          .filter(|sample| sample.as_ref().is_ok_and(|tree| tree.current().is_some()))
-          .count(),
-      )
-  }
-
   #[test]
   fn probability_defaults_to_0p5() -> Result<(), PredicateFailure<OptionSamples>> {
     ensure_that(
       sample_options(&of(Just(42_i32))),
       "roughly half of the samples are Some",
-      |samples| has_some_count(samples, 451..550),
+      |samples| sample_count_in_range(samples, 451..550, |tree| tree.current().is_some()),
     )
     .map(drop)
   }
@@ -334,7 +320,7 @@ mod test {
         subjects
           .iter()
           .zip([801..950, 51..150])
-          .all(|(sample, bounds)| has_some_count(sample, bounds))
+          .all(|(sample, bounds)| sample_count_in_range(sample, bounds, |tree| tree.current().is_some()))
       },
     )
     .map(drop)

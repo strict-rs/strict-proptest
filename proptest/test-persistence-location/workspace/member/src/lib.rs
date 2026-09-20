@@ -1,2 +1,2 @@
-#[macro_use] extern crate proptest;
+extern crate proptest;
 pub mod submodule;

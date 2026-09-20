@@ -25,6 +25,8 @@
 //! features linked above become stable.**
 
 use crate::std_facade::fmt;
+use crate::strategy::filter::new_filtered_tree;
+use crate::strategy::filter::recover_filtered_value;
 use crate::strategy::traits::NewTree;
 use crate::strategy::traits::Strategy;
 use crate::strategy::traits::ValueTree;
@@ -83,36 +85,17 @@ impl<S: Strategy, F: FilterFn<S::Value> + Clone> Strategy for Filter<S, F> {
   type Value = S::Value;
 
   fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-    loop {
-      let source_tree = self.source.new_tree(runner)?;
-      if self.fun.apply(&source_tree.current()) {
-        return Ok(Filter {
-          source: source_tree,
-          whence: "unused".into(),
-          fun:    self.fun.clone(),
-        });
-      }
-      runner.reject_local(self.whence.clone())?;
-    }
+    new_filtered_tree(&self.source, &self.whence, |candidate| self.fun.apply(candidate), runner)
+      .map(|source| Filter::new(source, "unused".into(), self.fun.clone()))
   }
 }
 
 impl<S: ValueTree, F: FilterFn<S::Value>> Filter<S, F> {
-  /// Return whether the current source value passes this filter.
-  fn accepts_current(&self) -> bool {
-    self.fun.apply(&self.source.current())
-  }
-
   /// After the source shrinks, `complicate()` it back until the predicate
   /// accepts the current value again. If recovery fails, report that this
   /// shrink step produced no usable change.
   fn ensure_acceptable(&mut self) -> bool {
-    while !self.accepts_current() {
-      if !self.source.complicate() {
-        return false;
-      }
-    }
-    true
+    recover_filtered_value(&mut self.source, |candidate| self.fun.apply(candidate))
   }
 }
 

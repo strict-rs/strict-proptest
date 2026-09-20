@@ -680,49 +680,12 @@ enum NormMeta {
 fn normalize_meta(meta: Meta) -> Option<NormMeta> {
   match meta {
     Meta::Path(_) => Some(NormMeta::Plain),
-    Meta::NameValue(nv) => match nv.value {
-      Expr::Lit(elit) => Some(NormMeta::Lit(elit.lit)),
-      Expr::Array(_)
-      | Expr::Assign(_)
-      | Expr::Async(_)
-      | Expr::Await(_)
-      | Expr::Binary(_)
-      | Expr::Block(_)
-      | Expr::Break(_)
-      | Expr::Call(_)
-      | Expr::Cast(_)
-      | Expr::Closure(_)
-      | Expr::Const(_)
-      | Expr::Continue(_)
-      | Expr::Field(_)
-      | Expr::ForLoop(_)
-      | Expr::Group(_)
-      | Expr::If(_)
-      | Expr::Index(_)
-      | Expr::Infer(_)
-      | Expr::Let(_)
-      | Expr::Loop(_)
-      | Expr::Macro(_)
-      | Expr::Match(_)
-      | Expr::MethodCall(_)
-      | Expr::Paren(_)
-      | Expr::Path(_)
-      | Expr::Range(_)
-      | Expr::RawAddr(_)
-      | Expr::Reference(_)
-      | Expr::Repeat(_)
-      | Expr::Return(_)
-      | Expr::Struct(_)
-      | Expr::Try(_)
-      | Expr::TryBlock(_)
-      | Expr::Tuple(_)
-      | Expr::Unary(_)
-      | Expr::Unsafe(_)
-      | Expr::Verbatim(_)
-      | Expr::While(_)
-      | Expr::Yield(_)
-      | _ => None,
-    },
+    Meta::NameValue(nv) => {
+      let Expr::Lit(elit) = nv.value else {
+        return None;
+      };
+      Some(NormMeta::Lit(elit.lit))
+    }
     Meta::List(ml) => {
       if let Ok(lit) = syn::parse2(ml.tokens.clone()) {
         Some(NormMeta::Lit(lit))

@@ -213,16 +213,40 @@ fn hardware_seed<const N: usize>(fallback: [u8; N]) -> [u8; N] {
   seed
 }
 
+/// Generate word reads with the native algorithm's word method so seeded
+/// streams keep their consumption order. Replay and recording use little-endian
+/// bytes for the same word width.
+macro_rules! rng_word {
+  ($method:ident, $word:ty, $native:ident) => {
+    fn $method(&mut self) -> Result<$word, Self::Error> {
+      Ok(match self.rng {
+        TestRngImpl::XorShift(ref mut rng) => rng.$native(),
+        TestRngImpl::ChaCha(ref mut rng) => rng.$native(),
+        TestRngImpl::PassThrough {
+          ..
+        } => {
+          let mut bytes = [0; size_of::<$word>()];
+          self.fill_bytes_inner(&mut bytes);
+          <$word>::from_le_bytes(bytes)
+        }
+        TestRngImpl::Recorder {
+          ref mut rng,
+          ref mut record,
+        } => {
+          let value = rng.$native();
+          record.extend_from_slice(&value.to_le_bytes());
+          value
+        }
+      })
+    }
+  };
+}
+
 impl TryRng for TestRng {
   type Error = Infallible;
 
-  fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
-    Ok(self.next_u32_inner())
-  }
-
-  fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
-    Ok(self.next_u64_inner())
-  }
+  rng_word!(try_next_u32, u32, next_u32);
+  rng_word!(try_next_u64, u64, next_u64);
 
   fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
     self.fill_bytes_inner(dest);
@@ -470,54 +494,6 @@ impl Seed {
 }
 
 impl TestRng {
-  /// Draw the next `u32`, dispatching to the active generator (and
-  /// recording it under `Recorder`).
-  fn next_u32_inner(&mut self) -> u32 {
-    match self.rng {
-      TestRngImpl::XorShift(ref mut rng) => rng.next_u32(),
-      TestRngImpl::ChaCha(ref mut rng) => rng.next_u32(),
-      TestRngImpl::PassThrough {
-        ..
-      } => {
-        let mut buf = [0; 4];
-        self.fill_bytes_inner(&mut buf[..]);
-        u32::from_le_bytes(buf)
-      }
-      TestRngImpl::Recorder {
-        ref mut rng,
-        ref mut record,
-      } => {
-        let read = rng.next_u32();
-        record.extend_from_slice(&read.to_le_bytes());
-        read
-      }
-    }
-  }
-
-  /// Draw the next `u64`, dispatching to the active generator (and
-  /// recording it under `Recorder`).
-  fn next_u64_inner(&mut self) -> u64 {
-    match self.rng {
-      TestRngImpl::XorShift(ref mut rng) => rng.next_u64(),
-      TestRngImpl::ChaCha(ref mut rng) => rng.next_u64(),
-      TestRngImpl::PassThrough {
-        ..
-      } => {
-        let mut buf = [0; 8];
-        self.fill_bytes_inner(&mut buf[..]);
-        u64::from_le_bytes(buf)
-      }
-      TestRngImpl::Recorder {
-        ref mut rng,
-        ref mut record,
-      } => {
-        let read = rng.next_u64();
-        record.extend_from_slice(&read.to_le_bytes());
-        read
-      }
-    }
-  }
-
   /// Fill `dest` from the active generator: real randomness for the
   /// algorithmic variants, the remaining window then zeros for
   /// `PassThrough`, recording the bytes under `Recorder`.
@@ -955,6 +931,33 @@ mod test {
       (first, second, tail, depleted),
       (0x3412_C0DE, 0xDEAD_BEEF_CAFE_7856, [1, 2, 3, 0], [0; 4]),
       "PassThrough replays little-endian values then zero-pads its depleted buffer",
+    )
+    .map_err(Box::new)
+    .map(drop)
+  }
+
+  /// Both word widths retain their generators and reads across depletion.
+  type DepletedWords = [(TestRng, [u32; 2], TestRng, [u64; 2]); 3];
+
+  #[test]
+  fn passthrough_words_zero_pad_missing_bytes() -> Check<DepletedWords> {
+    let seeds: [&[u8]; 3] = [&[], &[0xa5], &[1, 2, 3]];
+    let observations = seeds.map(|seed| {
+      let mut dword_rng = TestRng::from_seed(RngAlgorithm::PassThrough, seed);
+      let mut qword_rng = TestRng::from_seed(RngAlgorithm::PassThrough, seed);
+      let dwords = from_fn(|_| dword_rng.next_u32());
+      let qwords = from_fn(|_| qword_rng.next_u64());
+      (dword_rng, dwords, qword_rng, qwords)
+    });
+    ensure_that(
+      observations,
+      "partial and empty replay words are little-endian with zero-filled missing bytes",
+      |observed| {
+        observed
+          .iter()
+          .zip([0, 0xa5, 0x0003_0201])
+          .all(|(reads, expected)| reads.1 == [expected, 0] && reads.3 == [u64::from(expected), 0])
+      },
     )
     .map_err(Box::new)
     .map(drop)

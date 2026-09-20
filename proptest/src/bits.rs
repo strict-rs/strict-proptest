@@ -226,12 +226,7 @@ impl<T: BitSetLike> Strategy for BitSetStrategy<T> {
       }
     }
 
-    Ok(BitSetValueTree {
-      inner,
-      shrink: self.min,
-      prev_shrink: None,
-      min_count: 0,
-    })
+    Ok(BitSetValueTree::new(inner, 0, self.min))
   }
 }
 
@@ -364,12 +359,7 @@ impl<T: BitSetLike> Strategy for SampledBitSetStrategy<T> {
       bits.set(bit);
     }
 
-    Ok(BitSetValueTree {
-      inner:       bits,
-      shrink:      self.bits.start(),
-      prev_shrink: None,
-      min_count:   self.size.start(),
-    })
+    Ok(BitSetValueTree::new(bits, self.size.start(), self.bits.start()))
   }
 }
 
@@ -389,11 +379,29 @@ pub struct BitSetValueTree<T: BitSetLike> {
   min_count:   usize,
 }
 
+impl<T: BitSetLike> BitSetValueTree<T> {
+  /// Shrink an existing bitset down to `min_count` by clearing bits in order,
+  /// starting at `first_bit`.
+  pub(crate) const fn new(inner: T, min_count: usize, first_bit: usize) -> Self {
+    Self {
+      inner,
+      shrink: first_bit,
+      prev_shrink: None,
+      min_count,
+    }
+  }
+
+  /// Borrow the current selection without cloning its backing storage.
+  pub(crate) const fn bits(&self) -> &T {
+    &self.inner
+  }
+}
+
 impl<T: BitSetLike> ValueTree for BitSetValueTree<T> {
   type Value = T;
 
   fn current(&self) -> T {
-    self.inner.clone()
+    self.bits().clone()
   }
 
   fn simplify(&mut self) -> bool {
@@ -426,27 +434,26 @@ impl<T: BitSetLike> ValueTree for BitSetValueTree<T> {
   }
 }
 
-/// Defines a typed submodule of bit-set strategies for one integer type.
-///
-/// Each expansion emits a `pub mod` (named after the type) exposing an `ANY`
-/// constant plus `between`/`masked`/`sampled` constructors specialised to that
-/// integer, sparing callers the turbofish the generic strategies would need.
-macro_rules! int_api {
-  ($typ:ident, $max:expr) => {
+/// Define the typed bit-set constructors, with an optional `ANY` constant for
+/// representations whose full width is fixed independently of the platform.
+macro_rules! bitset_api {
+  ($module:ident, $typ:ty $(, $max:expr)?) => {
     #[doc = concat!(
                                                                                             "Bit-set strategies for `",
                                                                                             stringify!($typ),
                                                                                             "` values, shrinking by clearing selected bits."
                                                                                         )]
-    pub mod $typ {
+    pub mod $module {
       use super::*;
 
+      $(
       /// Generates integers where all bits may be set.
       pub const ANY: BitSetStrategy<$typ> = BitSetStrategy {
         min:  0,
         max:  $max,
         mask: None,
       };
+      )?
 
       /// Generates values where bits between the given bounds may be
       /// set.
@@ -458,7 +465,7 @@ macro_rules! int_api {
       /// may be set.
       #[allow(
         clippy::single_call_fn,
-        reason = "mask constructor mirrored per fixed-width integer type by the int_api bitset macro"
+        reason = "the typed mask constructor exposes the bit-set API for each representation"
       )]
       pub fn masked(mask: $typ) -> BitSetStrategy<$typ> {
         BitSetStrategy::masked(mask)
@@ -468,10 +475,8 @@ macro_rules! int_api {
       /// bounds given by `bits` may be set. The number of bits that are
       /// set is chosen to be in the range given by `size`.
       ///
-      /// ## Panics
-      ///
-      /// Panics if `size` includes a value that is greater than the
-      /// number of bits in `bits`.
+      /// Invalid ranges are reported during generation. Use
+      /// [`SampledBitSetStrategy::try_new`] for eager typed validation.
       pub fn sampled(size: impl Into<SizeRange>, bits: impl Into<SizeRange>) -> SampledBitSetStrategy<$typ> {
         SampledBitSetStrategy::new(size, bits)
       }
@@ -479,68 +484,22 @@ macro_rules! int_api {
   };
 }
 
-int_api!(u8, 8);
-int_api!(u16, 16);
-int_api!(u32, 32);
-int_api!(u64, 64);
-int_api!(u128, 128);
-int_api!(i8, 8);
-int_api!(i16, 16);
-int_api!(i32, 32);
-int_api!(i64, 64);
-int_api!(i128, 128);
-
-/// Defines a typed submodule of bit-set strategies without an `ANY` constant.
-///
-/// Like `int_api!` but for types whose full bit width is not a compile-time
-/// constant (`usize`/`isize`, `Vec<bool>`, `BitSet`): it emits
-/// `between`/`masked`/`sampled` and omits `ANY`.
-macro_rules! minimal_api {
-  ($md:ident, $typ:ty) => {
-    #[doc = concat!(
-                                                                                            "Bit-set strategies for `",
-                                                                                            stringify!($typ),
-                                                                                            "` values, shrinking by clearing selected bits."
-                                                                                        )]
-    pub mod $md {
-      use super::*;
-
-      /// Generates values where bits between the given bounds may be
-      /// set.
-      pub const fn between(min: usize, max: usize) -> BitSetStrategy<$typ> {
-        BitSetStrategy::new(min, max)
-      }
-
-      /// Generates values where any bits set in `mask` (and no others)
-      /// may be set.
-      #[allow(
-        clippy::single_call_fn,
-        reason = "mask constructor mirrored per variable-width type by the minimal_api bitset macro"
-      )]
-      pub fn masked(mask: $typ) -> BitSetStrategy<$typ> {
-        BitSetStrategy::masked(mask)
-      }
-
-      /// Create a strategy which generates values where bits within the
-      /// bounds given by `bits` may be set. The number of bits that are
-      /// set is chosen to be in the range given by `size`.
-      ///
-      /// ## Panics
-      ///
-      /// Panics if `size` includes a value that is greater than the
-      /// number of bits in `bits`.
-      pub fn sampled(size: impl Into<SizeRange>, bits: impl Into<SizeRange>) -> SampledBitSetStrategy<$typ> {
-        SampledBitSetStrategy::new(size, bits)
-      }
-    }
-  };
-}
-minimal_api!(usize, usize);
-minimal_api!(isize, isize);
+bitset_api!(u8, u8, 8);
+bitset_api!(u16, u16, 16);
+bitset_api!(u32, u32, 32);
+bitset_api!(u64, u64, 64);
+bitset_api!(u128, u128, 128);
+bitset_api!(i8, i8, 8);
+bitset_api!(i16, i16, 16);
+bitset_api!(i32, i32, 32);
+bitset_api!(i64, i64, 64);
+bitset_api!(i128, i128, 128);
+bitset_api!(usize, usize);
+bitset_api!(isize, isize);
 #[cfg(feature = "bit-set")]
 #[cfg_attr(docsrs, doc(cfg(feature = "bit-set")))]
-minimal_api!(bitset, BitSet);
-minimal_api!(bool_vec, Vec<bool>);
+bitset_api!(bitset, BitSet);
+bitset_api!(bool_vec, Vec<bool>);
 
 /// The crate's variable-size bit set.
 ///
@@ -661,6 +620,8 @@ pub(crate) fn sampled_var_bitset(size: impl Into<SizeRange>, bits: impl Into<Siz
 
 #[cfg(test)]
 mod test {
+  use core::ops::BitOr;
+
   use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_that;
 
@@ -701,6 +662,17 @@ mod test {
     (0..count)
       .map(|_| strategy.new_tree(&mut runner).map(trace_shrink_steps))
       .collect()
+  }
+
+  /// Check the union of all generated masks while preserving each failed draw.
+  fn covers_mask<T: BitSetLike + BitOr<Output = T> + Default + PartialEq>(samples: &Samples<BitSetStrategy<T>>, mask: &T) -> bool {
+    samples.1.iter().all(Result::is_ok)
+      && samples
+        .1
+        .iter()
+        .filter_map(|sample| sample.as_ref().ok())
+        .fold(T::default(), |bits, tree| bits | tree.current())
+        == *mask
   }
 
   #[test]
@@ -807,15 +779,7 @@ mod test {
     ensure_that(
       samples(u32::masked(0xdead_beef), 1024),
       "every masked bit is eventually generated and no unmasked bit appears",
-      |observed| {
-        observed.1.iter().all(Result::is_ok)
-          && observed
-            .1
-            .iter()
-            .filter_map(|sample| sample.as_ref().ok())
-            .fold(0, |bits, tree| bits | tree.current())
-            == 0xdead_beef
-      },
+      |observed| covers_mask(observed, &0xdead_beef),
     )
     .map(drop)
     .map_err(Box::new)
@@ -1028,13 +992,7 @@ mod test {
   fn i128_generates_values_in_mask() -> Check<Samples<BitSetStrategy<i128>>> {
     let mask = 0x0123_4567_89ab_cdef_0123_4567_89ab_cdef_i128;
     ensure_that(samples(i128::masked(mask), 1024), "every i128 mask bit is generated", |observed| {
-      observed.1.iter().all(Result::is_ok)
-        && observed
-          .1
-          .iter()
-          .filter_map(|sample| sample.as_ref().ok())
-          .fold(0, |bits, tree| bits | tree.current())
-          == mask
+      covers_mask(observed, &mask)
     })
     .map(drop)
     .map_err(Box::new)

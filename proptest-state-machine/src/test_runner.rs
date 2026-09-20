@@ -377,7 +377,15 @@ pub trait StateMachineTest: Sized {
 #[macro_export]
 macro_rules! prop_state_machine {
     // With proptest config annotation
-    (#![proptest_config($config:expr)]
+    (#![proptest_config($config:expr)] $($tests:tt)*) => {
+        $crate::prop_state_machine! {
+            @_CASES [$crate::strict_state_machine_config_from($config.__sugar_to_owned())]
+            $($tests)*
+        }
+    };
+
+    // Both public forms retain one per-case configuration evaluation.
+    (@_CASES [$config:expr]
     $(
         $(#[$meta:meta])*
         fn $test_name:ident(sequential $size:expr => $test:ident $(< $( $ty_param:tt ),+ >)?);
@@ -390,14 +398,9 @@ macro_rules! prop_state_machine {
                     &strategy,
                     stringify!($test_name),
                     |(initial_state, transitions, seen_counter)| {
-                        // Evaluated per generated case, matching the legacy
-                        // per-case `__sugar_to_owned` evaluation. The strict
-                        // state-machine adapter preserves local driver fields
-                        // such as `verbose`, while keeping persistence owned by
-                        // the outer strict property runner.
-                        let config = $crate::strict_state_machine_config_from(
-                            $config.__sugar_to_owned()
-                        );
+                        // The inner driver configuration never selects the
+                        // outer runner's generation or persistence policy.
+                        let config = $config;
                         <$test $(::< $( $ty_param ),+ >)? as $crate::StateMachineTest>::test_sequential(config, initial_state, transitions, seen_counter)
                     },
                 )
@@ -410,31 +413,28 @@ macro_rules! prop_state_machine {
         $(#[$meta:meta])*
         fn $test_name:ident(sequential $size:expr => $test:ident $(< $( $ty_param:tt ),+ >)?);
     )*) => {
-        $(
-            $(#[$meta])*
-            fn $test_name() -> $crate::StateMachinePropertyResult<$test $(< $( $ty_param ),+ >)?> {
-                let strategy = <<$test $(< $( $ty_param ),+ >)? as $crate::StateMachineTest>::Reference as $crate::ReferenceStateMachine>::sequential_strategy($size);
-                ::proptest::strict::ensure_property(
-                    &strategy,
-                    stringify!($test_name),
-                    |(initial_state, transitions, seen_counter)| {
-                        <$test $(::< $( $ty_param ),+ >)? as $crate::StateMachineTest>::test_sequential(
-                            $crate::strict_state_machine_config(), initial_state, transitions, seen_counter)
-                    },
-                )
-            }
-        )*
+        $crate::prop_state_machine! {
+            @_CASES [$crate::strict_state_machine_config()]
+            $(
+                $(#[$meta])*
+                fn $test_name(sequential $size => $test $(< $( $ty_param ),+ >)?);
+            )*
+        }
     };
 }
 
 #[cfg(test)]
 mod macro_test {
+  use std::cell::Cell;
   use std::convert::Infallible;
+  use std::fmt::Debug;
 
   use proptest::strategy::BoxedStrategy;
   use proptest::strategy::Just;
   use proptest::strategy::Strategy as _;
+  use proptest::strict::strict_default_config;
   use proptest::test_runner::Config;
+  use strict_test_support::ensure_that;
 
   /// A no-op model exercising hygienic macro expansion.
   struct Test;
@@ -471,6 +471,39 @@ mod macro_test {
     #![proptest_config(Config::default())]
     #[test]
     fn with_config_annotation(sequential 1..2 => Test);
+  }
+
+  #[test]
+  fn inner_configuration_is_evaluated_for_each_outer_case() -> Result<(), impl Debug> {
+    thread_local! {
+      /// Configuration evaluations in this thread's generated property run.
+      static CONFIGURATIONS: Cell<u32> = const { Cell::new(0) };
+    }
+    prop_state_machine! {
+      #![proptest_config({
+        CONFIGURATIONS.with(|count| count.set(count.get().saturating_add(1)));
+        Config { cases: 0, ..Config::default() }
+      })]
+      #[allow(clippy::single_call_fn, reason = "the generated wrapper is invoked directly so its complete report and configuration effects can be inspected")]
+      fn configured_cases(sequential 1..2 => Test);
+    }
+    let expected_cases = strict_default_config().cases;
+    CONFIGURATIONS.set(0);
+    let report = configured_cases();
+    let configurations = CONFIGURATIONS.get();
+    ensure_that(
+      (expected_cases, configurations, report),
+      "the inner configuration is evaluated once per case and cannot override the outer runner's case count",
+      |observed| {
+        observed.0 == observed.1
+          && observed
+            .2
+            .as_ref()
+            .is_ok_and(|run| run.statistics.successes == observed.0 && u32::try_from(run.evaluations.len()) == Ok(observed.1))
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 }
 

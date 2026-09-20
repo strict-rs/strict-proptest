@@ -34,7 +34,6 @@ pub use crate::option::{
   Probability,
   prob,
 };
-use crate::std_facade::Rc;
 use crate::strategy::LazyValueTree;
 use crate::strategy::NewTree;
 use crate::strategy::Strategy;
@@ -43,9 +42,9 @@ use crate::strategy::TupleUnionActive2;
 use crate::strategy::TupleUnionValueTree;
 use crate::strategy::ValueTree;
 use crate::strategy::WeightedStrategy;
+use crate::strategy::binary_union;
 #[cfg(test)]
 use crate::strategy::check_strategy_sanity;
-use crate::strategy::float_to_weight;
 use crate::strategy::statics;
 use crate::test_runner::TestRunner;
 
@@ -217,16 +216,11 @@ pub fn maybe_ok_weighted<T: Strategy, E: Strategy>(
   ok_strategy: T,
   err_strategy: E,
 ) -> MaybeOk<T, E> {
-  let prob = probability_of_ok.into().into();
-  let (ok_weight, err_weight) = float_to_weight(prob);
-
-  MaybeOk(TupleUnion::new((
-    (
-      err_weight,
-      Rc::new(statics::Map::new(err_strategy, WrapErr(PhantomData, PhantomData))),
-    ),
-    (ok_weight, Rc::new(statics::Map::new(ok_strategy, WrapOk(PhantomData, PhantomData)))),
-  )))
+  MaybeOk(binary_union(
+    probability_of_ok.into().into(),
+    statics::Map::new(err_strategy, WrapErr(PhantomData, PhantomData)),
+    statics::Map::new(ok_strategy, WrapOk(PhantomData, PhantomData)),
+  ))
 }
 
 /// Create a strategy for `Result`s where `Ok` values are taken from
@@ -255,28 +249,22 @@ pub fn maybe_err_weighted<T: Strategy, E: Strategy>(
   ok_strategy: T,
   err_strategy: E,
 ) -> MaybeErr<T, E> {
-  let prob = probability_of_err.into().into();
-  let (err_weight, ok_weight) = float_to_weight(prob);
-
-  MaybeErr(TupleUnion::new((
-    (ok_weight, Rc::new(statics::Map::new(ok_strategy, WrapOk(PhantomData, PhantomData)))),
-    (
-      err_weight,
-      Rc::new(statics::Map::new(err_strategy, WrapErr(PhantomData, PhantomData))),
-    ),
-  )))
+  MaybeErr(binary_union(
+    probability_of_err.into().into(),
+    statics::Map::new(ok_strategy, WrapOk(PhantomData, PhantomData)),
+    statics::Map::new(err_strategy, WrapErr(PhantomData, PhantomData)),
+  ))
 }
 
 #[cfg(test)]
 mod test {
-  use core::ops::Range;
-
   use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_that;
 
   use super::*;
   use crate::std_facade::Vec;
   use crate::strategy::Just;
+  use crate::strategy::sample_count_in_range;
   use crate::test_runner::Reason;
   use crate::test_runner::test_runner_without_persistence;
 
@@ -294,16 +282,6 @@ mod test {
     (0..1000).map(|_| strategy.new_tree(&mut runner)).collect()
   }
 
-  fn has_ok_count<V: ValueTree<Value = Result<(), ()>>>(samples: &[Result<V, Reason>], expected: Range<usize>) -> bool {
-    samples.iter().all(Result::is_ok)
-      && expected.contains(
-        &samples
-          .iter()
-          .filter(|sample| sample.as_ref().is_ok_and(|tree| tree.current().is_ok()))
-          .count(),
-      )
-  }
-
   #[test]
   fn probability_defaults_to_0p5() -> Result<(), PredicateFailure<(ErrSamples, OkSamples)>> {
     ensure_that(
@@ -312,7 +290,10 @@ mod test {
         sample_results(maybe_ok(Just(()), Just(()))),
       ),
       "both Result strategies default to a balanced split",
-      |subjects| has_ok_count(&subjects.0, 401..600) && has_ok_count(&subjects.1, 401..600),
+      |subjects| {
+        sample_count_in_range(&subjects.0, 401..600, |tree| tree.current().is_ok())
+          && sample_count_in_range(&subjects.1, 401..600, |tree| tree.current().is_ok())
+      },
     )
     .map(drop)
   }
@@ -336,12 +317,12 @@ mod test {
           .0
           .iter()
           .zip([801..950, 51..150])
-          .all(|(draws, bounds)| has_ok_count(draws, bounds))
+          .all(|(draws, bounds)| sample_count_in_range(draws, bounds, |tree| tree.current().is_ok()))
           && subjects
             .1
             .iter()
             .zip([801..950, 51..150])
-            .all(|(draws, bounds)| has_ok_count(draws, bounds))
+            .all(|(draws, bounds)| sample_count_in_range(draws, bounds, |tree| tree.current().is_ok()))
       },
     )
     .map(drop)

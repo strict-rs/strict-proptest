@@ -176,17 +176,9 @@ macro_rules! __proptest_internal {
        fn $test_name:ident($($parm:pat in $strategy:expr),+ $(,)?) $body:block
     )*) => {
         $(
-            $(#[$meta])*
-            fn $test_name()
-                -> ::core::result::Result<
-                    (),
-                    $crate::std_facade::Box<dyn ::core::fmt::Debug>,
-                >
-            {
-                let mut config = $crate::test_runner::contextualize_config($config.clone());
-                config.test_name = ::core::option::Option::Some(
-                    ::core::concat!(::core::module_path!(), "::", ::core::stringify!($test_name)));
-                $crate::proptest_helper!(@_BODY config ($($parm in $strategy),+) [] $body)
+            $crate::proptest_helper! {
+                @_TEST ($config) [$(#[$meta])*] $test_name
+                _BODY ($($parm in $strategy),+) $body
             }
         )*
     };
@@ -196,17 +188,9 @@ macro_rules! __proptest_internal {
         fn $test_name:ident($($arg:tt)+) $body:block
     )*) => {
         $(
-            $(#[$meta])*
-            fn $test_name()
-                -> ::core::result::Result<
-                    (),
-                    $crate::std_facade::Box<dyn ::core::fmt::Debug>,
-                >
-            {
-                let mut config = $crate::test_runner::contextualize_config($config.clone());
-                config.test_name = ::core::option::Option::Some(
-                    ::core::concat!(::core::module_path!(), "::", ::core::stringify!($test_name)));
-                $crate::proptest_helper!(@_BODY2 config ($($arg)+) [] $body)
+            $crate::proptest_helper! {
+                @_TEST ($config) [$(#[$meta])*] $test_name
+                _BODY2 ($($arg)+) $body
             }
         )*
     };
@@ -366,118 +350,7 @@ macro_rules! prop_oneof {
 
     ($_weight0:expr => $item0:expr $(,)?) => { $item0 };
 
-    ($weight0:expr => $item0:expr,
-     $weight1:expr => $item1:expr $(,)?) => {{
-        $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Rc::new($item0)),
-             ($weight1, $crate::std_facade::Rc::new($item1))))
-    }};
-
-    ($weight0:expr => $item0:expr,
-     $weight1:expr => $item1:expr,
-     $weight2:expr => $item2:expr $(,)?) => {{
-        $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Rc::new($item0)),
-             ($weight1, $crate::std_facade::Rc::new($item1)),
-             ($weight2, $crate::std_facade::Rc::new($item2))))
-    }};
-
-    ($weight0:expr => $item0:expr,
-     $weight1:expr => $item1:expr,
-     $weight2:expr => $item2:expr,
-     $weight3:expr => $item3:expr $(,)?) => {{
-        $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Rc::new($item0)),
-             ($weight1, $crate::std_facade::Rc::new($item1)),
-             ($weight2, $crate::std_facade::Rc::new($item2)),
-             ($weight3, $crate::std_facade::Rc::new($item3))))
-    }};
-
-    ($weight0:expr => $item0:expr,
-     $weight1:expr => $item1:expr,
-     $weight2:expr => $item2:expr,
-     $weight3:expr => $item3:expr,
-     $weight4:expr => $item4:expr $(,)?) => {{
-        $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Rc::new($item0)),
-             ($weight1, $crate::std_facade::Rc::new($item1)),
-             ($weight2, $crate::std_facade::Rc::new($item2)),
-             ($weight3, $crate::std_facade::Rc::new($item3)),
-             ($weight4, $crate::std_facade::Rc::new($item4))))
-    }};
-
-    ($weight0:expr => $item0:expr,
-     $weight1:expr => $item1:expr,
-     $weight2:expr => $item2:expr,
-     $weight3:expr => $item3:expr,
-     $weight4:expr => $item4:expr,
-     $weight5:expr => $item5:expr $(,)?) => {{
-        $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Rc::new($item0)),
-             ($weight1, $crate::std_facade::Rc::new($item1)),
-             ($weight2, $crate::std_facade::Rc::new($item2)),
-             ($weight3, $crate::std_facade::Rc::new($item3)),
-             ($weight4, $crate::std_facade::Rc::new($item4)),
-             ($weight5, $crate::std_facade::Rc::new($item5))))
-    }};
-
-    ($weight0:expr => $item0:expr,
-     $weight1:expr => $item1:expr,
-     $weight2:expr => $item2:expr,
-     $weight3:expr => $item3:expr,
-     $weight4:expr => $item4:expr,
-     $weight5:expr => $item5:expr,
-     $weight6:expr => $item6:expr $(,)?) => {{
-        $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Rc::new($item0)),
-             ($weight1, $crate::std_facade::Rc::new($item1)),
-             ($weight2, $crate::std_facade::Rc::new($item2)),
-             ($weight3, $crate::std_facade::Rc::new($item3)),
-             ($weight4, $crate::std_facade::Rc::new($item4)),
-             ($weight5, $crate::std_facade::Rc::new($item5)),
-             ($weight6, $crate::std_facade::Rc::new($item6))))
-    }};
-
-    ($weight0:expr => $item0:expr,
-     $weight1:expr => $item1:expr,
-     $weight2:expr => $item2:expr,
-     $weight3:expr => $item3:expr,
-     $weight4:expr => $item4:expr,
-     $weight5:expr => $item5:expr,
-     $weight6:expr => $item6:expr,
-     $weight7:expr => $item7:expr $(,)?) => {{
-        $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Rc::new($item0)),
-             ($weight1, $crate::std_facade::Rc::new($item1)),
-             ($weight2, $crate::std_facade::Rc::new($item2)),
-             ($weight3, $crate::std_facade::Rc::new($item3)),
-             ($weight4, $crate::std_facade::Rc::new($item4)),
-             ($weight5, $crate::std_facade::Rc::new($item5)),
-             ($weight6, $crate::std_facade::Rc::new($item6)),
-             ($weight7, $crate::std_facade::Rc::new($item7))))
-    }};
-
-    ($weight0:expr => $item0:expr,
-     $weight1:expr => $item1:expr,
-     $weight2:expr => $item2:expr,
-     $weight3:expr => $item3:expr,
-     $weight4:expr => $item4:expr,
-     $weight5:expr => $item5:expr,
-     $weight6:expr => $item6:expr,
-     $weight7:expr => $item7:expr,
-     $weight8:expr => $item8:expr $(,)?) => {{
-        $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Rc::new($item0)),
-             ($weight1, $crate::std_facade::Rc::new($item1)),
-             ($weight2, $crate::std_facade::Rc::new($item2)),
-             ($weight3, $crate::std_facade::Rc::new($item3)),
-             ($weight4, $crate::std_facade::Rc::new($item4)),
-             ($weight5, $crate::std_facade::Rc::new($item5)),
-             ($weight6, $crate::std_facade::Rc::new($item6)),
-             ($weight7, $crate::std_facade::Rc::new($item7)),
-             ($weight8, $crate::std_facade::Rc::new($item8))))
-    }};
-
+    // Eleven or more alternatives retain the dynamic union representation.
     ($weight0:expr => $item0:expr,
      $weight1:expr => $item1:expr,
      $weight2:expr => $item2:expr,
@@ -487,24 +360,28 @@ macro_rules! prop_oneof {
      $weight6:expr => $item6:expr,
      $weight7:expr => $item7:expr,
      $weight8:expr => $item8:expr,
-     $weight9:expr => $item9:expr $(,)?) => {{
-        $crate::strategy::TupleUnion::new(
-            (($weight0, $crate::std_facade::Rc::new($item0)),
-             ($weight1, $crate::std_facade::Rc::new($item1)),
-             ($weight2, $crate::std_facade::Rc::new($item2)),
-             ($weight3, $crate::std_facade::Rc::new($item3)),
-             ($weight4, $crate::std_facade::Rc::new($item4)),
-             ($weight5, $crate::std_facade::Rc::new($item5)),
-             ($weight6, $crate::std_facade::Rc::new($item6)),
-             ($weight7, $crate::std_facade::Rc::new($item7)),
-             ($weight8, $crate::std_facade::Rc::new($item8)),
-             ($weight9, $crate::std_facade::Rc::new($item9))))
-    }};
+     $weight9:expr => $item9:expr,
+     $($weight:expr => $item:expr),+ $(,)?) => {
+        $crate::prop_oneof!(@_DYNAMIC
+            $weight0 => $item0, $weight1 => $item1,
+            $weight2 => $item2, $weight3 => $item3,
+            $weight4 => $item4, $weight5 => $item5,
+            $weight6 => $item6, $weight7 => $item7,
+            $weight8 => $item8, $weight9 => $item9,
+            $($weight => $item),+)
+    };
 
-    ($($weight:expr => $item:expr),+ $(,)?) => {
+    (@_DYNAMIC $($weight:expr => $item:expr),+) => {
         $crate::strategy::Union::new_weighted($crate::std_facade::vec![
             $(($weight, $crate::strategy::Strategy::boxed($item))),+
         ])
+    };
+
+    // The single-alternative and dynamic arms above leave two through ten.
+    ($($weight:expr => $item:expr),+ $(,)?) => {
+        $crate::strategy::TupleUnion::new((
+            $(($weight, $crate::std_facade::Rc::new($item)),)+
+        ))
     };
 }
 
@@ -650,79 +527,10 @@ macro_rules! prop_compose {
 
     ($(#[$meta:meta])*
      $vis:vis
-     fn $name:ident $params:tt
-     ($($var:pat in $strategy:expr),+ $(,)?)
-       -> $return_type:ty $body:block) =>
+     fn $name:ident $params:tt $($tail:tt)+) =>
     {
-        #[must_use = "strategies do nothing unless used"]
-        $(#[$meta])*
-        $vis
-        fn $name $params
-                 -> impl $crate::strategy::Strategy<Value = $return_type> {
-            let strat = $crate::proptest_helper!(@_WRAP ($($strategy)+));
-            $crate::strategy::Strategy::prop_map(strat,
-                move |$crate::proptest_helper!(@_WRAPPAT ($($var),+))| $body)
-        }
-    };
-
-    ($(#[$meta:meta])*
-     $vis:vis
-     fn $name:ident $params:tt
-     ($($var:pat in $strategy:expr),+ $(,)?)
-     ($($var2:pat in $strategy2:expr),+ $(,)?)
-       -> $return_type:ty $body:block) =>
-    {
-        #[must_use = "strategies do nothing unless used"]
-        $(#[$meta])*
-        $vis
-        fn $name $params
-                 -> impl $crate::strategy::Strategy<Value = $return_type> {
-            let strat = $crate::proptest_helper!(@_WRAP ($($strategy)+));
-            let strat = $crate::strategy::Strategy::prop_flat_map(
-                strat,
-                move |$crate::proptest_helper!(@_WRAPPAT ($($var),+))|
-                $crate::proptest_helper!(@_WRAP ($($strategy2)+)));
-            $crate::strategy::Strategy::prop_map(strat,
-                move |$crate::proptest_helper!(@_WRAPPAT ($($var2),+))| $body)
-        }
-    };
-
-    ($(#[$meta:meta])*
-     $vis:vis
-     fn $name:ident $params:tt
-     ($($arg:tt)+)
-       -> $return_type:ty $body:block) =>
-    {
-        #[must_use = "strategies do nothing unless used"]
-        $(#[$meta])*
-        $vis
-        fn $name $params
-                 -> impl $crate::strategy::Strategy<Value = $return_type> {
-            let strat = $crate::proptest_helper!(@_EXT _STRAT ($($arg)+));
-            $crate::strategy::Strategy::prop_map(strat,
-                move |$crate::proptest_helper!(@_EXT _PAT ($($arg)+))| $body)
-        }
-    };
-
-    ($(#[$meta:meta])*
-     $vis:vis
-     fn $name:ident $params:tt
-     ($($arg:tt)+)
-     ($($arg2:tt)+)
-       -> $return_type:ty $body:block) =>
-    {
-        #[must_use = "strategies do nothing unless used"]
-        $(#[$meta])*
-        $vis
-        fn $name $params
-                 -> impl $crate::strategy::Strategy<Value = $return_type> {
-            let strat = $crate::proptest_helper!(@_EXT _STRAT ($($arg)+));
-            let strat = $crate::strategy::Strategy::prop_flat_map(
-                strat,
-                move |$crate::proptest_helper!(@_EXT _PAT ($($arg)+))|
-                $crate::proptest_helper!(@_EXT _STRAT ($($arg2)+)));
-            $crate::strategy::Strategy::prop_map(strat,
-                move |$crate::proptest_helper!(@_EXT _PAT ($($arg2)+))| $body)
+        $crate::proptest_helper! {
+            @_COMPOSE [] [$(#[$meta])*] $vis fn $name $params $($tail)+
         }
     };
 }
@@ -769,119 +577,23 @@ macro_rules! prop_compose {
 macro_rules! prop_compose_ffi {
     ($(#[$meta:meta])*
      $vis:vis fn $name:ident $params:tt
-     ($($var:pat in $strategy:expr),+ $(,)?)
+     $(($($arg:tt)+))+
      with extern "C" fn $mapper:ident(
          $($mapper_arg:ident : $mapper_ty:ty),* $(,)?
      ) -> $return_type:ty $mapper_body:block
      call $mapper_call:expr;) =>
     {
-        #[must_use = "strategies do nothing unless used"]
-        $(#[$meta])*
-        $vis fn $name $params
-                 -> impl $crate::strategy::Strategy<Value = $return_type> {
-            #[allow(
-                clippy::single_call_fn,
-                reason = "prop_compose_ffi preserves the user-named C-ABI mapper as a local function item"
-            )]
-            extern "C" fn $mapper(
-                $($mapper_arg : $mapper_ty),*
-            ) -> $return_type $mapper_body
-
-            let strat = $crate::proptest_helper!(@_WRAP ($($strategy)+));
-            $crate::strategy::Strategy::prop_map(strat,
-                move |$crate::proptest_helper!(@_WRAPPAT ($($var),+))|
-                    $mapper_call)
-        }
-    };
-
-    ($(#[$meta:meta])*
-     $vis:vis fn $name:ident $params:tt
-     ($($var:pat in $strategy:expr),+ $(,)?)
-     ($($var2:pat in $strategy2:expr),+ $(,)?)
-     with extern "C" fn $mapper:ident(
-         $($mapper_arg:ident : $mapper_ty:ty),* $(,)?
-     ) -> $return_type:ty $mapper_body:block
-     call $mapper_call:expr;) =>
-    {
-        #[must_use = "strategies do nothing unless used"]
-        $(#[$meta])*
-        $vis fn $name $params
-                 -> impl $crate::strategy::Strategy<Value = $return_type> {
-            #[allow(
-                clippy::single_call_fn,
-                reason = "prop_compose_ffi preserves the user-named C-ABI mapper as a local function item"
-            )]
-            extern "C" fn $mapper(
-                $($mapper_arg : $mapper_ty),*
-            ) -> $return_type $mapper_body
-
-            let strat = $crate::proptest_helper!(@_WRAP ($($strategy)+));
-            let strat = $crate::strategy::Strategy::prop_flat_map(
-                strat,
-                move |$crate::proptest_helper!(@_WRAPPAT ($($var),+))|
-                $crate::proptest_helper!(@_WRAP ($($strategy2)+)));
-            $crate::strategy::Strategy::prop_map(strat,
-                move |$crate::proptest_helper!(@_WRAPPAT ($($var2),+))|
-                    $mapper_call)
-        }
-    };
-
-    ($(#[$meta:meta])*
-     $vis:vis fn $name:ident $params:tt
-     ($($arg:tt)+)
-     with extern "C" fn $mapper:ident(
-         $($mapper_arg:ident : $mapper_ty:ty),* $(,)?
-     ) -> $return_type:ty $mapper_body:block
-     call $mapper_call:expr;) =>
-    {
-        #[must_use = "strategies do nothing unless used"]
-        $(#[$meta])*
-        $vis fn $name $params
-                 -> impl $crate::strategy::Strategy<Value = $return_type> {
-            #[allow(
-                clippy::single_call_fn,
-                reason = "prop_compose_ffi preserves the user-named C-ABI mapper as a local function item"
-            )]
-            extern "C" fn $mapper(
-                $($mapper_arg : $mapper_ty),*
-            ) -> $return_type $mapper_body
-
-            let strat = $crate::proptest_helper!(@_EXT _STRAT ($($arg)+));
-            $crate::strategy::Strategy::prop_map(strat,
-                move |$crate::proptest_helper!(@_EXT _PAT ($($arg)+))|
-                    $mapper_call)
-        }
-    };
-
-    ($(#[$meta:meta])*
-     $vis:vis fn $name:ident $params:tt
-     ($($arg:tt)+)
-     ($($arg2:tt)+)
-     with extern "C" fn $mapper:ident(
-         $($mapper_arg:ident : $mapper_ty:ty),* $(,)?
-     ) -> $return_type:ty $mapper_body:block
-     call $mapper_call:expr;) =>
-    {
-        #[must_use = "strategies do nothing unless used"]
-        $(#[$meta])*
-        $vis fn $name $params
-                 -> impl $crate::strategy::Strategy<Value = $return_type> {
-            #[allow(
-                clippy::single_call_fn,
-                reason = "prop_compose_ffi preserves the user-named C-ABI mapper as a local function item"
-            )]
-            extern "C" fn $mapper(
-                $($mapper_arg : $mapper_ty),*
-            ) -> $return_type $mapper_body
-
-            let strat = $crate::proptest_helper!(@_EXT _STRAT ($($arg)+));
-            let strat = $crate::strategy::Strategy::prop_flat_map(
-                strat,
-                move |$crate::proptest_helper!(@_EXT _PAT ($($arg)+))|
-                $crate::proptest_helper!(@_EXT _STRAT ($($arg2)+)));
-            $crate::strategy::Strategy::prop_map(strat,
-                move |$crate::proptest_helper!(@_EXT _PAT ($($arg2)+))|
-                    $mapper_call)
+        $crate::proptest_helper! {
+            @_COMPOSE [
+                #[allow(
+                    clippy::single_call_fn,
+                    reason = "prop_compose_ffi preserves the user-named C-ABI mapper as a local function item"
+                )]
+                extern "C" fn $mapper(
+                    $($mapper_arg : $mapper_ty),*
+                ) -> $return_type $mapper_body
+            ] [$(#[$meta])*] $vis fn $name $params
+            $(($($arg)+))+ -> $return_type { $mapper_call }
         }
     };
 }
@@ -1051,6 +763,74 @@ macro_rules! prop_assert_ne {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! proptest_helper {
+    (@_COMPOSE $items:tt $attrs:tt $vis:vis fn $name:ident $params:tt
+     ($($var:pat in $strategy:expr),+ $(,)?)
+     -> $return_type:ty $body:block) => {
+        $crate::proptest_helper! {
+            @_COMPOSE_FN $items $attrs $vis fn $name $params -> $return_type
+            [$crate::proptest_helper!(@_WRAP ($($strategy)+))]
+            [$crate::proptest_helper!(@_WRAPPAT ($($var),+))] $body
+        }
+    };
+    (@_COMPOSE $items:tt $attrs:tt $vis:vis fn $name:ident $params:tt
+     ($($var:pat in $strategy:expr),+ $(,)?)
+     ($($var2:pat in $strategy2:expr),+ $(,)?)
+     -> $return_type:ty $body:block) => {
+        $crate::proptest_helper! {
+            @_COMPOSE_FN $items $attrs $vis fn $name $params -> $return_type
+            [$crate::strategy::Strategy::prop_flat_map(
+                $crate::proptest_helper!(@_WRAP ($($strategy)+)),
+                move |$crate::proptest_helper!(@_WRAPPAT ($($var),+))|
+                    $crate::proptest_helper!(@_WRAP ($($strategy2)+)))]
+            [$crate::proptest_helper!(@_WRAPPAT ($($var2),+))] $body
+        }
+    };
+    (@_COMPOSE $items:tt $attrs:tt $vis:vis fn $name:ident $params:tt
+     ($($arg:tt)+) -> $return_type:ty $body:block) => {
+        $crate::proptest_helper! {
+            @_COMPOSE_FN $items $attrs $vis fn $name $params -> $return_type
+            [$crate::proptest_helper!(@_EXT _STRAT ($($arg)+))]
+            [$crate::proptest_helper!(@_EXT _PAT ($($arg)+))] $body
+        }
+    };
+    (@_COMPOSE $items:tt $attrs:tt $vis:vis fn $name:ident $params:tt
+     ($($arg:tt)+) ($($arg2:tt)+) -> $return_type:ty $body:block) => {
+        $crate::proptest_helper! {
+            @_COMPOSE_FN $items $attrs $vis fn $name $params -> $return_type
+            [$crate::strategy::Strategy::prop_flat_map(
+                $crate::proptest_helper!(@_EXT _STRAT ($($arg)+)),
+                move |$crate::proptest_helper!(@_EXT _PAT ($($arg)+))|
+                    $crate::proptest_helper!(@_EXT _STRAT ($($arg2)+)))]
+            [$crate::proptest_helper!(@_EXT _PAT ($($arg2)+))] $body
+        }
+    };
+    (@_COMPOSE_FN [$($item:item)*] [$(#[$meta:meta])*]
+     $vis:vis fn $name:ident $params:tt -> $return_type:ty
+     [$strategy:expr] [$pattern:pat] $body:block) => {
+        #[must_use = "strategies do nothing unless used"]
+        $(#[$meta])*
+        $vis fn $name $params
+            -> impl $crate::strategy::Strategy<Value = $return_type> {
+            $($item)*
+            let strat = $strategy;
+            $crate::strategy::Strategy::prop_map(strat, move |$pattern| $body)
+        }
+    };
+    (@_TEST ($config:expr) [$(#[$meta:meta])*] $test_name:ident
+     $body_kind:ident ($($args:tt)+) $body:block) => {
+        $(#[$meta])*
+        fn $test_name()
+            -> ::core::result::Result<
+                (),
+                $crate::std_facade::Box<dyn ::core::fmt::Debug>,
+            >
+        {
+            let mut config = $crate::test_runner::contextualize_config($config.clone());
+            config.test_name = ::core::option::Option::Some(
+                ::core::concat!(::core::module_path!(), "::", ::core::stringify!($test_name)));
+            $crate::proptest_helper!(@$body_kind config ($($args)+) [] $body)
+        }
+    };
     (@_WRAP ($a:tt)) => { $a };
     (@_WRAP ($a0:tt $a1:tt)) => { ($a0, $a1) };
     (@_WRAP ($a0:tt $a1:tt $a2:tt)) => { ($a0, $a1, $a2) };
@@ -1151,38 +931,34 @@ macro_rules! proptest_helper {
     (@_WRAPSTR ($a:pat, $($rest:pat),*)) => {
         (::core::stringify!($a), $crate::proptest_helper!(@_WRAPSTR ($($rest),*)))
     };
-    // build a property testing block that when executed, executes the full property test.
-    (@_BODY $config:ident ($($parm:pat in $strategy:expr),+) [$($mod:tt)*] $body:expr) => {{
-        $config.source_file = Some(file!());
+    // Preserve each argument grammar's tuple shape before shared execution.
+    (@_BODY $config:ident ($($parm:pat in $strategy:expr),+) [$($mod:tt)*] $body:expr) => {
+        $crate::proptest_helper!(@_BODY_WITH $config
+            [file!()]
+            [$crate::proptest_helper!(@_WRAP ($($strategy)+))]
+            [$crate::proptest_helper!(@_WRAPSTR ($($parm),+))]
+            [$crate::proptest_helper!(@_WRAPPAT ($($parm),+))]
+            [$($mod)*] $body)
+    };
+    (@_BODY2 $config:ident ($($arg:tt)+) [$($mod:tt)*] $body:expr) => {
+        $crate::proptest_helper!(@_BODY_WITH $config
+            [::core::file!()]
+            [$crate::proptest_helper!(@_EXT _STRAT ($($arg)+))]
+            [$crate::proptest_helper!(@_EXT _STR ($($arg)+))]
+            [$crate::proptest_helper!(@_EXT _PAT ($($arg)+))]
+            [$($mod)*] $body)
+    };
+    // Build one runner block after the argument grammar has been selected.
+    (@_BODY_WITH $config:ident [$source:expr] [$strategy:expr]
+     [$names:expr] [$pattern:pat] [$($mod:tt)*] $body:expr) => {{
+        $config.source_file = Some($source);
         let mut runner = $crate::test_runner::TestRunner::new($config);
-        let names = $crate::proptest_helper!(@_WRAPSTR ($($parm),+));
+        let names = $names;
         runner.run(
             &$crate::strategy::Strategy::prop_map(
-                $crate::proptest_helper!(@_WRAP ($($strategy)+)),
+                $strategy,
                 |values| $crate::sugar::NamedArguments(names, values)),
-            $($mod)* |$crate::sugar::NamedArguments(
-                _, $crate::proptest_helper!(@_WRAPPAT ($($parm),+)))|
-            {
-                let (): () = $body;
-                ::core::result::Result::Ok(())
-            })
-            .map_err(|error| {
-                let boxed: $crate::std_facade::Box<dyn ::core::fmt::Debug> =
-                    $crate::std_facade::Box::new(error);
-                boxed
-            })
-    }};
-    // build a property testing block that when executed, executes the full property test.
-    (@_BODY2 $config:ident ($($arg:tt)+) [$($mod:tt)*] $body:expr) => {{
-        $config.source_file = Some(::core::file!());
-        let mut runner = $crate::test_runner::TestRunner::new($config);
-        let names = $crate::proptest_helper!(@_EXT _STR ($($arg)+));
-        runner.run(
-            &$crate::strategy::Strategy::prop_map(
-                $crate::proptest_helper!(@_EXT _STRAT ($($arg)+)),
-                |values| $crate::sugar::NamedArguments(names, values)),
-            $($mod)* |$crate::sugar::NamedArguments(
-                _, $crate::proptest_helper!(@_EXT _PAT ($($arg)+)))|
+            $($mod)* |$crate::sugar::NamedArguments(_, $pattern)|
             {
                 let (): () = $body;
                 ::core::result::Result::Ok(())
@@ -1324,19 +1100,7 @@ macro_rules! named_arguments_tuple {
             $(for<'a> NamedArguments<$argn, &'a $argv>: fmt::Debug,)*
         {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                fmt::Debug::fmt(
-                    &NamedArguments(
-                        (self.0).$first_ix,
-                        &(self.1).$first_ix,
-                    ),
-                    f,
-                )?;
-                $(
-                    write!(f, ", ")?;
-                    fmt::Debug::fmt(
-                        &NamedArguments((self.0).$ix, &(self.1).$ix), f)?;
-                )*
-                Ok(())
+                fmt::Debug::fmt(&NamedArguments(self.0, &self.1), f)
             }
         }
     }
@@ -1418,11 +1182,14 @@ mod test {
   use strict_test_support::ensure_that;
 
   use crate::std_facade::Box;
+  use crate::std_facade::Cell;
   use crate::std_facade::String;
   /// Assertions retain complete generation evidence in a concrete allocation.
   type Check<S> = Result<(), Box<PredicateFailure<S>>>;
   /// All documented argument renderings, paired with their expected text.
   type ArgumentFormats = ComparisonFailure<[String; 12], [&'static str; 12]>;
+  /// Owned and nested argument renderings use the same labeled format.
+  type OwnedArgumentFormats = ComparisonFailure<[String; 2], [&'static str; 2]>;
   use crate::std_facade::Vec;
   use crate::strategy::Just;
   use crate::strategy::Strategy;
@@ -1436,6 +1203,8 @@ mod test {
 
   /// Every generated arm, including any native generation failure.
   type ArmSamples = (usize, Vec<Result<i32, Reason>>);
+  /// Weight-expression evaluations and the generated single-arm value.
+  type SingleArmDraw = (Cell<u32>, Result<i32, Reason>);
 
   /// Draw all samples before checking the requested arm coverage.
   fn sample_oneof(n: usize, strategy: impl Strategy<Value = i32>) -> ArmSamples {
@@ -1741,6 +1510,38 @@ mod test {
         "a = 1, b = 2, c = 3, d = 4",
       ],
       "named arguments retain their documented debug format at every tuple arity",
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn owned_named_arguments_keep_tuple_labels() -> Result<(), Box<OwnedArgumentFormats>> {
+    use super::NamedArguments;
+
+    ensure_eq(
+      [
+        std::format!("{:?}", NamedArguments(("name", "count"), (String::from("sample"), 3))),
+        std::format!("{:?}", NamedArguments((("left", "right"), "last"), ((1, 2), 3))),
+      ],
+      ["name = \"sample\", count = 3", "left = 1, right = 2, last = 3"],
+      "owned and nested tuples retain every label and value in order",
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn oneof_single_arm_does_not_evaluate_its_weight() -> Check<SingleArmDraw> {
+    let evaluations = Cell::new(0_u32);
+    let strategy = prop_oneof![{
+      evaluations.set(evaluations.get().saturating_add(1));
+      0
+    } => Just(13)];
+    ensure_that(
+      (evaluations, draw(strategy)),
+      "a single alternative is returned directly without evaluating its weight",
+      |observed| observed.0.get() == 0 && observed.1.as_ref().is_ok_and(|value| *value == 13),
     )
     .map(drop)
     .map_err(Box::new)

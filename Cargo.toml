@@ -59,14 +59,13 @@ template-stask = { version = "0.3.0", git = "https://github.com/earthlings-dev/t
 trybuild = { version = "1", git = "https://github.com/strict-rs/strict-trybuild.git", branch = "strict" }
 syn = { version = "3", features = ["full", "visit"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
-thiserror = { version = "2", git = "https://github.com/strict-rs/strict-thiserror.git", branch = "upgrade" }
+thiserror = { version = "2", git = "https://github.com/strict-rs/strict-thiserror.git", branch = "strict" }
 serde_json = "1"
 
 [patch.crates-io]
-bpaf = {  version = "0.10", git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync" }
 proptest = { path = "proptest", version = "2" }
 trybuild = {  version = "1", git = "https://github.com/strict-rs/strict-trybuild.git", branch = "strict" }
-thiserror = {  version = "2.1.0", git = "https://github.com/strict-rs/strict-thiserror.git", branch = "upgrade" }
+thiserror = {  version = "2.1.0", git = "https://github.com/strict-rs/strict-thiserror.git", branch = "strict" }
 
 [patch."https://github.com/strict-rs/strict-proptest.git"]
 proptest = { path = "proptest" }
@@ -84,8 +83,8 @@ proptest-state-machine = { path = "proptest-state-machine" }
 # strict-trybuild (comment out if unused, do not remove)
 
 # strict-bpaf (comment out if unused, do not remove)
-# bpaf_derive = { git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10.0" }
-# bpaf_cauwugo = { git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10.0" }
+# bpaf_derive = { git = "https://github.com/strict-rs/strict-bpaf.git", branch = "async", version = "0.10.0" }
+# bpaf_cauwugo = { git = "https://github.com/strict-rs/strict-bpaf.git", branch = "async", version = "0.10.0" }
 
 # strict-tracing (comment out if unused, do not remove)
 # tracing-appender = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.2.5" }
