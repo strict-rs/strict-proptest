@@ -108,21 +108,28 @@ mod internal {
   mod test {
     use std::cell::Cell;
 
-    use strict_test_support::TestFailure;
-    use strict_test_support::ensure;
+    use strict_test_support::ComparisonFailure;
+    use strict_test_support::ensure_eq;
 
     use super::SUPPRESSED;
     use super::suppress_panic_hook;
 
+    /// Complete same-type comparison at a terminal test boundary.
+    type Comparison<T> = Result<(), ComparisonFailure<T, T>>;
+
     #[test]
-    fn returns_body_value_and_clears_suppression() -> Result<(), TestFailure> {
+    fn returns_body_value_and_clears_suppression() -> Comparison<(u8, bool)> {
       let produced = suppress_panic_hook(|| 7_u8);
-      ensure(produced == 7, "the body's return value passes through")?;
-      ensure(!SUPPRESSED.get(), "suppression is cleared once the scope ends")
+      ensure_eq(
+        (produced, SUPPRESSED.get()),
+        (7, false),
+        "the body value passes through and suppression is cleared",
+      )
+      .map(drop)
     }
 
     #[test]
-    fn nested_scopes_restore_the_outer_flag() -> Result<(), TestFailure> {
+    fn nested_scopes_restore_the_outer_flag() -> Comparison<[bool; 3]> {
       let active_inside = Cell::new(false);
       let active_after_inner = Cell::new(false);
       suppress_panic_hook(|| {
@@ -130,9 +137,12 @@ mod internal {
         suppress_panic_hook(|| ());
         active_after_inner.set(SUPPRESSED.get());
       });
-      ensure(active_inside.get(), "suppression is active while the scope runs")?;
-      ensure(active_after_inner.get(), "an inner scope restores the outer scope's suppression")?;
-      ensure(!SUPPRESSED.get(), "suppression is cleared once the outer scope ends")
+      ensure_eq(
+        [active_inside.get(), active_after_inner.get(), SUPPRESSED.get()],
+        [true, true, false],
+        "nested scopes restore their caller's suppression state",
+      )
+      .map(drop)
     }
   }
 }

@@ -154,15 +154,20 @@ impl<T: ValueTree> ValueTree for Fuse<T> {
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure_all;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
+  use crate::std_facade::Box;
+
+  /// Guarded tree and every attempted transition with its resulting value.
+  type GuardedWalk = (Fuse<StrictValueTree>, [(bool, u32); 11]);
   use crate::test_runner::Reason;
 
   // NOTE: this fixture reports no progress when the guard contract is
   // violated. `Fuse` exists to suppress the calls that would hit those
   // paths, so the surrounding sanity check remains the detection mechanism.
+  #[derive(Debug)]
   struct StrictValueTree {
     min:   u32,
     curr:  u32,
@@ -227,25 +232,42 @@ mod test {
   }
 
   #[test]
-  fn guards_bad_transitions() -> Result<(), TestFailure> {
-    let mut vt = Fuse::new(StrictValueTree::new(5));
-    ensure_all(&[
-      (!vt.complicate(), "complicate before simplify is guarded"),
-      (5 == vt.current(), "the initial value is untouched"),
-      (vt.simplify(), "simplify steps down"), // 0, 4, 5
-      (vt.simplify(), "simplify steps down"), // 0, 3, 4
-      (vt.simplify(), "simplify steps down"), // 0, 2, 3
-      (vt.simplify(), "simplify steps down"), // 0, 1, 2
-      (vt.simplify(), "simplify steps down"), // 0, 0, 1
-      (0 == vt.current(), "simplification reached zero"),
-      (!vt.simplify(), "an exhausted tree cannot simplify"),        // 1, 0, 1
-      (!vt.simplify(), "repeated simplify after false is guarded"), // 1, 0, 1
-      (0 == vt.current(), "the value is unchanged after guards"),
-      (vt.complicate(), "the tree complicates once"), // 1, 1, 1
-      (1 == vt.current(), "complicate stepped back up"),
-      (!vt.complicate(), "an exhausted tree cannot complicate"),        // 1, 1, 0
-      (!vt.complicate(), "repeated complicate after false is guarded"), // 1, 1, 0
-      (1 == vt.current(), "the value is unchanged after guards"),
-    ])
+  fn guards_bad_transitions() -> Result<(), Box<PredicateFailure<GuardedWalk>>> {
+    let mut tree = Fuse::new(StrictValueTree::new(5));
+    let steps = [
+      (tree.complicate(), tree.current()),
+      (tree.simplify(), tree.current()),
+      (tree.simplify(), tree.current()),
+      (tree.simplify(), tree.current()),
+      (tree.simplify(), tree.current()),
+      (tree.simplify(), tree.current()),
+      (tree.simplify(), tree.current()),
+      (tree.simplify(), tree.current()),
+      (tree.complicate(), tree.current()),
+      (tree.complicate(), tree.current()),
+      (tree.complicate(), tree.current()),
+    ];
+    ensure_that(
+      (tree, steps),
+      "Fuse guards premature and exhausted transitions while preserving valid shrinking",
+      |observed| {
+        observed.1
+          == [
+            (false, 5),
+            (true, 4),
+            (true, 3),
+            (true, 2),
+            (true, 1),
+            (true, 0),
+            (false, 0),
+            (false, 0),
+            (true, 1),
+            (false, 1),
+            (false, 1),
+          ]
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

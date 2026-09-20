@@ -4,15 +4,20 @@
 
 - The minimum supported Rust version has been increased to 1.96.0.
 - Removed the `Arbitrary` implementations for `std::sync::Mutex`, `std::sync::RwLock`, `std::sync::Condvar`, and `std::sync::WaitTimeoutResult` (and the `ArbitraryF1` lifts for the two locks). The poisoning-prone std locks conflict with the strict lint policy, and `WaitTimeoutResult` cannot be produced without them; compile-fail coverage pins the removals.
-- `#[property_test]` (re-exported under the `attr-macro` feature) now generates strict tests: the wrapper returns `proptest::strict::TestResult`, runs through `proptest::strict::ensure_property`, and rejects `()` property bodies at compile time. See the `proptest-macro` changelog for the full codegen contract.
-- Renamed the additive `no_std` Cargo feature to `libm`. A no-`std` build is still selected with `default-features = false`; `libm` only enables `num-traits`'s `libm` math support without `std`.
+- `#[property_test]` (re-exported under `attr-macro`) preserves `Result<A, E>` bodies and result aliases, returns a native `PropertyResult` with a concrete argument tuple, and rejects unit-returning bodies. The macro supports explicit typed fork transport; see the `proptest-macro` changelog.
+- Renamed the additive `no_std` Cargo feature to `libm`. A no-`std` build is still selected with `default-features = false`; `libm` enables allocation and `num-traits`'s `libm` math support without `std`.
+- Optional dependencies are activated through their owning public features. Select `attr-macro`, `std`, or `fork` instead of the implicit dependency features `proptest-macro`, `regex-syntax`, `rusty-fork`, or `tempfile`.
 - Renamed the public weighted-union type alias `W<T>` to `Weighted<T>` (re-exported as `proptest::strategy::Weighted`) and replaced the tuple-union sharing alias `WA<T>` with `WeightedStrategy<T> = (u32, Rc<T>)`. Direct `TupleUnion` users must update explicit tuple-entry types from `WA`/`Arc` to `WeightedStrategy`/`Rc`.
 - Removed the deprecated `FailurePersistence::load_persisted_failures` and `FailurePersistence::save_persisted_failure` compatibility bridge for legacy 16-byte XorShift seeds. Backends now implement the current `PersistedSeed` methods directly.
 - Removed the deprecated `RngCore` re-export from `proptest::prelude`; users should import rand 0.10's `Rng` trait instead.
 - Removed bracketed function modifiers from `prop_compose!`; C-ABI mapper functions now belong behind `prop_compose_ffi!`.
 
+- `ResultCache` stores `EvaluationId` values instead of cloning property results. Custom caches must implement the new `put` and `get` signatures; typed subjects and failures require no `Clone` bound.
+
 ### Bug Fixes
 
+- Standalone features include their build prerequisites: `attr-macro` enables `strict-test`; `libm` enables `alloc`; `alt-stable` enables `libm`; and `atomic64bit`, `bit-set`, `hardware-rng`, and `f16` enable `alloc`. `unstable` inherits allocation through `f16`. Native `f16` and `unstable` APIs continue to require nightly unless `alt-stable` selects the stable substitutes.
+- Uninhabited `Option` and `Result` strategies share their `Infallible` implementations across feature configurations, covering `string::ParseError` and current-nightly `!` without conflicting trait implementations or an obsolete `never_type` gate.
 - Stable `--all-features` builds no longer select nightly `#![feature(...)]`
   gates: exact impls for still-unstable standard-library and language APIs are
   compiled only with `unstable` when `alt-stable` is not enabled, while
@@ -32,6 +37,9 @@
 
 ### New Additions
 
+- Added native `TestRunner::run_typed` and `run_typed_with_transport`, sharing generation and shrinking with the legacy runner. Reports preserve successful subjects, intermediate failures, statistics, and the matched minimized input/failure through cache hits, rejected or passing shrink attempts, and exhausted budgets.
+- Added `PropertyTransport` and `strict::ensure_property_with_transport` for explicit typed fork replay. Versioned frames transport both successful and failing outcomes without parent callback execution; codec, protocol, I/O, crash, timeout, and finalization failures remain distinguishable. In-process execution has no serialization or thread-safety bounds. Typed calls without a codec reject fork or timeout configuration before evaluation.
+
 - Added the `alt-stable` feature for stable substitutes of still-nightly API
   surfaces: `allocator_api2::alloc::{Global, AllocError}`, `half::f16` through
   `proptest::num::half_f16`, and
@@ -41,7 +49,7 @@
   MSRV: `alloc::Layout`, `core::iter::StepBy`,
   `core::num::TryFromIntError`, `char` case-mapping iterator/error types,
   narrow atomic integer types, and `Rc`/`Arc` wrappers for `CStr` and `OsStr`.
-- Added the `proptest::strict` module behind the new default-on `strict-test` feature (requires `std`): `ensure_property` and `ensure_property_with_config` run a strategy against a closure returning `Result<(), TestFailure>` (`proptest::strict::TestResult`) and map runner outcomes onto `TestFailure::PropertyFalsified` / `TestFailure::PropertyAborted` instead of panicking, with `TestFailure` re-exported from `strict-test-support`. `strict_default_config()` starts from `Config::default()` (ordinary `PROPTEST_*` environment behavior preserved), disables failure persistence, and seeds deterministically from `STRICT_TEST_SEED`: unset or unparseable pins the fixed seed `0x5EED`, `random` opts into OS entropy, and an integer pins that exact seed.
+- Added the generic `proptest::strict` facade behind the default-on `strict-test` feature (`std` required). `ensure_property` and `ensure_property_with_config` retain native successful evidence, concrete failures, minimized cases, and ordered execution history through `PropertyResult`. `strict_default_config()` starts from `Config::default()`, disables persistence, and resolves `STRICT_TEST_SEED`: absent or invalid uses `0x5EED`, `random` selects OS entropy, and an integer selects that seed. Explicit configuration preserves the caller's persistence and seeding choices.
 - Added typed fallible constructors alongside the panicking legacy forms: `Union::try_new_uniform` / `Union::try_new_weighted` / `try_float_to_weight` (with `UnionBuildError`), the `collection::try_vec` family (with `EmptySizeRange` via `SizeRange::ensure_nonempty`), `sample::try_subsequence` / `sample::try_select` / `Index::try_index`, `SampledBitSetStrategy::try_new` (with `SampledBitsError`), `try_range_subset` (with `RangeSubsetError`), and the crate-internal `Seed::try_from_bytes` (with `SeedLengthError`).
 - The typed strategy-construction error types now implement `Copy`: `collection::EmptySizeRange`, `strategy::UnionBuildError`, `sample::EmptySelection`, `sample::SubsequenceError`, `bits::SampledBitsError`, and (feature `std`) `range_subset::RangeSubsetError`.
 - `string::RegexGeneratorValueTree` now implements `Debug`, rendering opaquely as `RegexGeneratorValueTree { .. }` (the wrapped value tree carries no `Debug` of its own).

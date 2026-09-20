@@ -9,11 +9,28 @@
 //! This module provides integration tests that test the expansion
 //! of the derive macro.
 
-use strict_test_support::TestFailure;
-use strict_test_support::ensure;
-use strict_test_support::ensure_contains;
+use strict_test_support::ComparisonFailure;
+use strict_test_support::PredicateFailure;
+use strict_test_support::ensure_eq;
+use strict_test_support::ensure_that;
 use syn::ItemEnum;
-use syn::parse_quote;
+
+/// Native parser, expansion, and diagnostic assertion failures.
+#[derive(Debug, thiserror::Error)]
+enum ExpansionFailure {
+  /// Invalid fixture or generated syntax.
+  #[error(transparent)]
+  Parse(#[from] syn::Error),
+  /// Complete generated and expected syntax trees.
+  #[error(transparent)]
+  Expansion(Box<ComparisonFailure<syn::File, syn::File>>),
+  /// Native variant payload counts.
+  #[error(transparent)]
+  Counts(#[from] ComparisonFailure<Vec<usize>, [usize; 5]>),
+  /// Complete compiler diagnostics for all unit-variant forms.
+  #[error(transparent)]
+  Diagnostics(#[from] PredicateFailure<Vec<String>>),
+}
 
 use crate::derive::impl_proptest_arbitrary;
 use crate::util::PayloadFields;
@@ -22,44 +39,18 @@ use crate::util::PayloadFields;
 // Macros:
 //==============================================================================
 
-// Borrowed from:
-// https://docs.rs/synstructure/0.7.0/src/synstructure/macros.rs.html#104-135,
-// reshaped so the comparison flows as `Result<(), TestFailure>` instead of
-// panicking.
-macro_rules! test_derive {
-    ($name:path { $($i:tt)* } expands to { $($o:tt)* }) => {
-        {
-            let expected = ::quote::quote!($($o)*);
-
-            let i = stringify!( $($i)* );
-            let parsed = ::strict_test_support::ensure_ok(
-                ::syn::parse_str::<::syn::DeriveInput>(i),
-                concat!("Failed to parse input to `#[derive(",
-                    stringify!($name),
-                ")]`"),
-            )?;
-            let res = $name(parsed);
-            ::strict_test_support::ensure_eq(
-                &format!("{}", res),
-                &format!("{}", expected),
-                "the derive expansion matches the pinned tokens",
-            )
-        }
-    };
-}
-
+/// Compare native parsed expansion trees, preserving both complete subjects.
 macro_rules! test {
-    ($test_name:ident { $($i:tt)* } expands to { $($o:tt)* }) => {
-        #[test]
-        fn $test_name(
-        ) -> ::core::result::Result<(), ::strict_test_support::TestFailure>
-        {
-            test_derive!(
-                $crate::derive::impl_proptest_arbitrary { $($i)* }
-                expands to { $($o)* }
-            )
-        }
-    };
+  ($test_name:ident { $($input:tt)* } expands to { $($expected:tt)* }) => {
+    #[test]
+    fn $test_name() -> Result<(), ExpansionFailure> {
+      let parsed = syn::parse2(quote::quote!($($input)*))?;
+      let actual: syn::File = syn::parse2(crate::derive::impl_proptest_arbitrary(parsed))?;
+      let expected: syn::File = syn::parse2(quote::quote!($($expected)*))?;
+      ensure_eq(actual, expected, "the derive expansion matches its complete syntax contract")
+        .map(drop).map_err(|failure| ExpansionFailure::Expansion(Box::new(failure)))
+    }
+  };
 }
 
 //==============================================================================
@@ -67,8 +58,8 @@ macro_rules! test {
 //==============================================================================
 
 #[test]
-fn unit_tuple_and_struct_zero_payload_variants_normalize_as_payloadless() -> Result<(), TestFailure> {
-  let item: ItemEnum = parse_quote! {
+fn unit_tuple_and_struct_zero_payload_variants_normalize_as_payloadless() -> Result<(), ExpansionFailure> {
+  let item: ItemEnum = syn::parse2(quote::quote! {
       enum ZeroPayloadVariants {
           Unit,
           Tuple(),
@@ -76,7 +67,7 @@ fn unit_tuple_and_struct_zero_payload_variants_normalize_as_payloadless() -> Res
           TuplePayload(u8),
           StructPayload { value: u8 },
       }
-  };
+  })?;
 
   let payload_counts: Vec<_> = item
     .variants
@@ -84,44 +75,39 @@ fn unit_tuple_and_struct_zero_payload_variants_normalize_as_payloadless() -> Res
     .map(|variant| PayloadFields::from(variant.fields).as_slice().len())
     .collect();
 
-  ensure(
-    payload_counts.as_slice() == [0, 0, 0, 1, 1],
+  ensure_eq(
+    payload_counts,
+    [0, 0, 0, 1, 1],
     "unit, empty tuple, and empty struct variants normalize to zero payload fields",
   )
+  .map(drop)
+  .map_err(ExpansionFailure::Counts)
 }
 
-fn ensure_e0029_unit_variant_diagnostic(input: &str, attribute_fragment: &str) -> Result<(), TestFailure> {
-  let parsed = strict_test_support::ensure_ok(
-    syn::parse_str::<syn::DeriveInput>(input),
-    "zero-payload variant diagnostic input parses as a derive input",
-  )?;
-  let output = format!("{}", impl_proptest_arbitrary(parsed));
-
-  ensure_contains(
-    &output,
-    "compile_error",
-    "the redundant unit-variant attribute emits compile_error tokens",
-  )?;
-  ensure_contains(
-    &output,
-    "[proptest_derive, E0029]",
-    "the redundant unit-variant attribute emits E0029",
-  )?;
-  ensure_contains(
-    &output,
-    attribute_fragment,
-    "the redundant unit-variant diagnostic names the attribute family",
-  )?;
-  ensure_contains(
-    &output,
-    "unit variant has no effect",
-    "the redundant unit-variant diagnostic describes the no-payload path",
+/// Retain the complete diagnostics of each redundant unit-variant attribute.
+fn ensure_unit_diagnostics(inputs: &[&str; 3], attribute: &str) -> Result<Vec<String>, ExpansionFailure> {
+  let diagnostics = inputs
+    .iter()
+    .map(|input| Ok(impl_proptest_arbitrary(syn::parse_str(input)?).to_string()))
+    .collect::<Result<Vec<_>, syn::Error>>()?;
+  ensure_that(
+    diagnostics,
+    "all zero-payload forms reject the redundant attribute with E0029",
+    |observed| {
+      observed.iter().all(|output| {
+        output.contains("compile_error")
+          && output.contains("[proptest_derive, E0029]")
+          && output.contains(attribute)
+          && output.contains("unit variant has no effect")
+      })
+    },
   )
+  .map_err(ExpansionFailure::Diagnostics)
 }
 
 #[test]
-fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_params() -> Result<(), TestFailure> {
-  for input in [
+fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_params() -> Result<(), ExpansionFailure> {
+  let inputs = [
     "
             #[derive(Debug)]
             enum UnitVariant {
@@ -143,16 +129,13 @@ fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_params() -> Resu
                 Struct {},
             }
         ",
-  ] {
-    ensure_e0029_unit_variant_diagnostic(input, "params")?;
-  }
-
-  Ok(())
+  ];
+  ensure_unit_diagnostics(&inputs, "params").map(drop)
 }
 
 #[test]
-fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_filter() -> Result<(), TestFailure> {
-  for input in [
+fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_filter() -> Result<(), ExpansionFailure> {
+  let inputs = [
     "
             #[derive(Debug)]
             enum UnitVariant {
@@ -174,16 +157,13 @@ fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_filter() -> Resu
                 Struct {},
             }
         ",
-  ] {
-    ensure_e0029_unit_variant_diagnostic(input, "filter")?;
-  }
-
-  Ok(())
+  ];
+  ensure_unit_diagnostics(&inputs, "filter").map(drop)
 }
 
 #[test]
-fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_strategy() -> Result<(), TestFailure> {
-  for input in [
+fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_strategy() -> Result<(), ExpansionFailure> {
+  let inputs = [
     r#"
             #[derive(Debug)]
             enum UnitVariant {
@@ -205,16 +185,13 @@ fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_strategy() -> Re
                 Struct {},
             }
         "#,
-  ] {
-    ensure_e0029_unit_variant_diagnostic(input, "strategy")?;
-  }
-
-  Ok(())
+  ];
+  ensure_unit_diagnostics(&inputs, "strategy").map(drop)
 }
 
 #[test]
-fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_value() -> Result<(), TestFailure> {
-  for input in [
+fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_value() -> Result<(), ExpansionFailure> {
+  let inputs = [
     r#"
             #[derive(Debug)]
             enum UnitVariant {
@@ -236,16 +213,13 @@ fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_value() -> Resul
                 Struct {},
             }
         "#,
-  ] {
-    ensure_e0029_unit_variant_diagnostic(input, "value")?;
-  }
-
-  Ok(())
+  ];
+  ensure_unit_diagnostics(&inputs, "value").map(drop)
 }
 
 #[test]
-fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_regex() -> Result<(), TestFailure> {
-  for input in [
+fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_regex() -> Result<(), ExpansionFailure> {
+  let inputs = [
     r#"
             #[derive(Debug)]
             enum UnitVariant {
@@ -267,11 +241,8 @@ fn unit_tuple_and_struct_zero_payload_variants_reject_redundant_regex() -> Resul
                 Struct {},
             }
         "#,
-  ] {
-    ensure_e0029_unit_variant_diagnostic(input, "regex")?;
-  }
-
-  Ok(())
+  ];
+  ensure_unit_diagnostics(&inputs, "regex").map(drop)
 }
 
 test! {

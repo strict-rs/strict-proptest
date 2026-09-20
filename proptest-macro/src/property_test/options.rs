@@ -1,157 +1,185 @@
 use proc_macro2::TokenStream;
 use quote::ToTokens;
 use quote::quote;
-use quote::quote_spanned;
 use syn::Expr;
-use syn::Ident;
-use syn::LitStr;
-use syn::MetaNameValue;
 use syn::Path;
-use syn::Token;
+use syn::Type;
 use syn::parse::Parse;
 use syn::parse::ParseStream;
-use syn::punctuated::Punctuated;
-use syn::spanned::Spanned as _;
+use syn::token::Comma;
+use syn::token::Eq as EqToken;
+use syn::token::FatArrow;
 
-/// Options parsed from the attribute itself (e.g. the config from `#[property_test(config = ...)]`)
+/// A declared transport type and the expression constructing its codec.
+#[cfg_attr(test, derive(Debug))]
+pub(super) struct Transport {
+  /// Concrete codec type used in the generated return signature.
+  pub ty:    Type,
+  /// Codec expression evaluated once when the wrapper runs.
+  pub value: Expr,
+}
+
+/// Options parsed from the property-test attribute.
 #[derive(Default)]
+#[cfg_attr(test, derive(Debug))]
 pub(super) struct Options {
-  /// Collect compiler errors and emit them later, since errors here are largely recoverable
+  /// Recoverable option diagnostics, emitted beside the generated item.
   pub errors:        Vec<TokenStream>,
-  /// The user's `config = <expr>`, if given. When present, codegen routes
-  /// through `ensure_property_with_config` with `test_name` / `source_file`
-  /// forced; when absent, the strict defaults apply.
+  /// Explicit runner configuration, retaining all caller-selected fields.
   pub config:        Option<Expr>,
-  /// The path to the `proptest` crate from `proptest_path = <path>`, for a
-  /// re-exported or renamed proptest. `None` means the default `::proptest`.
+  /// Renamed or re-exported proptest crate path.
   pub proptest_path: Option<Path>,
+  /// Explicit typed fork codec, written `transport = Type => expression`.
+  pub transport:     Option<Transport>,
 }
 
 impl Options {
-  /// Resolve the crate path codegen prefixes onto every emitted item: the
-  /// user's `proptest_path` if set, otherwise `::proptest`.
+  /// Resolve every emitted proptest reference through the selected crate path.
   pub(super) fn true_proptest_path(&self) -> TokenStream {
     self
       .proptest_path
       .as_ref()
-      .map_or_else(|| quote! { ::proptest }, ToTokens::to_token_stream)
+      .map_or_else(|| quote!(::proptest), ToTokens::to_token_stream)
   }
 }
 
-/// Validate a `proptest_path = <value>` attribute value: only a plain,
-/// qself-free path can name the proptest crate. Returns the path on success,
-/// or the spanned `compile_error!` statement to record as a recoverable
-/// diagnostic.
+/// Validate a qself-free path naming the proptest crate.
 #[allow(
   clippy::single_call_fn,
-  reason = "validate that a proptest_path value is a bare path to the proptest crate"
+  reason = "keep crate-path validation and its targeted diagnostic separate from option-list parsing"
 )]
-fn parse_proptest_path(attr_value: &Expr) -> Result<Path, TokenStream> {
-  let bad_path = || {
+fn parse_proptest_path(expression: &Expr) -> Result<Path, TokenStream> {
+  if let Expr::Path(ref path) = *expression
+    && path.qself.is_none()
+  {
+    return Ok(path.path.clone());
+  }
+  Err(
     syn::Error::new_spanned(
-      attr_value,
+      expression,
       "argument to `proptest_path` must be a path to the proptest crate, e.g. `proptest_path = ::path::to::proptest`",
     )
-    .to_compile_error()
-  };
-  let Expr::Path(ref path) = *attr_value else {
-    return Err(bad_path());
-  };
-  if path.qself.is_some() {
-    return Err(bad_path());
-  }
-  Ok(path.path.clone())
+    .to_compile_error(),
+  )
 }
 
 impl Parse for Options {
-  // note: this impl takes only the contents of the attr, not the attr itself
-  // e.g. it will get `foo = bar, baz = qux`, not `#[macro(foo = bar, baz = qux)]`
   fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-    let pairs = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
-
-    let mut errors = Vec::new();
-
-    let mut config = None;
-    let mut proptest_path = None;
-
-    for MetaNameValue {
-      path,
-      value: attr_value,
-      ..
-    } in pairs
-    {
-      let path_string = path.get_ident().map(Ident::to_string);
-
-      match path_string.as_deref() {
-        None => errors.push(quote_spanned!(path.span() => compile_error!("unknown argument");)),
-        Some("config") => config = Some(attr_value),
-        Some("proptest_path") => match parse_proptest_path(&attr_value) {
-          Ok(parsed_path) => proptest_path = Some(parsed_path),
-          Err(error) => errors.push(error),
-        },
-        Some(other) => {
-          let message_text = format!("unknown argument: {other}");
-          let message = LitStr::new(&message_text, other.span());
-          let error = quote_spanned!(other.span() => compile_error!(#message););
-          errors.push(error);
+    let mut options = Self::default();
+    while !input.is_empty() {
+      let path: Path = input.parse()?;
+      let EqToken {
+        ..
+      } = input.parse()?;
+      if path.is_ident("transport") {
+        let ty = input.parse()?;
+        let FatArrow {
+          ..
+        } = input.parse()?;
+        let constructor = input.parse()?;
+        options.transport = Some(Transport {
+          ty,
+          value: constructor,
+        });
+      } else if path.is_ident("config") {
+        options.config = Some(input.parse()?);
+      } else if path.is_ident("proptest_path") {
+        match parse_proptest_path(&input.parse()?) {
+          Ok(crate_path) => options.proptest_path = Some(crate_path),
+          Err(error) => options.errors.push(error),
         }
+      } else {
+        drop(input.parse::<Expr>()?);
+        let message = path
+          .get_ident()
+          .map_or_else(|| "unknown argument".to_owned(), |name| format!("unknown argument: {name}"));
+        options.errors.push(syn::Error::new_spanned(path, message).to_compile_error());
+      }
+      if !input.is_empty() {
+        let Comma {
+          ..
+        } = input.parse()?;
       }
     }
-
-    Ok(Self {
-      errors,
-      config,
-      proptest_path,
-    })
+    Ok(options)
   }
 }
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_ok;
-  use strict_test_support::ensure_some;
-  use syn::parse_str;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
 
+  /// Full parser outcome, including every recoverable diagnostic.
+  type Observation = Result<Options, syn::Error>;
+
   #[test]
-  fn simple_parse_example() -> Result<(), TestFailure> {
-    let Options {
-      errors,
-      config,
-      proptest_path,
-    } = ensure_ok(
-      parse_str("config = (), random = 123, proptest_path = ::foo::bar"),
-      "the attribute contents parse recoverably",
-    )?;
-
-    let parsed_proptest_path = ensure_some(proptest_path, "the proptest_path value is captured")?;
-
-    ensure(config.is_some(), "the config expression is captured")?;
-    ensure_eq(&errors.len(), &1_usize, "the unknown key records one deferred error")?;
-    ensure(parsed_proptest_path.leading_colon.is_some(), "the path keeps its leading colons")?;
-    let segments = parsed_proptest_path
-      .segments
-      .iter()
-      .map(|seg| seg.ident.to_string())
-      .collect::<Vec<_>>()
-      .join("::");
-    ensure_eq(&segments, &"foo::bar".to_owned(), "the path segments parse in order")
+  fn simple_parse_example() -> Result<(), Box<PredicateFailure<Observation>>> {
+    ensure_that(
+      syn::parse_str("config = (), random = 123, proptest_path = ::foo::bar"),
+      "options retain configuration, one recoverable error, and the complete crate path",
+      |result: &Observation| {
+        let Ok(ref options) = *result else {
+          return false;
+        };
+        options.config.is_some()
+          && options.errors.len() == 1
+          && options.proptest_path.as_ref().is_some_and(|path| {
+            path.leading_colon.is_some() && path.segments.iter().map(|segment| segment.ident.to_string()).eq(["foo", "bar"])
+          })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn invalid_proptest_path() -> Result<(), TestFailure> {
-    let options = ensure_ok(
-      parse_str::<Options>("proptest_path = actually::a::function()"),
-      "an invalid proptest_path value stays a recoverable parse",
-    )?;
-    ensure_eq(
-      &options.errors.len(),
-      &1_usize,
-      "the invalid value records one deferred compile_error",
+  fn invalid_proptest_path() -> Result<(), Box<PredicateFailure<Observation>>> {
+    ensure_that(
+      syn::parse_str("proptest_path = actually::a::function()"),
+      "an expression cannot silently become a crate path",
+      |result: &Observation| {
+        result
+          .as_ref()
+          .is_ok_and(|options| options.proptest_path.is_none() && options.errors.len() == 1)
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn transport_preserves_type_and_constructor() -> Result<(), Box<PredicateFailure<Observation>>> {
+    ensure_that(
+      syn::parse_str("transport = Codec<u32> => Codec::new(7), config = configured(),"),
+      "transport keeps its declared type and independently evaluated constructor",
+      |result: &Observation| {
+        let Ok(ref options) = *result else {
+          return false;
+        };
+        options.errors.is_empty()
+          && options.config.is_some()
+          && options.transport.as_ref().is_some_and(|transport| {
+            matches!(&transport.ty, Type::Path(path)
+            if path.path.segments.first().is_some_and(|segment| segment.ident == "Codec"))
+              && matches!(transport.value, Expr::Call(_))
+          })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn transport_requires_a_declared_type() -> Result<(), Box<PredicateFailure<Observation>>> {
+    ensure_that(
+      syn::parse_str("transport = Codec::new()"),
+      "transport without a type and constructor separator is rejected",
+      Result::is_err,
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

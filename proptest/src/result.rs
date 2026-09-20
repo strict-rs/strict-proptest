@@ -269,119 +269,122 @@ pub fn maybe_err_weighted<T: Strategy, E: Strategy>(
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_some;
+  use core::ops::Range;
+
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
+  use crate::std_facade::Vec;
   use crate::strategy::Just;
   use crate::test_runner::Reason;
   use crate::test_runner::test_runner_without_persistence;
 
-  fn count_ok_of_1000(strategy: impl Strategy<Value = Result<(), ()>>) -> Result<u32, TestFailure> {
+  /// Complete generated trees or their native generation failures.
+  type Samples<S> = Vec<NewTree<S>>;
+  /// Native samples from the strategy which shrinks toward Ok.
+  type ErrSamples = Samples<MaybeErr<Just<()>, Just<()>>>;
+  /// Native samples from the strategy which shrinks toward Err.
+  type OkSamples = Samples<MaybeOk<Just<()>, Just<()>>>;
+  /// Both weighted strategy directions, each retaining high and low frequency samples.
+  type WeightedSamples = ([ErrSamples; 2], [OkSamples; 2]);
+
+  fn sample_results<S: Strategy<Value = Result<(), ()>>>(strategy: S) -> Samples<S> {
     let mut runner = TestRunner::deterministic();
-    let mut count = 0_u32;
-    for _ in 0..1000 {
-      let generated = ensure_some(strategy.new_tree(&mut runner).ok(), "result strategy generates a value tree")?;
-      count = count.saturating_add(u32::from(generated.current().is_ok()));
-    }
-
-    Ok(count)
+    (0..1000).map(|_| strategy.new_tree(&mut runner)).collect()
   }
 
-  #[allow(
-    clippy::single_call_fn,
-    reason = "the result shrink test names the maybe_err direction toward Ok"
-  )]
-  fn ensure_maybe_err_case_shrinks_to_ok<V>(val: &mut V) -> Result<(), TestFailure>
-  where
-    V: ValueTree<Value = Result<(), ()>>,
-  {
-    if val.current().is_ok() {
-      ensure(!val.simplify(), "an Ok case cannot simplify")?;
-      return ensure(val.current().is_ok(), "the case stays Ok");
-    }
-
-    ensure(val.simplify(), "an Err case simplifies")?;
-    ensure(val.current().is_ok(), "maybe_err shrinks toward Ok")
-  }
-
-  #[allow(
-    clippy::single_call_fn,
-    reason = "the result shrink test names the maybe_ok direction toward Err"
-  )]
-  fn ensure_maybe_ok_case_shrinks_to_err<V>(val: &mut V) -> Result<(), TestFailure>
-  where
-    V: ValueTree<Value = Result<(), ()>>,
-  {
-    if val.current().is_err() {
-      ensure(!val.simplify(), "an Err case cannot simplify")?;
-      return ensure(val.current().is_err(), "the case stays Err");
-    }
-
-    ensure(val.simplify(), "an Ok case simplifies")?;
-    ensure(val.current().is_err(), "maybe_ok shrinks toward Err")
+  fn has_ok_count<V: ValueTree<Value = Result<(), ()>>>(samples: &[Result<V, Reason>], expected: Range<usize>) -> bool {
+    samples.iter().all(Result::is_ok)
+      && expected.contains(
+        &samples
+          .iter()
+          .filter(|sample| sample.as_ref().is_ok_and(|tree| tree.current().is_ok()))
+          .count(),
+      )
   }
 
   #[test]
-  fn probability_defaults_to_0p5() -> Result<(), TestFailure> {
-    let default_err_weight = count_ok_of_1000(maybe_err(Just(()), Just(())))?;
-    ensure(
-      default_err_weight > 400 && default_err_weight < 600,
-      "maybe_err defaults to a balanced split",
-    )?;
-    let default_ok_weight = count_ok_of_1000(maybe_ok(Just(()), Just(())))?;
-    ensure(
-      default_ok_weight > 400 && default_ok_weight < 600,
-      "maybe_ok defaults to a balanced split",
+  fn probability_defaults_to_0p5() -> Result<(), PredicateFailure<(ErrSamples, OkSamples)>> {
+    ensure_that(
+      (
+        sample_results(maybe_err(Just(()), Just(()))),
+        sample_results(maybe_ok(Just(()), Just(()))),
+      ),
+      "both Result strategies default to a balanced split",
+      |subjects| has_ok_count(&subjects.0, 401..600) && has_ok_count(&subjects.1, 401..600),
     )
+    .map(drop)
   }
 
   #[test]
-  fn probability_handled_correctly() -> Result<(), TestFailure> {
-    let mostly_ok_from_low_err = count_ok_of_1000(maybe_err_weighted(0.1, Just(()), Just(())))?;
-    ensure(
-      mostly_ok_from_low_err > 800 && mostly_ok_from_low_err < 950,
-      "a 0.1 err weight yields mostly Ok",
-    )?;
-
-    let mostly_err_from_high_err = count_ok_of_1000(maybe_err_weighted(0.9, Just(()), Just(())))?;
-    ensure(
-      mostly_err_from_high_err > 50 && mostly_err_from_high_err < 150,
-      "a 0.9 err weight yields mostly Err",
-    )?;
-
-    let mostly_ok_from_high_ok = count_ok_of_1000(maybe_ok_weighted(0.9, Just(()), Just(())))?;
-    ensure(
-      mostly_ok_from_high_ok > 800 && mostly_ok_from_high_ok < 950,
-      "a 0.9 ok weight yields mostly Ok",
-    )?;
-
-    let mostly_err_from_low_ok = count_ok_of_1000(maybe_ok_weighted(0.1, Just(()), Just(())))?;
-    ensure(
-      mostly_err_from_low_ok > 50 && mostly_err_from_low_ok < 150,
-      "a 0.1 ok weight yields mostly Err",
+  fn probability_handled_correctly() -> Result<(), PredicateFailure<WeightedSamples>> {
+    ensure_that(
+      (
+        [
+          sample_results(maybe_err_weighted(0.1, Just(()), Just(()))),
+          sample_results(maybe_err_weighted(0.9, Just(()), Just(()))),
+        ],
+        [
+          sample_results(maybe_ok_weighted(0.9, Just(()), Just(()))),
+          sample_results(maybe_ok_weighted(0.1, Just(()), Just(()))),
+        ],
+      ),
+      "both weighted Result strategies preserve the requested high and low Ok frequencies",
+      |subjects| {
+        subjects
+          .0
+          .iter()
+          .zip([801..950, 51..150])
+          .all(|(draws, bounds)| has_ok_count(draws, bounds))
+          && subjects
+            .1
+            .iter()
+            .zip([801..950, 51..150])
+            .all(|(draws, bounds)| has_ok_count(draws, bounds))
+      },
     )
+    .map(drop)
+  }
+
+  /// Reached tree, original case, simplify result, and resulting case.
+  type ShrinkStep<V> = (V, Result<(), ()>, bool, Result<(), ()>);
+  /// Both shrink directions retain every case and native generation error.
+  type ShrinkDirections = (
+    Vec<Result<ShrinkStep<MaybeErrValueTree<Just<()>, Just<()>>>, Reason>>,
+    Vec<Result<ShrinkStep<MaybeOkValueTree<Just<()>, Just<()>>>, Reason>>,
+  );
+
+  fn shrink_once<V: ValueTree<Value = Result<(), ()>>>(mut tree: V) -> ShrinkStep<V> {
+    let before = tree.current();
+    let simplified = tree.simplify();
+    let after = tree.current();
+    (tree, before, simplified, after)
   }
 
   #[test]
-  fn shrink_to_correct_case() -> Result<(), TestFailure> {
+  fn shrink_to_correct_case() -> Result<(), PredicateFailure<ShrinkDirections>> {
     let mut runner = test_runner_without_persistence();
-    {
-      let input = maybe_err(Just(()), Just(()));
-      for _ in 0..64 {
-        let mut val = ensure_some(input.new_tree(&mut runner).ok(), "maybe_err strategy generates a value tree")?;
-        ensure_maybe_err_case_shrinks_to_ok(&mut val)?;
-      }
-    }
-    {
-      let input = maybe_ok(Just(()), Just(()));
-      for _ in 0..64 {
-        let mut val = ensure_some(input.new_tree(&mut runner).ok(), "maybe_ok strategy generates a value tree")?;
-        ensure_maybe_ok_case_shrinks_to_err(&mut val)?;
-      }
-    }
-    Ok(())
+    let toward_ok = maybe_err(Just(()), Just(()));
+    let ok_steps = (0..64).map(|_| toward_ok.new_tree(&mut runner).map(shrink_once)).collect();
+    let toward_err = maybe_ok(Just(()), Just(()));
+    let err_steps = (0..64).map(|_| toward_err.new_tree(&mut runner).map(shrink_once)).collect();
+    ensure_that(
+      (ok_steps, err_steps),
+      "Result cases shrink only toward the designated variant",
+      |subjects: &ShrinkDirections| {
+        subjects.0.iter().all(|step| {
+          step
+            .as_ref()
+            .is_ok_and(|reached| reached.2 == reached.1.is_err() && reached.3.is_ok())
+        }) && subjects.1.iter().all(|step| {
+          step
+            .as_ref()
+            .is_ok_and(|reached| reached.2 == reached.1.is_ok() && reached.3.is_err())
+        })
+      },
+    )
+    .map(drop)
   }
 
   #[test]

@@ -1,0 +1,37 @@
+#[test]
+fn transported() -> ::renamed::test_runner::PropertyResult<
+    (u32,),
+    <NativeResult as ::renamed::test_runner::PropertyReturn>::Success,
+    <NativeResult as ::renamed::test_runner::PropertyReturn>::Failure,
+    <Codec as ::renamed::test_runner::PropertyTransport<
+        (u32,),
+        <NativeResult as ::renamed::test_runner::PropertyReturn>::Success,
+        <NativeResult as ::renamed::test_runner::PropertyReturn>::Failure,
+    >>::Error,
+> {
+    let strategy = (::renamed::prelude::any::<u32>(),);
+    let config = ::renamed::test_runner::Config {
+        test_name: Some(concat!(module_path!(), "::", stringify!(transported))),
+        source_file: Some(file!()),
+        ..configured()
+    };
+    let property = |input| {
+        let evaluate = |(x,): (u32,)| -> NativeResult { check(x) };
+        ::renamed::test_runner::PropertyReturn::into_result(evaluate(input))
+    };
+    let mut outcome = {
+        let transport: Codec = Codec::new();
+        ::renamed::strict::ensure_property_with_transport(
+            &strategy,
+            concat!(module_path!(), "::", stringify!(transported)),
+            config,
+            transport,
+            property,
+        )
+    };
+    match &mut outcome {
+        Ok(run) => run.argument_labels = &[stringify!(x)],
+        Err(failure) => failure.run.argument_labels = &[stringify!(x)],
+    }
+    outcome
+}

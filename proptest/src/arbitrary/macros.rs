@@ -119,11 +119,11 @@ macro_rules! no_panic_test {
     ($($name: ident => $self: ty),+ $(,)?) => {
         $(
             #[test]
-            fn $name() -> $crate::strict::TestResult {
+            fn $name() -> $crate::test_runner::PropertyResult<$self, $self, ::core::convert::Infallible> {
                 $crate::strict::ensure_property(
                     &$crate::arbitrary::any::<$self>(),
                     concat!(module_path!(), "::", stringify!($name)),
-                    |_| Ok(()),
+                    |value| Ok(value),
                 )
             }
         )+
@@ -135,14 +135,9 @@ macro_rules! no_panic_test {
   ($($name:ident => $self:ty),+ $(,)?) => {
       $(
           #[test]
-          fn $name() -> ::core::result::Result<(), ::strict_test_support::TestFailure> {
-              use $crate::strategy::Strategy as _;
-
+          fn $name() -> $crate::test_runner::PropertyResult<$self, $self, ::core::convert::Infallible> {
               let mut runner = $crate::test_runner::TestRunner::deterministic();
-              ::strict_test_support::ensure(
-                  $crate::arbitrary::any::<$self>().new_tree(&mut runner).is_ok(),
-                  concat!(module_path!(), "::", stringify!($name)),
-              )
+              runner.run_typed(&$crate::arbitrary::any::<$self>(), |value| Ok(value))
           }
       )+
   };

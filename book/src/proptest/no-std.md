@@ -12,29 +12,26 @@ version = "proptestVersion"
 # Opt out of the `std` feature
 default-features = false
 
-# alloc: Use the `alloc` crate directly. Proptest has a hard requirement on
-# memory allocation, so either this or `std` is needed.
-# libm: Use `num-traits`' libm-backed float math without enabling `std`.
-features = ["libm", "alloc"]
+# libm: Enable allocation and `num-traits`' libm-backed float math without `std`.
+features = ["libm"]
 ```
 
 Some APIs are not available in the no-`std` build. This includes functionality
 which necessarily needs `std` such as failure persistence and forking, as well
 as features depending on other crates which do not support no-`std` usage, such
-as regex support. Use `default-features = false` for a no-`std` build, add
-`alloc` when allocation-backed APIs are needed, and add `libm` when float math
-from `num-traits` is needed without `std`.
+as regex support. Use `default-features = false` for a no-`std` build. Proptest requires an allocator: `alloc` provides the base configuration, and `libm` includes `alloc` together with `num-traits`' float math. The `atomic64bit`, `bit-set`, `hardware-rng`, and `f16` features also enable `alloc`, so each can be selected on its own.
 
 Use `alt-stable` when you want stable substitutes for APIs that are still
 nightly-only in `std`/`core`/`alloc`, such as `half::f16` instead of primitive
 `f16` and `allocator_api2::alloc` types instead of the unstable allocator API:
 
 ```toml
-features = ["libm", "alloc", "alt-stable"]
+features = ["alt-stable"]
 ```
 
-Use `unstable` only on nightly when you want the exact nightly standard-library
-or language API implementations rather than stable substitutes.
+`alt-stable` includes `libm` and its allocation prerequisite. Use `f16` or `unstable` on nightly for native language and standard-library APIs; `unstable` includes `f16` and therefore allocation. Enabling `alt-stable` alongside either feature selects the stable substitutes.
+
+`attr-macro` enables `strict-test` and its `std` prerequisite because generated `#[property_test]` wrappers execute through the strict runner. It therefore selects a `std` build even with default features disabled.
 
 The `no_std` build may not have access to an entropy source (one exception are
 x86-64 machines that support rdrand, in this case the library can be compiled

@@ -3,9 +3,8 @@ name = "proptest-derive"
 version.workspace = true
 authors = ["Mazdak Farrokhzad <twingoow@gmail.com>", "Takumi Shimada <hello@takumi.earth>"]
 license.workspace = true
-readme = "README.md"
-edition.workspace = true
-rust-version.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
 repository.workspace = true
 documentation.workspace = true
 keywords = ["derive", "arbitrary", "proptest", "testing", "quickcheck"]
@@ -32,6 +31,7 @@ compiletest_rs = { workspace = true, features = ["tmp", "stable"] }
 # criterion is used for benchmarks.
 criterion = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 
 [dependencies]
 proptest-derive-internal = { workspace = true }

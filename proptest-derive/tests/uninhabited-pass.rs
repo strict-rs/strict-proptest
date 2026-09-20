@@ -19,13 +19,13 @@
 #[cfg(test)]
 mod tests {
   extern crate core as real_core;
-
   use proptest::prelude::Arbitrary;
   use proptest::prelude::any;
-  use proptest::strict::TestResult;
   use proptest::strict::ensure_property;
+  use proptest::test_runner::PropertyResult;
   use proptest_derive::Arbitrary;
-  use strict_test_support::ensure;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   mod core {
     pub(in crate::tests) mod convert {
@@ -53,9 +53,9 @@ mod tests {
   }
 
   #[test]
-  fn ty1_always_v1() -> TestResult {
+  fn ty1_always_v1() -> PropertyResult<Ty1, Ty1, PredicateFailure<Ty1>> {
     ensure_property(&any::<Ty1>(), "every uninhabited-array variant is dropped from generation", |v1| {
-      ensure(matches!(v1, Ty1::V1), "only the inhabited variant appears")
+      ensure_that(v1, "only the inhabited variant appears", |observed| matches!(*observed, Ty1::V1))
     })
   }
 
@@ -116,16 +116,15 @@ mod tests {
     }
   }
 
+  /// Both native projected payloads returned by the generated property.
+  type ProjectionRun = PropertyResult<(UsePrj0, UsePrj1), (u8, u8), core::convert::Infallible>;
+
   #[test]
-  fn associated_projection_fields_are_generated() -> TestResult {
+  fn associated_projection_fields_are_generated() -> ProjectionRun {
     ensure_property(
       &(any::<UsePrj0>(), any::<UsePrj1>()),
       "projection-hidden fields the derive cannot inspect still generate",
-      |(prj0, prj1)| {
-        let _: u8 = prj0.projection();
-        let _: u8 = prj1.projection();
-        Ok(())
-      },
+      |(prj0, prj1)| Ok((prj0.projection(), prj1.projection())),
     )
   }
 

@@ -21,8 +21,8 @@ mod tests {
 
   use proptest::prelude::Arbitrary;
   use proptest_derive::Arbitrary;
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
+  use strict_test_support::ComparisonFailure;
+  use strict_test_support::ensure_eq;
 
   #[derive(Debug)]
   struct NotArbitrary;
@@ -41,15 +41,18 @@ mod tests {
     }
   }
 
+  /// Both non-phantom fields participate in the round-trip comparison.
+  type Fields = (i32, i32);
+
   #[test]
-  fn foo_fields_are_available_without_u_arbitrary_bound() -> Result<(), TestFailure> {
+  fn foo_fields_are_available_without_u_arbitrary_bound() -> Result<(), ComparisonFailure<Fields, Fields>> {
     let foo = Foo {
       first:   1,
       second:  2,
       phantom: PhantomData::<NotArbitrary>,
     };
 
-    ensure(foo.into_parts() == (1, 2), "the non-phantom fields round-trip without a bound on U")
+    ensure_eq(foo.into_parts(), (1, 2), "the non-phantom fields round-trip without a bound on U").map(drop)
   }
 
   #[test]

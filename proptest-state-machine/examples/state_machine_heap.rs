@@ -10,16 +10,19 @@
 //! In this example, we demonstrate using the state machine testing approach
 //! for a heap implementation that has a bug in it. The heap `MyHeap` is in the
 //! `system_under_test` module inlined at the bottom of this file.
+//! Pass `--correct` to run the same property against the corrected pop.
+
+use std::env;
 
 use proptest::prelude::*;
-use proptest::strict::TestFailure;
-use proptest::strict::TestResult;
 use proptest::test_runner::Config;
 use proptest_state_machine::ReferenceStateMachine;
+use proptest_state_machine::StateMachinePropertyResult;
 use proptest_state_machine::StateMachineTest;
 use proptest_state_machine::prop_state_machine;
 use proptest_state_machine::strict_state_machine_config;
-use strict_test_support::ensure;
+use strict_test_support::PredicateFailure;
+use strict_test_support::ensure_that;
 use system_under_test::MyHeap;
 
 // Setup the state machine test using the `prop_state_machine!` macro
@@ -48,11 +51,7 @@ prop_state_machine! {
     );
 }
 
-fn main() -> TestResult {
-  ensure(
-    !PopImplementation::OPTIONS.is_empty(),
-    "the heap example exposes at least one pop implementation",
-  )?;
+fn main() -> StateMachinePropertyResult<MyHeap<i32>> {
   // The generated test fn returns the strict verdict; returning it from
   // `main` reports a falsified property through the process exit status
   // instead of a panic.
@@ -73,9 +72,31 @@ impl PopImplementation {
   const BUGGY_DEFAULT: Self = Self::Wrong;
   /// The corrected implementation that makes the state machine pass.
   const CORRECT: Self = Self::Correct;
-  /// All supported pop implementations, keeping the teaching alternatives
-  /// visible in the example binary.
-  const OPTIONS: [Self; 2] = [Self::BUGGY_DEFAULT, Self::CORRECT];
+}
+
+/// Concrete heap observations retained by a failed transition or invariant.
+type PopObservation = (MyHeap<i32>, bool, Option<i32>);
+
+/// A removed value must agree with prior emptiness and bound every remaining item.
+#[allow(
+  clippy::single_call_fn,
+  reason = "the max-heap pop contract is independent of transition execution and implementation selection"
+)]
+fn pop_preserves_maximum(observed: &PopObservation) -> bool {
+  observed.2.map_or(observed.1, |removed| {
+    !observed.1 && observed.0.iter().all(|in_heap| removed >= *in_heap)
+  })
+}
+
+/// Concrete heap observations retained by a failed transition or invariant.
+#[derive(Debug, thiserror::Error)]
+pub enum HeapFailure {
+  /// A pop returned an inconsistent absence or a value below a remaining item.
+  #[error(transparent)]
+  Pop(#[from] PredicateFailure<PopObservation>),
+  /// The heap's length and emptiness observations disagree.
+  #[error(transparent)]
+  Invariant(#[from] PredicateFailure<(usize, bool)>),
 }
 
 /// An empty type used for the `ReferenceStateMachine` implementation. The
@@ -127,6 +148,9 @@ impl ReferenceStateMachine for HeapStateMachine {
 impl StateMachineTest for MyHeap<i32> {
   type SystemUnderTest = Self;
   type Reference = HeapStateMachine;
+  type Failure = HeapFailure;
+  type TransitionEvidence = (Vec<i32>, Option<(bool, Option<i32>)>);
+  type InvariantEvidence = (usize, bool);
 
   fn init_test(_ref_state: &<Self::Reference as ReferenceStateMachine>::State) -> Self::SystemUnderTest {
     Self::new()
@@ -136,58 +160,48 @@ impl StateMachineTest for MyHeap<i32> {
     mut state: Self::SystemUnderTest,
     _ref_state: &<Self::Reference as ReferenceStateMachine>::State,
     transition: Transition,
-  ) -> Result<Self::SystemUnderTest, TestFailure> {
-    match transition {
+  ) -> Result<(Self::SystemUnderTest, Self::TransitionEvidence), Self::Failure> {
+    let pop = match transition {
       Transition::Pop => {
         // We read the state before applying the transition.
         let was_empty = state.is_empty();
 
-        // We use the broken implementation of pop, which should be
-        // discovered by the test.
-        let result = state.pop_using(PopImplementation::BUGGY_DEFAULT);
+        // The default demonstrates the bug; `--correct` exercises the repair.
+        let implementation = if env::args_os().any(|argument| argument == "--correct") {
+          PopImplementation::CORRECT
+        } else {
+          PopImplementation::BUGGY_DEFAULT
+        };
+        let result = state.pop_using(implementation);
 
-        // NOTE: To fix the issue that gets found by the state machine,
-        // switch the implementation from `BUGGY_DEFAULT` to
-        // `CORRECT`.
-
-        // Check a post-condition.
-        match result {
-          Some(popped) => {
-            ensure(!was_empty, "a popped value implies the heap was non-empty")?;
-            ensure_popped_value_is_heap_max(popped, &state)?;
-          }
-          None => ensure(was_empty, "an empty pop implies the heap was empty")?,
-        }
+        // A failed post-condition owns the reached heap and both observations.
+        let (checked, initially_empty, popped) = ensure_that(
+          (state, was_empty, result),
+          "a pop agrees with prior emptiness and returns at least every remaining value",
+          pop_preserves_maximum,
+        )?;
+        state = checked;
+        Some((initially_empty, popped))
       }
-      Transition::Push(element) => state.push(element),
-    }
-    Ok(state)
+      Transition::Push(element) => {
+        state.push(element);
+        None
+      }
+    };
+    let remaining = state.iter().copied().collect();
+    Ok((state, (remaining, pop)))
   }
 
-  fn check_invariants(state: &Self::SystemUnderTest, _ref_state: &<Self::Reference as ReferenceStateMachine>::State) -> TestResult {
+  fn check_invariants(
+    state: &Self::SystemUnderTest,
+    _ref_state: &<Self::Reference as ReferenceStateMachine>::State,
+  ) -> Result<Self::InvariantEvidence, Self::Failure> {
     // Check that the heap's API gives consistent results
-    match state.len() {
-      0 => ensure(state.is_empty(), "a zero-length heap reports is_empty"),
-      _ => ensure(!state.is_empty(), "a non-zero-length heap does not report is_empty"),
-    }
+    ensure_that((state.len(), state.is_empty()), "heap length and emptiness agree", |observed| {
+      (observed.0 == 0) == observed.1
+    })
+    .map_err(HeapFailure::Invariant)
   }
-}
-
-#[allow(
-  clippy::single_call_fn,
-  reason = "the heap example names the pop post-condition checked after every generated Pop transition"
-)]
-/// Verify that the popped value is still at least every value left in the heap.
-fn ensure_popped_value_is_heap_max(popped: i32, state: &MyHeap<i32>) -> Result<(), TestFailure> {
-  // The heap must not contain any value which was greater than the
-  // "maximum" we were just given.
-  for in_heap in state.iter() {
-    ensure(
-      popped >= *in_heap,
-      "the popped value is greater than or equal to every value still in the heap",
-    )?;
-  }
-  Ok(())
 }
 
 /// A hand-rolled implementation of a binary heap, like
@@ -365,20 +379,29 @@ pub mod system_under_test {
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
+  use proptest_state_machine::SequentialResult;
+  use proptest_state_machine::SequentialStage;
+  use proptest_state_machine::StateMachineTest as _;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
+  use super::HeapFailure;
+  use super::PopImplementation;
+  use super::Transition;
+  use super::strict_state_machine_config;
   use super::system_under_test::MyHeap;
 
   #[test]
-  fn corrected_pop_returns_descending_maxima() -> Result<(), TestFailure> {
+  fn corrected_pop_returns_descending_maxima() -> Result<(), PredicateFailure<(MyHeap<i32>, [Option<i32>; 2], MyHeap<i32>, Vec<i32>)>> {
     let mut heap = MyHeap::new();
     for value in [3, 1, 9, 4, 7, 2] {
       heap.push(value);
     }
 
-    ensure(heap.pop() == Some(9), "first corrected pop returns the maximum")?;
-    ensure(heap.pop() == Some(7), "second corrected pop restores heap order before returning")?;
+    let first = [
+      heap.pop_using(PopImplementation::CORRECT),
+      heap.pop_using(PopImplementation::CORRECT),
+    ];
 
     let mut unordered = MyHeap::new();
     for value in [5, 8, 6, 10, 1, 4] {
@@ -388,9 +411,54 @@ mod tests {
     while let Some(value) = unordered.pop() {
       observed.push(value);
     }
-    ensure(
-      observed.as_slice() == [10, 8, 6, 5, 4, 1],
-      "corrected pop drains unordered pushes in descending order",
+    ensure_that(
+      (heap, first, unordered, observed),
+      "corrected pop restores order and drains descending maxima",
+      |(_, first, emptied, observed)| *first == [Some(9), Some(7)] && emptied.is_empty() && observed.as_slice() == [10, 8, 6, 5, 4, 1],
     )
+    .map(drop)
+  }
+
+  #[test]
+  fn planted_pop_bug_retains_heap_and_completed_transition_evidence() -> Result<(), Box<PredicateFailure<SequentialResult<MyHeap<i32>>>>> {
+    let result = MyHeap::test_sequential(
+      strict_state_machine_config(),
+      Vec::new(),
+      vec![
+        Transition::Push(3),
+        Transition::Push(2),
+        Transition::Push(1),
+        Transition::Pop,
+        Transition::Pop,
+        Transition::Push(4),
+      ],
+      None,
+    );
+    ensure_that(
+      result,
+      "the second buggy pop fails with its remaining heap and unattempted tail",
+      |result| {
+        result.as_ref().is_err_and(|failure| {
+          failure.stage == SequentialStage::Application
+            && failure.evidence.initial_invariant == Some((0, true))
+            && failure.evidence.transitions.len() == 5
+            && failure
+              .evidence
+              .transitions
+              .last()
+              .is_some_and(|step| step.application.is_none() && step.invariant.is_none())
+            && failure.remaining.len() == 1
+            && failure
+              .remaining
+              .as_slice()
+              .first()
+              .is_some_and(|transition| matches!(*transition, Transition::Push(4)))
+            && matches!(failure.failure, HeapFailure::Pop(ref popped) if !popped.subject.1
+            && popped.subject.2 == Some(1) && popped.subject.0.iter().copied().collect::<Vec<_>>() == [2])
+        })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

@@ -16,11 +16,11 @@ Scope: `proptest-derive/` — the procedural-macro crate (`[lib] proc-macro = tr
 - Feature `boxed_union` (off by default, pulls in no extra deps) — emit heap-allocated, type-erased `BoxedStrategy` unions instead of the static nested `TupleUnion` structs in derived enum code, trading an allocation for not building deep nested tuple types (which can stack-overflow on exceptionally large structures). This crate only forwards the flag (`boxed_union = ["proptest-derive-internal/boxed_union"]`); the codegen `cfg` and its specifics live in `proptest-derive-internal`.
 - Compile-time deps: `proptest-derive-internal` (the pipeline) and `proc-macro2` (the token-conversion boundary). `syn`/`quote` are dependencies of the internal crate, not of this one.
 - Dev-deps: `proptest`, `compiletest_rs`, `criterion`, `serde_json`, and `strict-test-support`. `proptest` is dev-only — as a proc-macro crate this emits code that names `proptest` in the *downstream* crate rather than linking it itself, so it isn't a normal dependency, but the integration tests and bench need it. `criterion` is the bench harness; `serde_json` is used by the compile-fail harness to read Cargo fingerprint JSON; `strict-test-support` provides the `ensure*` vocabulary the tests return through.
-- `compiletest_rs` is pulled with `features = ["tmp", "stable"]` rather than its defaults: the stable compile-fail suite runs on stable Rust, while literal-`!` fixtures live in nightly-only directories selected by the harness. Compiletest-rs's *default* features fail to compile (upstream laumann/compiletest-rs#166) while its `stable` fallback compiles fine. See the comment in `Cargo.toml`.
+- `compiletest_rs` is pulled with `features = ["tmp", "stable"]` rather than its defaults: the stable compile-fail suite runs on stable Rust, while literal-`!` fixtures live in nightly-only directories selected by the harness. The current nightly compiler accepts literal `!` without a feature attribute; keeping these fixtures separate preserves the workspace's stable compiler floor. Compiletest-rs's *default* features fail to compile (upstream laumann/compiletest-rs#166) while its `stable` fallback compiles fine. See the comment in `Cargo.toml`.
 
 ## Testing
 
-The ordinary integration tests and stable compile-fail UI cases run on stable Rust. Literal-`!` fixtures use `#![feature(never_type)]` and are selected by the compiletest harness only when `${RUSTC:-rustc} --version` reports nightly. Run the derive suite on nightly for full literal-`!` coverage and run it both ways, since `boxed_union` changes the generated code:
+The ordinary integration tests and stable compile-fail UI cases run on stable Rust. Literal-`!` fixtures are selected by the compiletest harness only when `${RUSTC:-rustc} --version` reports nightly. Run the derive suite on nightly for full literal-`!` coverage and run it both ways, since `boxed_union` changes the generated code:
 
 ```sh
 cargo +nightly test -p proptest-derive
@@ -33,7 +33,7 @@ The full feature matrix, formatting, and other workspace-wide commands live in t
 
 ## Gotcha
 
-This crate is **sensitive to stale build artifacts** — the `compile-fail/` harness picks freshly-built `proptest`/`proptest_derive` artifacts by Cargo fingerprint, and stale copies can be matched by mistake (mechanics in `tests/AGENTS.md`). If the suite fails in ways that make no sense, `cargo clean` and retry.
+The `compile-fail/` harness selects the exact `proptest`/`proptest_derive` dependency fingerprints recorded by its running binary, together with compiler, configuration, and feature checks (mechanics in `tests/AGENTS.md`). Inspect a native artifact-selection failure before changing build state; choosing a recent artifact without matching the active dependency identity can produce unrelated compiler diagnostics.
 
 ## Changelog & conventions
 

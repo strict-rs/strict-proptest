@@ -68,6 +68,10 @@ impl Ipv6MulticastScope {
   /// Classify the multicast scope of an IPv6 address.
   #[cfg(feature = "std")]
   #[must_use]
+  #[allow(
+    clippy::single_call_fn,
+    reason = "the address-level API checks the multicast prefix before decoding its scope nibble"
+  )]
   pub const fn from_ipv6_addr(addr: Ipv6Addr) -> Option<Self> {
     let octets = addr.octets();
     if octets[0] != 0xff {
@@ -82,13 +86,22 @@ mod test {
   #[cfg(feature = "std")]
   use std::net::Ipv6Addr;
 
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
+
+  use crate::std_facade::Vec;
+
+  /// Input nibble, observed classification, and expected classification.
+  type ScopeObservation = (u8, Option<Ipv6MulticastScope>, Option<Ipv6MulticastScope>);
 
   use super::Ipv6MulticastScope;
 
+  /// Native address classifications at the multicast-prefix boundary.
+  #[cfg(feature = "std")]
+  type AddressScopes = [(Ipv6Addr, Option<Ipv6MulticastScope>); 2];
+
   #[test]
-  fn scope_nibble_accepts_only_named_scopes() -> Result<(), TestFailure> {
+  fn scope_nibble_accepts_only_named_scopes() -> Result<(), PredicateFailure<Vec<ScopeObservation>>> {
     let accepted = [
       (1, Ipv6MulticastScope::InterfaceLocal),
       (2, Ipv6MulticastScope::LinkLocal),
@@ -99,32 +112,30 @@ mod test {
       (0xE, Ipv6MulticastScope::Global),
     ];
 
-    for (scope, expected) in accepted {
-      ensure(
-        Ipv6MulticastScope::from_scope_nibble(scope) == Some(expected),
-        "a named scope nibble maps to its stable enum variant",
-      )?;
-    }
-
-    for scope in [0, 6, 7, 9, 0xA, 0xB, 0xC, 0xD, 0xF] {
-      ensure(
-        Ipv6MulticastScope::from_scope_nibble(scope).is_none(),
-        "an unnamed scope nibble is rejected",
-      )?;
-    }
-    Ok(())
+    let observations = accepted
+      .into_iter()
+      .map(|(scope, expected)| (scope, Some(expected)))
+      .chain([0, 6, 7, 9, 0xA, 0xB, 0xC, 0xD, 0xF].into_iter().map(|scope| (scope, None)))
+      .map(|(scope, expected)| (scope, Ipv6MulticastScope::from_scope_nibble(scope), expected))
+      .collect();
+    ensure_that(
+      observations,
+      "named scope nibbles classify and unnamed nibbles are rejected",
+      |subjects: &Vec<ScopeObservation>| subjects.iter().all(|observed| observed.1 == observed.2),
+    )
+    .map(drop)
   }
 
   #[cfg(feature = "std")]
   #[test]
-  fn ipv6_addr_scope_requires_multicast_prefix() -> Result<(), TestFailure> {
-    ensure(
-      Ipv6MulticastScope::from_ipv6_addr(Ipv6Addr::new(0xff0e, 0, 0, 0, 0, 0, 0, 1)) == Some(Ipv6MulticastScope::Global),
-      "an ff0e multicast address is global scope",
-    )?;
-    ensure(
-      Ipv6MulticastScope::from_ipv6_addr(Ipv6Addr::LOCALHOST).is_none(),
-      "a non-multicast address has no multicast scope",
+  fn ipv6_addr_scope_requires_multicast_prefix() -> Result<(), PredicateFailure<AddressScopes>> {
+    let observations = [Ipv6Addr::new(0xff0e, 0, 0, 0, 0, 0, 0, 1), Ipv6Addr::LOCALHOST]
+      .map(|address| (address, Ipv6MulticastScope::from_ipv6_addr(address)));
+    ensure_that(
+      observations,
+      "multicast ff0e is global and localhost has no multicast scope",
+      |subjects| matches!(*subjects, [(_, Some(Ipv6MulticastScope::Global)), (_, None)]),
     )
+    .map(drop)
   }
 }

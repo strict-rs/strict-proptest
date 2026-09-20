@@ -264,80 +264,104 @@ where
 
 #[cfg(test)]
 mod test {
+  use core::array::from_fn;
+  use core::cmp::Reverse;
   use std::borrow::ToOwned as _;
+  use std::collections::BTreeSet;
   use std::collections::HashSet;
-  use std::format;
-  use std::vec;
 
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
+  use strict_test_support::ComparisonFailure;
+  use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_some;
+  use strict_test_support::ensure_that;
 
   use super::*;
   use crate::collection;
+  use crate::std_facade::Box;
   use crate::strategy::just::Just;
+  use crate::strategy::trace_shrink_steps;
   use crate::test_runner::Reason;
   use crate::test_runner::test_runner_without_persistence;
 
+  /// Each permutation's native generation result.
+  type Permutations = Vec<Result<Vec<i32>, Reason>>;
+  /// Native before/after array comparisons at the swap boundary.
+  type SwapOutcome<const WIDTH: usize, const CASES: usize> = Result<(), ComparisonFailure<[[i32; WIDTH]; CASES], [[i32; WIDTH]; CASES]>>;
+  /// Deque states reached after one valid and two invalid swaps.
+  type DequeSnapshots = [VecDeque<i32>; 3];
+
   static VALUES: &[i32] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+  /// Shuffle trees together with the permutations and distances observed during shrinking.
+  type ShuffleWalks = Vec<Result<ShuffleWalk, Reason>>;
+  /// Reached shuffle tree with each permutation and its displacement.
+  type ShuffleWalk = (ShuffleValueTree<Just<Vec<i32>>>, Vec<(Vec<i32>, u32)>);
 
   #[test]
-  fn generates_different_permutations() -> Result<(), TestFailure> {
+  fn generates_different_permutations() -> Result<(), PredicateFailure<Permutations>> {
     let mut runner = test_runner_without_persistence();
-    let mut seen = HashSet::<Vec<i32>>::new();
-
     let input = Just(VALUES.to_owned()).prop_shuffle();
-
-    for _ in 0..1024 {
-      let mut value = ensure_some(input.new_tree(&mut runner).ok(), "shuffle strategy generates a value tree")?.current();
-
-      ensure(seen.insert(value.clone()), "no permutation is generated twice")?;
-
-      value.sort_unstable();
-      ensure(VALUES == &value[..], "every permutation keeps the original elements")?;
-    }
-    Ok(())
+    let samples: Vec<_> = (0..1024)
+      .map(|_| input.new_tree(&mut runner).map(|tree| tree.current()))
+      .collect();
+    ensure_that(
+      samples,
+      "all 1024 permutations are distinct and preserve the original elements",
+      |observed| {
+        observed.iter().all(|sample| {
+          sample
+            .as_ref()
+            .is_ok_and(|values| values.len() == VALUES.len() && values.iter().collect::<BTreeSet<_>>() == VALUES.iter().collect())
+        }) && observed
+          .iter()
+          .filter_map(|sample| sample.as_ref().ok())
+          .collect::<HashSet<_>>()
+          .len()
+          == 1024
+      },
+    )
+    .map(drop)
   }
 
-  fn ensure_shuffle_distance_not_increased<V>(value: &V, prev_dist: u32) -> Result<u32, TestFailure>
-  where
-    V: ValueTree<Value = Vec<i32>>,
-  {
-    let shuffled = value.current();
-    // Compute the "shuffle distance" by summing the absolute distance of
-    // each element's displacement.
-    let dist = shuffled
-      .iter()
-      .enumerate()
-      .map(|(ix, &nominal)| {
-        let nominal_ix = i32::try_from(ix).unwrap_or(i32::MAX);
-        nominal.abs_diff(nominal_ix)
+  /// Observe a permutation and its total element displacement together.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "displacement measurement is independent of the shrink traversal and its monotonicity assertion"
+  )]
+  fn shuffle_distance(value: Vec<i32>) -> (Vec<i32>, u32) {
+    let distance = value.iter().enumerate().fold(0_u32, |total, (index, nominal)| {
+      total.saturating_add(nominal.abs_diff(i32::try_from(index).unwrap_or(i32::MAX)))
+    });
+    (value, distance)
+  }
+
+  #[test]
+  fn simplify_reduces_shuffle_amount() -> Result<(), PredicateFailure<ShuffleWalks>> {
+    let mut runner = test_runner_without_persistence();
+    let input = Just(VALUES.to_owned()).prop_shuffle();
+    let walks: ShuffleWalks = (0..1024)
+      .map(|_| input.new_tree(&mut runner))
+      .map(|generation| {
+        generation.map(|initial_tree| {
+          let (tree, values) = trace_shrink_steps(initial_tree);
+          let observations = values.into_iter().map(shuffle_distance).collect();
+          (tree, observations)
+        })
       })
-      .sum::<u32>();
-
-    ensure(dist <= prev_dist, "each simplify step reduces the shuffle distance")?;
-    Ok(dist)
-  }
-
-  #[test]
-  fn simplify_reduces_shuffle_amount() -> Result<(), TestFailure> {
-    let mut runner = test_runner_without_persistence();
-
-    let input = Just(VALUES.to_owned()).prop_shuffle();
-    for _ in 0..1024 {
-      let mut value = ensure_some(input.new_tree(&mut runner).ok(), "shuffle strategy generates a value tree")?;
-
-      let mut prev_dist = u32::MAX;
-      prev_dist = ensure_shuffle_distance_not_increased(&value, prev_dist)?;
-      while value.simplify() {
-        prev_dist = ensure_shuffle_distance_not_increased(&value, prev_dist)?;
-      }
-
-      // When fully simplified, the result is in the original order.
-      ensure_eq(&0, &prev_dist, "full simplification restores the original order")?;
-    }
-    Ok(())
+      .collect();
+    let converges_to_source = |walk: &Result<ShuffleWalk, Reason>| {
+      let Ok(ref reached) = *walk else {
+        return false;
+      };
+      reached.1.iter().map(|step| Reverse(step.1)).is_sorted()
+        && reached.1.last().is_some_and(|step| step.1 == 0 && step.0 == VALUES)
+        && reached.0.current() == VALUES
+    };
+    ensure_that(
+      walks,
+      "each simplification reduces displacement and ultimately restores source order",
+      |observed| observed.iter().all(converges_to_source),
+    )
+    .map(drop)
   }
 
   #[test]
@@ -346,50 +370,49 @@ mod test {
   }
 
   #[test]
-  fn swap_if_in_bounds_swaps_in_bounds_pairs() -> Result<(), TestFailure> {
+  fn swap_if_in_bounds_swaps_in_bounds_pairs() -> SwapOutcome<4, 2> {
     let mut values = [1, 2, 3, 4];
     swap_if_in_bounds(&mut values, 0, 3);
-    ensure_eq(
-      &"[4, 2, 3, 1]".to_owned(),
-      &format!("{values:?}"),
-      "an in-bounds pair swaps both elements",
-    )?;
+    let swapped = values;
     swap_if_in_bounds(&mut values, 2, 2);
     ensure_eq(
-      &"[4, 2, 3, 1]".to_owned(),
-      &format!("{values:?}"),
-      "equal indices leave the slice unchanged",
+      [swapped, values],
+      [[4, 2, 3, 1]; 2],
+      "in-bounds pairs swap, while equal indices preserve the slice",
     )
+    .map(drop)
   }
 
   #[test]
-  fn swap_if_in_bounds_ignores_out_of_bounds_pairs() -> Result<(), TestFailure> {
+  fn swap_if_in_bounds_ignores_out_of_bounds_pairs() -> SwapOutcome<3, 3> {
     let mut values = [1, 2, 3];
     swap_if_in_bounds(&mut values, 0, 3);
+    let first = values;
     swap_if_in_bounds(&mut values, 5, 1);
+    let second = values;
     swap_if_in_bounds(&mut values, 9, 9);
     ensure_eq(
-      &"[1, 2, 3]".to_owned(),
-      &format!("{values:?}"),
-      "out-of-bounds pairs leave the slice untouched",
+      [first, second, values],
+      [[1, 2, 3]; 3],
+      "each out-of-bounds pair preserves the slice",
     )
+    .map(drop)
   }
 
   #[test]
-  fn vec_deque_swap_is_bounds_guarded() -> Result<(), TestFailure> {
-    let mut deque: VecDeque<i32> = VecDeque::from(vec![1, 2, 3]);
+  fn vec_deque_swap_is_bounds_guarded() -> Result<(), Box<ComparisonFailure<DequeSnapshots, DequeSnapshots>>> {
+    let mut deque = VecDeque::from([1, 2, 3]);
     deque.shuffle_swap(0, 2);
-    ensure_eq(
-      &"[3, 2, 1]".to_owned(),
-      &format!("{deque:?}"),
-      "an in-bounds pair swaps both deque elements",
-    )?;
+    let swapped = deque.clone();
     deque.shuffle_swap(0, 3);
+    let first_invalid = deque.clone();
     deque.shuffle_swap(7, 1);
     ensure_eq(
-      &"[3, 2, 1]".to_owned(),
-      &format!("{deque:?}"),
-      "out-of-bounds pairs leave the deque untouched",
+      [swapped, first_invalid, deque],
+      from_fn(|_| VecDeque::from([3, 2, 1])),
+      "in-bounds deque indices swap and each out-of-bounds pair preserves the result",
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

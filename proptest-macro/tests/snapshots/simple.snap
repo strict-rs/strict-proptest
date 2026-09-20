@@ -1,0 +1,31 @@
+#[test]
+fn foo() -> ::proptest::test_runner::PropertyResult<
+    (i32,),
+    <CheckResult as ::proptest::test_runner::PropertyReturn>::Success,
+    <CheckResult as ::proptest::test_runner::PropertyReturn>::Failure,
+    ::core::convert::Infallible,
+> {
+    let strategy = (::proptest::prelude::any::<i32>(),);
+    let config = ::proptest::test_runner::Config {
+        test_name: Some(concat!(module_path!(), "::", stringify!(foo))),
+        source_file: Some(file!()),
+        ..::proptest::strict::strict_default_config()
+    };
+    let property = |input| {
+        let evaluate = |(x,): (i32,)| -> CheckResult { check(x) };
+        ::proptest::test_runner::PropertyReturn::into_result(evaluate(input))
+    };
+    let mut outcome = {
+        ::proptest::strict::ensure_property_with_config(
+            &strategy,
+            concat!(module_path!(), "::", stringify!(foo)),
+            config,
+            property,
+        )
+    };
+    match &mut outcome {
+        Ok(run) => run.argument_labels = &[stringify!(x)],
+        Err(failure) => failure.run.argument_labels = &[stringify!(x)],
+    }
+    outcome
+}

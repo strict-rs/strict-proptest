@@ -550,216 +550,361 @@ const fn unsupported<T>(error: &'static str) -> Result<T, InternalError> {
 
 #[cfg(test)]
 mod test {
+  use core::hash::Hash;
   use std::collections::HashSet;
   use std::format;
+  use std::time::Duration;
+  use std::time::Instant;
 
   use regex::Regex;
   use regex::bytes::Regex as BytesRegex;
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_contains;
-  use strict_test_support::ensure_ok;
-  use strict_test_support::ensure_some;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
   use crate::test_runner::test_runner_without_persistence;
 
-  #[test]
-  fn regex_generator_value_tree_is_debug() -> Result<(), TestFailure> {
-    let strategy = ensure_ok(string_regex("[a-z]+"), "the pattern is supported")?;
-    let mut runner = TestRunner::deterministic();
-    let value_tree = ensure_some(strategy.new_tree(&mut runner).ok(), "the string strategy builds a value tree")?;
-    let rendered = format!("{value_tree:?}");
-    ensure_contains(
-      &rendered,
-      "RegexGeneratorValueTree",
-      "the debug rendering names the value-tree type",
-    )
+  /// Reached regex trees and every string observed along their shrink walks.
+  type Walks<T> = Vec<Result<(RegexGeneratorValueTree<T>, Vec<T>), Reason>>;
+
+  /// Pattern, matcher, strategy, and native generation outcomes for a regex run.
+  #[derive(Debug)]
+  struct RegexSamples<T: fmt::Debug, R> {
+    /// The pattern supplied to both regex implementations.
+    pattern:  String,
+    /// Native matcher construction result.
+    matcher:  Result<R, regex::Error>,
+    /// Native generator construction result.
+    strategy: ParseResult<T>,
+    /// Every reached tree and its generated values.
+    walks:    Walks<T>,
   }
 
-  fn do_test(pattern: &str, min_distinct: usize, max_distinct: usize, iterations: usize) -> Result<(), TestFailure> {
-    let generated = generate_values_matching_regex(pattern, iterations)?;
-    ensure(
-      generated.len() >= min_distinct,
-      "generated at least the expected number of distinct strings",
-    )?;
-    ensure(
-      generated.len() <= max_distinct,
-      "generated at most the expected number of distinct strings",
-    )
-  }
+  /// Full regex sampling subject together with the requested diversity bounds.
+  type BoundedSamples<T, R> = (RegexSamples<T, R>, RangeInclusive<usize>);
+  /// Assertion result retaining both regex implementations and all sampled values.
+  type CheckedSamples<T, R> = Result<BoundedSamples<T, R>, Box<PredicateFailure<BoundedSamples<T, R>>>>;
+  /// A string sample collection and its expected complete diversity set.
+  type ExpectedStrings = (RegexSamples<String, Regex>, HashSet<String>);
 
-  fn do_test_bytes(pattern: &str, min_distinct: usize, max_distinct: usize, iterations: usize) -> Result<(), TestFailure> {
-    let generated = generate_byte_values_matching_regex(pattern, iterations)?;
-    ensure(
-      generated.len() >= min_distinct,
-      "generated at least the expected number of distinct byte strings",
-    )?;
-    ensure(
-      generated.len() <= max_distinct,
-      "generated at most the expected number of distinct byte strings",
-    )
-  }
-
-  fn generate_values_matching_regex(pattern: &str, iterations: usize) -> Result<HashSet<String>, TestFailure> {
-    let rx = ensure_ok(Regex::new(pattern), "the pattern is valid regex")?;
-    let mut generated = HashSet::new();
-
-    let strategy = ensure_ok(string_regex(pattern), "the pattern is supported")?;
-    let mut runner = TestRunner::deterministic();
-    for _ in 0..iterations {
-      let mut value = ensure_some(strategy.new_tree(&mut runner).ok(), "string strategy generates a value tree")?;
-
-      ensure_string_value_matches_and_record(&value, &rx, &mut generated)?;
-      while value.simplify() {
-        ensure_string_value_matches_and_record(&value, &rx, &mut generated)?;
-      }
-    }
-    Ok(generated)
-  }
-
-  fn ensure_string_value_matches_and_record<V>(value: &V, rx: &Regex, generated: &mut HashSet<String>) -> Result<(), TestFailure>
-  where
-    V: ValueTree<Value = String>,
-  {
-    let produced = value.current();
-    let ok = rx
-      .find(&produced)
-      .is_some_and(|matsch| 0 == matsch.start() && produced.len() == matsch.end());
-    ensure(ok, "every generated string matches the pattern")?;
-
-    let _was_new = generated.insert(produced);
-    Ok(())
-  }
-
+  /// Observe a bounded simplification walk separately from generation and its wall-clock budget.
   #[allow(
     clippy::single_call_fn,
-    reason = "test-only helper collecting every byte string a byte-regex strategy generates while shrinking"
+    reason = "bounded tree traversal is independent of regex construction and the generation time budget"
   )]
-  fn generate_byte_values_matching_regex(pattern: &str, iterations: usize) -> Result<HashSet<Vec<u8>>, TestFailure> {
-    let rx = ensure_ok(BytesRegex::new(pattern), "the pattern is valid byte regex")?;
-    let mut generated = HashSet::new();
+  fn shrink_regex<T: fmt::Debug>(mut tree: RegexGeneratorValueTree<T>, limit: usize) -> (RegexGeneratorValueTree<T>, Vec<T>) {
+    let mut values = vec![tree.current()];
+    for _ in 0..limit {
+      if !tree.simplify() {
+        break;
+      }
+      values.push(tree.current());
+    }
+    (tree, values)
+  }
 
-    let strategy = ensure_ok(bytes_regex(pattern), "the pattern is supported")?;
-    let mut runner = TestRunner::deterministic();
+  /// Preserve every generated and simplified value, respecting the existing optional time bound.
+  fn sample_regex<T: fmt::Debug>(
+    strategy: &ParseResult<T>,
+    runner: &mut TestRunner,
+    iterations: usize,
+    shrink_limit: usize,
+    start_time: Option<Instant>,
+  ) -> Walks<T> {
+    let mut walks = Vec::new();
+    let Ok(generator) = strategy.as_ref() else {
+      return walks;
+    };
     for _ in 0..iterations {
-      let mut value = ensure_some(strategy.new_tree(&mut runner).ok(), "byte-string strategy generates a value tree")?;
-
-      ensure_byte_value_matches_and_record(&value, &rx, &mut generated)?;
-      while value.simplify() {
-        ensure_byte_value_matches_and_record(&value, &rx, &mut generated)?;
+      walks.push(generator.new_tree(runner).map(|tree| shrink_regex(tree, shrink_limit)));
+      if start_time.is_some_and(|start| start.elapsed().as_secs() > 10) {
+        break;
       }
     }
-    Ok(generated)
+    walks
   }
 
-  fn ensure_byte_value_matches_and_record<V>(value: &V, rx: &BytesRegex, generated: &mut HashSet<Vec<u8>>) -> Result<(), TestFailure>
+  /// Generate string walks together with both native regex construction results.
+  fn generate_values_matching_regex(pattern: &str, iterations: usize) -> RegexSamples<String, Regex> {
+    let matcher = Regex::new(pattern);
+    let strategy = string_regex(pattern);
+    let walks = sample_regex(&strategy, &mut TestRunner::deterministic(), iterations, usize::MAX, None);
+    RegexSamples {
+      pattern: pattern.to_owned(),
+      matcher,
+      strategy,
+      walks,
+    }
+  }
+
+  impl<T: fmt::Debug, R> RegexSamples<T, R> {
+    /// Check every native generation outcome against its constructed matcher.
+    fn matches(&self, pattern: fn(&R) -> &str, accepts: impl Fn(&R, &T) -> bool) -> bool {
+      let Ok(ref matcher) = self.matcher else {
+        return false;
+      };
+      pattern(matcher) == self.pattern
+        && self.strategy.is_ok()
+        && self.walks.iter().all(Result::is_ok)
+        && self
+          .walks
+          .iter()
+          .filter_map(|walk| walk.as_ref().ok())
+          .flat_map(|generation| &generation.1)
+          .all(|produced| accepts(matcher, produced))
+    }
+
+    /// Borrow all distinct values while the sample report retains their owners.
+    fn distinct_values(&self) -> HashSet<&T>
+    where
+      T: Eq + Hash,
+    {
+      self
+        .walks
+        .iter()
+        .filter_map(|walk| walk.as_ref().ok())
+        .flat_map(|generation| &generation.1)
+        .collect()
+    }
+  }
+
+  /// Validate native matching and diversity evidence shared by both regex representations.
+  fn check_samples<T, R>(
+    samples: RegexSamples<T, R>,
+    bounds: RangeInclusive<usize>,
+    pattern: fn(&R) -> &str,
+    accepts: impl Fn(&R, &T) -> bool,
+  ) -> CheckedSamples<T, R>
   where
-    V: ValueTree<Value = Vec<u8>>,
+    T: fmt::Debug + Eq + Hash,
+    R: fmt::Debug,
   {
-    let produced = value.current();
-    let ok = rx
-      .find(&produced)
-      .is_some_and(|matsch| 0 == matsch.start() && produced.len() == matsch.end());
-    ensure(ok, "every generated byte string matches the pattern")?;
-
-    let _was_new = generated.insert(produced);
-    Ok(())
+    ensure_that(
+      (samples, bounds),
+      "all generated values fully match and have the requested diversity",
+      |observed| observed.0.matches(pattern, &accepts) && observed.1.contains(&observed.0.distinct_values().len()),
+    )
+    .map_err(Box::new)
   }
 
-  #[test]
-  fn test_case_insensitive_produces_all_available_values() -> Result<(), TestFailure> {
-    let expected: HashSet<String> = ["a", "b", "A", "B"].into_iter().map(String::from).collect();
-    ensure(
-      generate_values_matching_regex("(?i:a|B)", 64)? == expected,
-      "a case-insensitive alternation generates every casing",
+  /// Check string matches and diversity without discarding any generation outcome.
+  fn do_test(pattern: &str, min_distinct: usize, max_distinct: usize, iterations: usize) -> CheckedSamples<String, Regex> {
+    check_samples(
+      generate_values_matching_regex(pattern, iterations),
+      min_distinct..=max_distinct,
+      Regex::as_str,
+      |matcher, produced| {
+        matcher
+          .find(produced)
+          .is_some_and(|found| found.start() == 0 && found.end() == produced.len())
+      },
     )
   }
 
-  #[test]
-  fn test_literal() -> Result<(), TestFailure> {
-    do_test("foo", 1, 1, 8)?;
-    do_test_bytes("foo", 1, 1, 8)
+  /// Check arbitrary-byte regex matches with the same retained native outcomes.
+  fn do_test_bytes(pattern: &str, min_distinct: usize, max_distinct: usize, iterations: usize) -> CheckedSamples<Vec<u8>, BytesRegex> {
+    let matcher = BytesRegex::new(pattern);
+    let strategy = bytes_regex(pattern);
+    let walks = sample_regex(&strategy, &mut TestRunner::deterministic(), iterations, usize::MAX, None);
+    let samples = RegexSamples {
+      pattern: pattern.to_owned(),
+      matcher,
+      strategy,
+      walks,
+    };
+    check_samples(samples, min_distinct..=max_distinct, BytesRegex::as_str, |compiled, produced| {
+      compiled
+        .find(produced)
+        .is_some_and(|found| found.start() == 0 && found.end() == produced.len())
+    })
   }
 
   #[test]
-  fn test_casei_literal() -> Result<(), TestFailure> {
-    do_test("(?i:fOo)", 8, 8, 64)
+  fn regex_generator_value_tree_is_debug() -> Result<(), impl fmt::Debug> {
+    let result = string_regex("[a-z]+").map(|strategy| {
+      let generated = strategy.new_tree(&mut TestRunner::deterministic()).map(|tree| {
+        let rendered = format!("{tree:?}");
+        (tree, rendered)
+      });
+      (strategy, generated)
+    });
+    ensure_that(result, "the native value-tree debug rendering names its type", |observed| {
+      let Ok(generated) = observed.as_ref() else {
+        return false;
+      };
+      generated
+        .1
+        .as_ref()
+        .is_ok_and(|rendering| rendering.1.contains("RegexGeneratorValueTree"))
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn test_alternation() -> Result<(), TestFailure> {
-    do_test("foo|bar|baz", 3, 3, 16)?;
-    do_test_bytes("foo|bar|baz", 3, 3, 16)
+  fn test_case_insensitive_produces_all_available_values() -> Result<(), Box<PredicateFailure<ExpectedStrings>>> {
+    let expected: HashSet<String> = ["a", "b", "A", "B"].into_iter().map(String::from).collect();
+    ensure_that(
+      (generate_values_matching_regex("(?i:a|B)", 64), expected),
+      "case-insensitive alternation generates every casing",
+      |observed| {
+        observed.0.matcher.is_ok()
+          && observed.0.strategy.is_ok()
+          && observed.0.walks.iter().all(Result::is_ok)
+          && observed.0.distinct_values() == observed.1.iter().collect()
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn test_repetition() -> Result<(), TestFailure> {
-    do_test("a{0,8}", 9, 9, 64)?;
-    do_test_bytes("a{0,8}", 9, 9, 64)
+  fn test_literal() -> Result<(), impl fmt::Debug> {
+    let result_1 = do_test("foo", 1, 1, 8);
+    let result_2 = do_test_bytes("foo", 1, 1, 8);
+    ensure_that(
+      (result_1, result_2),
+      "every regex representation satisfies its sampling contract",
+      |observed| observed.0.is_ok() && observed.1.is_ok(),
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn test_question() -> Result<(), TestFailure> {
-    do_test("a?", 2, 2, 16)?;
-    do_test_bytes("a?", 2, 2, 16)
+  fn test_casei_literal() -> Result<(), impl fmt::Debug> {
+    do_test("(?i:fOo)", 8, 8, 64).map(drop)
   }
 
   #[test]
-  fn test_star() -> Result<(), TestFailure> {
-    do_test("a*", 33, 33, 256)?;
-    do_test_bytes("a*", 33, 33, 256)
+  fn test_alternation() -> Result<(), impl fmt::Debug> {
+    let result_1 = do_test("foo|bar|baz", 3, 3, 16);
+    let result_2 = do_test_bytes("foo|bar|baz", 3, 3, 16);
+    ensure_that(
+      (result_1, result_2),
+      "every regex representation satisfies its sampling contract",
+      |observed| observed.0.is_ok() && observed.1.is_ok(),
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn test_plus() -> Result<(), TestFailure> {
-    do_test("a+", 32, 32, 256)?;
-    do_test_bytes("a+", 32, 32, 256)
+  fn test_repetition() -> Result<(), impl fmt::Debug> {
+    let result_1 = do_test("a{0,8}", 9, 9, 64);
+    let result_2 = do_test_bytes("a{0,8}", 9, 9, 64);
+    ensure_that(
+      (result_1, result_2),
+      "every regex representation satisfies its sampling contract",
+      |observed| observed.0.is_ok() && observed.1.is_ok(),
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn test_n_to_range() -> Result<(), TestFailure> {
-    do_test("a{4,}", 4, 4, 64)?;
-    do_test_bytes("a{4,}", 4, 4, 64)
+  fn test_question() -> Result<(), impl fmt::Debug> {
+    let result_1 = do_test("a?", 2, 2, 16);
+    let result_2 = do_test_bytes("a?", 2, 2, 16);
+    ensure_that(
+      (result_1, result_2),
+      "every regex representation satisfies its sampling contract",
+      |observed| observed.0.is_ok() && observed.1.is_ok(),
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn test_concatenation() -> Result<(), TestFailure> {
-    do_test("(foo|bar)(xyzzy|plugh)", 4, 4, 32)?;
-    do_test_bytes("(foo|bar)(xyzzy|plugh)", 4, 4, 32)
+  fn test_star() -> Result<(), impl fmt::Debug> {
+    let result_1 = do_test("a*", 33, 33, 256);
+    let result_2 = do_test_bytes("a*", 33, 33, 256);
+    ensure_that(
+      (result_1, result_2),
+      "every regex representation satisfies its sampling contract",
+      |observed| observed.0.is_ok() && observed.1.is_ok(),
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn test_ascii_class() -> Result<(), TestFailure> {
-    do_test("[[:digit:]]", 10, 10, 256)
+  fn test_plus() -> Result<(), impl fmt::Debug> {
+    let result_1 = do_test("a+", 32, 32, 256);
+    let result_2 = do_test_bytes("a+", 32, 32, 256);
+    ensure_that(
+      (result_1, result_2),
+      "every regex representation satisfies its sampling contract",
+      |observed| observed.0.is_ok() && observed.1.is_ok(),
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn test_unicode_class() -> Result<(), TestFailure> {
-    do_test("\\p{Greek}", 24, 512, 256)
+  fn test_n_to_range() -> Result<(), impl fmt::Debug> {
+    let result_1 = do_test("a{4,}", 4, 4, 64);
+    let result_2 = do_test_bytes("a{4,}", 4, 4, 64);
+    ensure_that(
+      (result_1, result_2),
+      "every regex representation satisfies its sampling contract",
+      |observed| observed.0.is_ok() && observed.1.is_ok(),
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn test_dot() -> Result<(), TestFailure> {
-    do_test(".", 200, 65536, 256)
+  fn test_concatenation() -> Result<(), impl fmt::Debug> {
+    let result_1 = do_test("(foo|bar)(xyzzy|plugh)", 4, 4, 32);
+    let result_2 = do_test_bytes("(foo|bar)(xyzzy|plugh)", 4, 4, 32);
+    ensure_that(
+      (result_1, result_2),
+      "every regex representation satisfies its sampling contract",
+      |observed| observed.0.is_ok() && observed.1.is_ok(),
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn test_dot_s() -> Result<(), TestFailure> {
-    do_test("(?s).", 200, 65536, 256)?;
-    do_test_bytes("(?s-u).", 256, 256, 2048)
+  fn test_ascii_class() -> Result<(), impl fmt::Debug> {
+    do_test("[[:digit:]]", 10, 10, 256).map(drop)
   }
 
   #[test]
-  fn test_backslash_d_plus() -> Result<(), TestFailure> {
-    do_test("\\d+", 1, 65536, 256)
+  fn test_unicode_class() -> Result<(), impl fmt::Debug> {
+    do_test("\\p{Greek}", 24, 512, 256).map(drop)
   }
 
   #[test]
-  fn test_non_utf8_byte_strings() -> Result<(), TestFailure> {
-    do_test_bytes(r"(?-u)[\xC0-\xFF]\x20", 64, 64, 512)?;
-    do_test_bytes(r"(?-u)\x20[\x80-\xBF]", 64, 64, 512)?;
-    do_test_bytes(
+  fn test_dot() -> Result<(), impl fmt::Debug> {
+    do_test(".", 200, 65536, 256).map(drop)
+  }
+
+  #[test]
+  fn test_dot_s() -> Result<(), impl fmt::Debug> {
+    let result_1 = do_test("(?s).", 200, 65536, 256);
+    let result_2 = do_test_bytes("(?s-u).", 256, 256, 2048);
+    ensure_that(
+      (result_1, result_2),
+      "every regex representation satisfies its sampling contract",
+      |observed| observed.0.is_ok() && observed.1.is_ok(),
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn test_backslash_d_plus() -> Result<(), impl fmt::Debug> {
+    do_test("\\d+", 1, 65536, 256).map(drop)
+  }
+
+  #[test]
+  fn test_non_utf8_byte_strings() -> Result<(), impl fmt::Debug> {
+    let result_1 = do_test_bytes(r"(?-u)[\xC0-\xFF]\x20", 64, 64, 512);
+    let result_2 = do_test_bytes(r"(?-u)\x20[\x80-\xBF]", 64, 64, 512);
+    let result_3 = do_test_bytes(
       r"(?x-u)
   \xed (( ( \xa0\x80 | \xad\xbf | \xae\x80 | \xaf\xbf )
           ( \xed ( \xb0\x80 | \xbf\xbf ) )? )
@@ -767,67 +912,118 @@ mod test {
       15,
       15,
       120,
+    );
+    ensure_that(
+      (result_1, result_2, result_3),
+      "every regex representation satisfies its sampling contract",
+      |observed| observed.0.is_ok() && observed.1.is_ok() && observed.2.is_ok(),
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
+  /// Preserve the value while statically checking thread-transfer guarantees.
   #[allow(
     clippy::single_call_fn,
-    reason = "test-only assertion that the regex strategy type stays Send and Sync"
+    reason = "the identity boundary checks thread-transfer bounds while preserving its subject"
   )]
-  fn ensure_send_and_sync<T: Send + Sync>(_: T) {}
+  fn ensure_send_and_sync<T: Send + Sync>(value: T) -> T {
+    value
+  }
 
   #[test]
-  fn regex_strategy_is_send_and_sync() -> Result<(), TestFailure> {
-    ensure_send_and_sync(ensure_ok(string_regex("."), "the dot pattern is supported")?);
-    Ok(())
+  fn regex_strategy_is_send_and_sync() -> Result<(), PredicateFailure<ParseResult<String>>> {
+    ensure_that(
+      ensure_send_and_sync(string_regex(".")),
+      "the dot strategy is supported and Send + Sync",
+      Result::is_ok,
+    )
+    .map(drop)
+  }
+
+  /// A contributed regex's supported run or its native unsupported-construction outcome.
+  enum ConsistencyRun {
+    /// Unsupported patterns remain an explicit portability skip.
+    Unsupported {
+      pattern: String,
+      error:   RegexStrategyError,
+    },
+    /// Supported patterns retain every attempted generation and its elapsed time.
+    Supported {
+      samples: RegexSamples<String, Regex>,
+      elapsed: Duration,
+    },
+  }
+
+  impl fmt::Debug for ConsistencyRun {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+      match *self {
+        Self::Unsupported {
+          ref pattern,
+          ref error,
+        } => formatter
+          .debug_struct("Unsupported")
+          .field("pattern", pattern)
+          .field("error", error)
+          .finish(),
+        Self::Supported {
+          ref samples,
+          elapsed,
+        } => formatter
+          .debug_struct("Supported")
+          .field("samples", samples)
+          .field("elapsed", &elapsed)
+          .finish(),
+      }
+    }
   }
 
   macro_rules! consistent {
     ($name:ident, $value:expr) => {
       #[test]
-      fn $name() -> Result<(), TestFailure> {
-        test_generates_matching_strings($value)
+      fn $name() -> Result<(), Box<PredicateFailure<ConsistencyRun>>> {
+        test_generates_matching_strings($value).map(drop)
       }
     };
   }
 
-  fn test_generates_matching_strings(pattern: &str) -> Result<(), TestFailure> {
-    use std::time;
-
-    let mut runner = test_runner_without_persistence();
-    let start = time::Instant::now();
-
-    // If we don't support this regex, just move on quietly
-    let Ok(strategy) = string_regex(pattern) else {
-      return Ok(());
+  /// Exercise a contributed pattern under the existing case, shrink, and time budgets.
+  fn test_generates_matching_strings(pattern: &str) -> Result<ConsistencyRun, Box<PredicateFailure<ConsistencyRun>>> {
+    let start = Instant::now();
+    let construction = string_regex(pattern);
+    let outcome = match construction {
+      Err(error) => ConsistencyRun::Unsupported {
+        pattern: pattern.to_owned(),
+        error,
+      },
+      Ok(generator) => {
+        let strategy = Ok(generator);
+        let matcher = Regex::new(pattern);
+        let walks = sample_regex(&strategy, &mut test_runner_without_persistence(), 1000, 1000, Some(start));
+        ConsistencyRun::Supported {
+          samples: RegexSamples {
+            pattern: pattern.to_owned(),
+            matcher,
+            strategy,
+            walks,
+          },
+          elapsed: start.elapsed(),
+        }
+      }
     };
-    let rx = ensure_ok(Regex::new(pattern), "a supported pattern is valid regex")?;
-
-    for _ in 0..1000 {
-      let mut val = ensure_some(strategy.new_tree(&mut runner).ok(), "string strategy generates a value tree")?;
-      ensure_current_string_matches(&val, &rx)?;
-
-      // No more than 1000 simplify steps to keep test time down
-      let mut simplify_steps = 0_u16;
-      while simplify_steps < 1000 && val.simplify() {
-        simplify_steps = simplify_steps.saturating_add(1);
-        ensure_current_string_matches(&val, &rx)?;
-      }
-
-      // Quietly stop testing if we've run for >10 s
-      if start.elapsed().as_secs() > 10 {
-        break;
-      }
-    }
-    Ok(())
-  }
-
-  fn ensure_current_string_matches<V>(val: &V, rx: &Regex) -> Result<(), TestFailure>
-  where
-    V: ValueTree<Value = String>,
-  {
-    let produced = val.current();
-    ensure(rx.is_match(&produced), "every produced string matches the source pattern")
+    ensure_that(
+      outcome,
+      "every generated value for a supported contributed regex matches its source pattern",
+      |observed| match *observed {
+        ConsistencyRun::Unsupported {
+          ..
+        } => true,
+        ConsistencyRun::Supported {
+          ref samples, ..
+        } => samples.matches(Regex::as_str, |matcher, produced| matcher.is_match(produced)),
+      },
+    )
+    .map_err(Box::new)
   }
 
   include!("regex-contrib/crates_regex.rs");

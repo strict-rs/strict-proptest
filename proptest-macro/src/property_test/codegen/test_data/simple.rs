@@ -1,4 +1,1 @@
-fn foo(x: i32) -> ::proptest::strict::TestResult {
-    let _ = x;
-    Ok(())
-}
+fn foo(x: i32) -> CheckResult { check(x) }

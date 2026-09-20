@@ -7,53 +7,31 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! The native strict property runner: run a [`Strategy`] against a
-//! `Result`-returning property and get the outcome back as a
-//! [`TestResult`] instead of a panic.
+//! Typed, deterministically seeded property execution through the native runner.
 //!
-//! [`ensure_property`] drives [`TestRunner::run`] directly, so the property
-//! closure returns `Result<(), TestFailure>` like any other strict test
-//! body and no panicking macro is involved: a falsified property surfaces
-//! as [`TestFailure::PropertyFalsified`] carrying the engine's rendering of
-//! the shrunk minimal failing input, and a run that cannot complete
-//! surfaces as [`TestFailure::PropertyAborted`].
+//! Properties return their original success subjects and concrete failures.
+//! The native report retains every evaluation, and a falsification pairs the
+//! minimized strategy value with the assertion failure from that evaluation.
+//! Preconditions belong in strategies such as [`Strategy::prop_filter`].
 //!
-//! Strategies are the ordinary [`crate::strategy`] vocabulary: ranges,
-//! [`crate::collection`], and the [`Strategy`] combinators (`prop_map`,
-//! `prop_filter`, ...). A precondition belongs in the strategy as a
-//! [`Strategy::prop_filter`] — unwanted inputs are then rejected at
-//! generation, and an over-strict filter surfaces as
-//! [`TestFailure::PropertyAborted`] instead of panicking the way
-//! `prop_assume!` would.
+//! [`ensure_property`] disables regression persistence and uses a fixed seed.
+//! `STRICT_TEST_SEED=random` selects entropy, an integer selects that seed,
+//! and absent or invalid values use `0x5EED`. Other `PROPTEST_*` settings
+//! still come from [`Config::default`]. [`ensure_property_with_config`]
+//! preserves the caller's configuration.
 //!
-//! Failure persistence is disabled: a strict property run never writes a
-//! `proptest-regressions/` file; pin a discovered counterexample as a named
-//! unit test instead. Because that removes the usual replay anchor, the
-//! runner is seeded deterministically by default — every run draws the same
-//! inputs. The `STRICT_TEST_SEED` environment variable selects the seed:
-//! unset (or unrecognized) pins a fixed deterministic seed, `random` opts
-//! into OS entropy for an exploratory run, and a bare integer pins that
-//! exact seed to replay a discovered case. This supersedes
-//! `PROPTEST_RNG_SEED`; the remaining `PROPTEST_*` knobs (case count,
-//! shrink iterations, ...) still apply through [`Config::default`], and
-//! [`ensure_property_with_config`] hands the runner a caller-built
-//! [`Config`] verbatim.
+//! Fork or timeout execution requires [`ensure_property_with_transport`].
+//! Its codec transports subjects, failures, counterexamples, and shared case
+//! state. In-process execution requires no serialization bounds.
 
 use std::env;
-use std::string::ToString as _;
-
-pub use strict_test_support::TestFailure;
 
 use crate::strategy::Strategy;
 use crate::test_runner::Config;
+use crate::test_runner::PropertyResult;
+use crate::test_runner::PropertyTransport;
 use crate::test_runner::RngSeed;
-use crate::test_runner::TestCaseError;
-use crate::test_runner::TestError;
 use crate::test_runner::TestRunner;
-
-/// The outcome of a strict test body: `Ok(())` when every expectation
-/// holds, or the first [`TestFailure`] encountered.
-pub type TestResult = Result<(), TestFailure>;
 
 /// Environment variable selecting the strict property-runner RNG seed.
 const SEED_ENV: &str = "STRICT_TEST_SEED";
@@ -98,163 +76,207 @@ pub fn strict_default_config() -> Config {
   }
 }
 
-/// Run `property` against inputs generated from `strategy`, shrinking any
-/// falsifying input to a minimal counterexample.
+/// Run a typed property under deterministic strict defaults and shrink failures.
 ///
-/// The closure returns [`TestResult`], so a property body composes the
-/// same `ensure*` helpers as any other strict test and reads identically.
-/// (The closure is the trailing parameter so multi-line properties stay
-/// readable.)
-///
-/// The run uses [`strict_default_config`]: deterministically seeded by
-/// default, so runs are reproducible; set `STRICT_TEST_SEED=random` for an
-/// exploratory run, or `STRICT_TEST_SEED=<integer>` to replay a specific
-/// seed. No `proptest-regressions/` file is ever written.
+/// Every successful subject and concrete failure remains in the native report.
+/// Values need not be cloneable, thread safe, or serializable.
 ///
 /// # Errors
 ///
-/// Returns [`TestFailure::PropertyFalsified`] when an input falsifies the
-/// property (the report carries the engine's rendering of the shrunk
-/// minimal failing input), or [`TestFailure::PropertyAborted`] when the
-/// runner cannot complete a run (for example, a strategy filter rejects
-/// too many inputs).
+/// Returns a native falsification, generation abort, or engine failure with
+/// strict context and all reached evidence. Fork or timeout requires an
+/// explicit transport and is rejected before invoking the property.
 ///
 /// # Examples
 ///
 /// ```
-/// use proptest::strict::TestFailure;
 /// use proptest::strict::ensure_property;
-/// use strict_test_support::ensure;
+/// use proptest::test_runner::PropertyFailure;
+/// use proptest::test_runner::PropertyResult;
+/// use strict_test_support::PredicateFailure;
+/// use strict_test_support::ensure_that;
 ///
-/// # fn main() -> Result<(), TestFailure> {
-/// ensure_property(&(0_u32..10), "generated samples stay below ten", |sample| {
-///   ensure(sample < 10, "sample below ten")
-/// })?;
-/// # Ok(())
+/// fn range_property() -> PropertyResult<u32, u32, PredicateFailure<u32>> {
+///   ensure_property(&(0_u32..10), "samples stay below ten", |sample| {
+///     ensure_that(sample, "sample below ten", |sample| *sample < 10)
+///   })
+/// }
+///
+/// # fn main() -> Result<(), Box<PropertyFailure<u32, u32, PredicateFailure<u32>>>> {
+/// range_property().map(drop)
 /// # }
 /// ```
-pub fn ensure_property<S, F>(strategy: &S, context: &'static str, property: F) -> TestResult
+pub fn ensure_property<S, F, A, E>(strategy: &S, context: &'static str, property: F) -> PropertyResult<S::Value, A, E>
 where
   S: Strategy,
-  F: Fn(S::Value) -> TestResult,
+  F: Fn(S::Value) -> Result<A, E>,
 {
   ensure_property_with_config(strategy, context, strict_default_config(), property)
 }
 
-/// Run `property` against inputs generated from `strategy` under a
-/// caller-built [`Config`], shrinking any falsifying input to a minimal
-/// counterexample.
+/// Run a typed property using the caller's configuration verbatim.
 ///
-/// The `config` is handed to the runner verbatim: the caller owns every
-/// choice in it, including failure persistence and the RNG seed. Use
-/// [`strict_default_config`] as a starting point to keep the strict
-/// defaults (no persistence, deterministic seed) and override only
-/// specific fields.
+/// Use [`strict_default_config`] when only selected settings should differ
+/// from deterministic, persistence-free defaults.
 ///
 /// # Errors
 ///
-/// Returns [`TestFailure::PropertyFalsified`] when an input falsifies the
-/// property (the report carries the engine's rendering of the shrunk
-/// minimal failing input), or [`TestFailure::PropertyAborted`] when the
-/// runner cannot complete a run (for example, a strategy filter rejects
-/// too many inputs).
+/// Returns a native falsification or engine failure with all reached evidence.
+/// Fork and timeout settings require the explicit transport entry.
 #[allow(
   clippy::single_call_fn,
-  reason = "drive TestRunner::run under a caller Config, mapping TestError onto TestFailure"
+  reason = "public entry point preserves caller-selected configuration independently of strict defaults"
 )]
-pub fn ensure_property_with_config<S, F>(strategy: &S, context: &'static str, config: Config, property: F) -> TestResult
+pub fn ensure_property_with_config<S, F, A, E>(
+  strategy: &S,
+  context: &'static str,
+  config: Config,
+  property: F,
+) -> PropertyResult<S::Value, A, E>
 where
   S: Strategy,
-  F: Fn(S::Value) -> TestResult,
+  F: Fn(S::Value) -> Result<A, E>,
 {
-  let mut runner = TestRunner::new(config);
-  let outcome = runner.run(strategy, |input| {
-    property(input).map_err(|failure| TestCaseError::fail(failure.to_string()))
-  });
+  attach_context(TestRunner::new(config).run_typed(strategy, property), context)
+}
+
+/// Run with a declared typed fork transport and caller-selected configuration.
+///
+/// The runner owns process supervision, shrinking, persistence, and temporary
+/// file finalization. The codec owns payload representation and restoration of
+/// shared state before replayed shrinking. A local run does not invoke it.
+///
+/// # Errors
+///
+/// Preserves assertion and codec failures separately from native generation,
+/// process, timeout, framing, I/O, and finalization failures.
+pub fn ensure_property_with_transport<S, F, A, E, C>(
+  strategy: &S,
+  context: &'static str,
+  config: Config,
+  transport: C,
+  property: F,
+) -> PropertyResult<S::Value, A, E, C::Error>
+where
+  S: Strategy,
+  F: Fn(S::Value) -> Result<A, E>,
+  C: PropertyTransport<S::Value, A, E>,
+{
+  attach_context(
+    TestRunner::new(config).run_typed_with_transport(strategy, property, transport),
+    context,
+  )
+}
+
+/// Attach context without changing any native payload or configuration.
+fn attach_context<V, A, E, T>(outcome: PropertyResult<V, A, E, T>, context: &'static str) -> PropertyResult<V, A, E, T> {
   match outcome {
-    Ok(()) => Ok(()),
-    Err(failed @ TestError::Fail(..)) => Err(TestFailure::PropertyFalsified {
-      context,
-      report: failed.to_string(),
-    }),
-    Err(TestError::Abort(reason)) => Err(TestFailure::PropertyAborted {
-      context,
-      reason: reason.to_string(),
-    }),
+    Ok(mut run) => {
+      run.context = context;
+      Ok(run)
+    }
+    Err(mut failure) => {
+      failure.context = context;
+      failure.run.context = context;
+      Err(failure)
+    }
   }
 }
 
 #[cfg(test)]
 mod tests {
   use core::cell::Cell;
-  use std::path::Path;
-  use std::string::ToString as _;
+  use core::convert::Infallible;
+  use std::fs::Metadata;
+  use std::fs::metadata;
+  use std::io;
+  use std::path::PathBuf;
 
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_all;
-  use strict_test_support::ensure_contains;
+  use strict_test_support::ComparisonFailure;
+  use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_some;
+  use strict_test_support::ensure_that;
 
-  use super::DETERMINISTIC_SEED;
-  use super::TestFailure;
-  use super::TestResult;
-  use super::ensure_property;
-  use super::ensure_property_with_config;
-  use super::resolve_seed;
-  use super::strict_default_config;
-  use crate::strategy::Strategy;
-  use crate::test_runner::Config;
-  use crate::test_runner::RngSeed;
+  use super::*;
+  use crate::std_facade::Box;
+  use crate::test_runner::CaseOrigin;
+  use crate::test_runner::EvaluationOutcome;
+  use crate::test_runner::MapFailurePersistence;
+  use crate::test_runner::PropertyCause;
+
+  /// The native evidence returned by range-bound assertions.
+  type RangeOutcome = PropertyResult<u32, u32, PredicateFailure<u32>>;
+
+  /// Native scalar runs with no property assertion failure.
+  type ScalarRun = PropertyResult<u32, u32, Infallible>;
+  /// Native sample runs used to compare deterministic sequences.
+  type SampleRun = PropertyResult<u64, u64, Infallible>;
+  /// A concrete allocation retains complete assertion subjects on failure.
+  type Check<S> = Result<(), Box<PredicateFailure<S>>>;
+  /// All four supported seed-resolution inputs.
+  type SeedResolutions = [RngSeed; 4];
+  /// Configuration, run, requested path, and native filesystem observation.
+  type PersistenceProbe = (Config, RangeOutcome, PathBuf, io::Result<Metadata>);
+  /// Persisting runner, original failing run, and baseline/replayed passing runs.
+  type PersistenceReplay = (TestRunner, PropertyResult<u32, Infallible, u32>, [ScalarRun; 2]);
 
   #[test]
-  fn ensure_property_passes_when_the_property_holds() -> TestResult {
-    ensure_property(&(0_u32..10), "all generated inputs satisfy the range bound", |input| {
-      ensure(input < 10, "input stays below ten")
-    })
+  fn ensure_property_passes_when_the_property_holds() -> Check<RangeOutcome> {
+    ensure_that(
+      ensure_property(&(0_u32..10), "range bound", |input| {
+        ensure_that(input, "below ten", |subject| *subject < 10)
+      }),
+      "the report retains successful subjects and strict context",
+      |outcome| {
+        outcome.as_ref().is_ok_and(|run| {
+          run.context == "range bound"
+            && run
+              .evaluations
+              .iter()
+              .all(|record| matches!(record.outcome, EvaluationOutcome::Returned(Ok(value)) if value < 10))
+        })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn ensure_property_reports_falsified_properties_with_minimal_input() -> TestResult {
-    // Both the shrinking contract and the message-format contract are
-    // read off one rendered failure, so the falsified property runs
-    // once and the facets are batched.
-    let failure = ensure_some(
+  fn ensure_property_reports_falsified_properties_with_minimal_input() -> Check<RangeOutcome> {
+    ensure_that(
       ensure_property(&(1_u32..32), "input stays below one", |input| {
-        ensure(input < 1, "input stays below one")
-      })
-      .err(),
-      "a falsified property must fail",
-    )?;
-    let rendered = failure.to_string();
-    ensure_all(&[
-      (rendered.contains("property falsified"), "the failure names the falsified family"),
-      (
-        rendered.contains("input stays below one"),
-        "the failure carries the property context",
-      ),
-      (
-        rendered.contains("minimal failing input: 1"),
-        "shrinking converges to the minimal counterexample",
-      ),
-    ])
+        ensure_that(input, "below one", |subject| *subject < 1)
+      }),
+      "falsification retains the minimized input and original assertion subject",
+      |outcome| {
+        outcome.as_ref().is_err_and(|report| {
+          report.context == "input stays below one"
+            && matches!(report.cause, PropertyCause::Falsified { counterexample: 1, ref failure, .. } if failure.subject == 1)
+        })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn ensure_property_reports_aborted_runs() -> TestResult {
-    let rejecting = Strategy::prop_filter(0_u32..10, "rejected by the test fixture", |_input| false);
-    let failure = ensure_some(
-      ensure_property(&rejecting, "a fully rejecting filter aborts the run", |_input| Ok(())).err(),
-      "a fully rejecting strategy must abort the run",
-    )?;
-    ensure_contains(&failure.to_string(), "property aborted", "the failure names the abort family")
+  fn ensure_property_reports_aborted_runs() -> Check<ScalarRun> {
+    let rejecting = (0_u32..10).prop_filter("rejecting strategy", |_| false);
+    ensure_that(
+      ensure_property(&rejecting, "generation abort", Ok),
+      "generation abort does not invent an assertion failure or evaluation",
+      |outcome| {
+        outcome
+          .as_ref()
+          .is_err_and(|report| matches!(report.cause, PropertyCause::Aborted(_)) && report.run.evaluations.is_empty())
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn ensure_property_with_config_honors_the_caller_config() -> TestResult {
-    // The runner must take the caller's Config verbatim: a case count
-    // of 7 runs exactly 7 successful cases, and the strict default
-    // persistence/seed choices are not re-imposed on it.
+  fn ensure_property_with_config_honors_the_caller_config() -> Check<(ScalarRun, u32)> {
     let executed = Cell::new(0_u32);
     let config = Config {
       cases: 7,
@@ -262,52 +284,107 @@ mod tests {
       rng_seed: RngSeed::Fixed(11),
       ..Config::default()
     };
-    ensure_property_with_config(&(0_u32..100), "an explicit config drives the run", config, |_input| {
-      executed.set(executed.get() + 1);
-      Ok(())
-    })?;
-    ensure_eq(&executed.get(), &7, "the caller's case count is used verbatim")
+    let run = ensure_property_with_config(&(0_u32..100), "explicit config", config, |input| {
+      executed.set(executed.get().saturating_add(1));
+      Ok(input)
+    });
+    ensure_that(
+      (run, executed.get()),
+      "configured cases execute exactly once each and retain their subjects",
+      |observed| {
+        observed.1 == 7
+          && observed
+            .0
+            .as_ref()
+            .is_ok_and(|report| report.statistics.successes == 7 && report.evaluations.len() == 7)
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn strict_default_config_preserves_ordinary_proptest_defaults() -> TestResult {
-    // strict_default_config only pins persistence and the seed; the
-    // remaining knobs must still come from Config::default() so the
-    // PROPTEST_* environment overrides keep working through it.
-    let strict = strict_default_config();
-    let ordinary = Config::default();
-    ensure_all(&[
-      (strict.cases == ordinary.cases, "the case count comes from Config::default"),
-      (
-        strict.max_shrink_iters == ordinary.max_shrink_iters,
-        "the shrink budget comes from Config::default",
-      ),
-    ])
+  fn explicit_persistence_preserves_replay_counting_and_generated_rng_sequence() -> Check<PersistenceReplay> {
+    let config = Config {
+      cases: 4,
+      source_file: Some(file!()),
+      failure_persistence: Some(Box::new(MapFailurePersistence::default())),
+      rng_seed: RngSeed::Fixed(11),
+      ..Config::default()
+    };
+    let mut persisting = TestRunner::new(config);
+    let failure = persisting.run_typed(&(0_u32..1_000), Err);
+    let replay_config = persisting.config().clone();
+    let baseline_config = Config {
+      failure_persistence: None,
+      ..replay_config
+    };
+    let baseline = ensure_property_with_config(&(0_u32..1_000), "baseline", baseline_config, Ok);
+    let replayed = ensure_property_with_config(&(0_u32..1_000), "replayed", replay_config, Ok);
+    ensure_that((persisting, failure, [baseline, replayed]), "explicit persistence replays a saved failure without counting it or perturbing generated samples", |observed| {
+      let [Ok(ref baseline_run), Ok(ref replay_run)] = observed.2 else {
+        return false;
+      };
+      let Some(persisted) = replay_run.evaluations.first() else {
+        return false;
+      };
+      observed.0.config().failure_persistence.as_ref().is_some_and(|backend| backend.load_persisted_failures2(Some(file!())).len() == 1)
+        && observed.1.as_ref().is_err_and(|report| matches!(report.cause, PropertyCause::Falsified { counterexample: 0, failure: 0, .. }))
+        && persisted.origin == CaseOrigin::Persisted
+        && baseline_run.statistics.successes == 4
+        && replay_run.statistics.successes == 4
+        && baseline_run.evaluations.len() == 4
+        && replay_run.evaluations.len() == 5
+        && baseline_run.evaluations.first().is_some_and(|first| {
+          matches!((&first.outcome, &persisted.outcome), (&EvaluationOutcome::Returned(Ok(initial)), &EvaluationOutcome::Returned(Ok(recovered))) if initial == recovered)
+        })
+        && baseline_run.evaluations.iter().zip(replay_run.evaluations.iter().skip(1)).all(|(baseline_case, replay_case)| {
+          baseline_case.origin == CaseOrigin::Generated && replay_case.origin == CaseOrigin::Generated
+            && matches!((&baseline_case.outcome, &replay_case.outcome), (&EvaluationOutcome::Returned(Ok(expected)), &EvaluationOutcome::Returned(Ok(actual))) if expected == actual)
+        })
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn resolve_seed_maps_raw_values_onto_rng_seeds() -> TestResult {
-    // The pure seam is driven directly so no test mutates the process
-    // environment (racy, and set_var is banned by the lint policy).
-    ensure_all(&[
-      (
-        resolve_seed(None) == RngSeed::Fixed(DETERMINISTIC_SEED),
-        "unset pins the fixed deterministic seed",
-      ),
-      (resolve_seed(Some("random")) == RngSeed::Random, "random opts into OS entropy"),
-      (
-        resolve_seed(Some("42")) == RngSeed::Fixed(42),
-        "a bare integer pins that exact seed",
-      ),
-      (
-        resolve_seed(Some("garbage")) == RngSeed::Fixed(DETERMINISTIC_SEED),
-        "an unrecognized value falls back to the fixed seed",
-      ),
-    ])
+  fn strict_default_config_preserves_ordinary_proptest_defaults() -> Check<(Config, Config)> {
+    ensure_that(
+      (strict_default_config(), Config::default()),
+      "strict defaults override only persistence and seeding",
+      |observed| {
+        let mut expected = observed.1.clone();
+        expected.failure_persistence = None;
+        expected.rng_seed = observed.0.rng_seed;
+        observed.0 == expected
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
-  /// A strict-shaped config carrying an explicit seed, so seed behavior
-  /// is driven without touching `STRICT_TEST_SEED` itself.
+  #[test]
+  fn resolve_seed_maps_raw_values_onto_rng_seeds() -> Result<(), Box<ComparisonFailure<SeedResolutions, SeedResolutions>>> {
+    ensure_eq(
+      [
+        resolve_seed(None),
+        resolve_seed(Some("random")),
+        resolve_seed(Some("42")),
+        resolve_seed(Some("garbage")),
+      ],
+      [
+        RngSeed::Fixed(DETERMINISTIC_SEED),
+        RngSeed::Random,
+        RngSeed::Fixed(42),
+        RngSeed::Fixed(DETERMINISTIC_SEED),
+      ],
+      "seed resolution preserves absent, entropy, explicit, and invalid cases",
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  /// Construct explicit seed configuration without mutating process environment.
   fn seeded_config(seed: RngSeed) -> Config {
     Config {
       failure_persistence: None,
@@ -317,84 +394,71 @@ mod tests {
   }
 
   #[test]
-  fn fixed_seed_replays_the_same_samples() -> TestResult {
-    // Fold each drawn sample through an order-sensitive accumulator;
-    // two runs under the same fixed seed must fold to the same value.
-    let strategy = 0_u64..1_000;
-    let fold = |seed: RngSeed| -> Result<u64, TestFailure> {
-      let acc = Cell::new(0_u64);
-      ensure_property_with_config(&strategy, "fold the sampled inputs", seeded_config(seed), |sample| {
-        acc.set(acc.get().wrapping_mul(31).wrapping_add(sample));
-        Ok(())
-      })?;
-      Ok(acc.get())
-    };
-    let first = fold(RngSeed::Fixed(DETERMINISTIC_SEED))?;
-    let second = fold(RngSeed::Fixed(DETERMINISTIC_SEED))?;
-    ensure_eq(&first, &second, "a fixed seed replays the same sampled input sequence")
-  }
-
-  #[test]
-  fn random_seed_still_drives_the_property() -> TestResult {
-    // The entropy path must execute and honor both polarities: a true
-    // property passes and a false one still falsifies.
-    ensure_property_with_config(
-      &(0_u32..10),
-      "a random-seeded run holds the bound",
-      seeded_config(RngSeed::Random),
-      |sample| ensure(sample < 10, "sample stays below ten"),
-    )?;
-    let failure = ensure_some(
+  fn fixed_seed_replays_the_same_samples() -> Check<[SampleRun; 2]> {
+    let runs = [(); 2].map(|()| {
       ensure_property_with_config(
-        &(1_u32..32),
-        "a random-seeded run still falsifies",
-        seeded_config(RngSeed::Random),
-        |sample| ensure(sample < 1, "sample below one"),
+        &(0_u64..1_000),
+        "sample sequence",
+        seeded_config(RngSeed::Fixed(DETERMINISTIC_SEED)),
+        Ok,
       )
-      .err(),
-      "a false property must falsify even under a random seed",
-    )?;
-    ensure_contains(
-      &failure.to_string(),
-      "property falsified",
-      "the random-seeded failure names the falsified family",
-    )
+    });
+    ensure_that(runs, "a fixed seed reproduces the complete native sample sequence", |observed| {
+      let [Ok(ref first_run), Ok(ref second_run)] = *observed else {
+        return false;
+      };
+      first_run.evaluations.len() == second_run.evaluations.len()
+        && first_run.evaluations.iter().zip(&second_run.evaluations).all(|(left, right)| {
+          matches!((&left.outcome, &right.outcome),
+            (&EvaluationOutcome::Returned(Ok(left_subject)), &EvaluationOutcome::Returned(Ok(right_subject)))
+              if left_subject == right_subject)
+        })
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn strict_runs_never_write_persistence_files() -> TestResult {
-    // Config-level: the strict default disables persistence outright,
-    // so the runner has nothing to write with.
-    ensure(
-      strict_default_config().failure_persistence.is_none(),
-      "strict_default_config must disable failure persistence",
-    )?;
-    // Behavior-level: falsify a property under the default strict
-    // config, then pin the absence of the exact file the default
-    // persistence would have used. Proptest's default is
-    // FileFailurePersistence::SourceParallel("proptest-regressions"),
-    // which maps a source under src/ to a crate-root sibling tree
-    // (failure_persistence/file.rs::resolve): this module's source
-    // <crate>/src/strict.rs resolves to
-    // <crate>/proptest-regressions/strict.txt.
-    let failure = ensure_some(
-      ensure_property(&(1_u32..32), "falsify a property to probe persistence", |input| {
-        ensure(input < 1, "input stays below one")
-      })
-      .err(),
-      "the persistence probe property must falsify",
-    )?;
-    ensure_contains(
-      &failure.to_string(),
-      "property falsified",
-      "the persistence probe reports the falsified family",
-    )?;
-    let counterfactual = Path::new(env!("CARGO_MANIFEST_DIR"))
+  fn random_seed_still_drives_the_property() -> Check<[RangeOutcome; 2]> {
+    let passing = ensure_property_with_config(&(0_u32..10), "random pass", seeded_config(RngSeed::Random), |sample| {
+      ensure_that(sample, "below ten", |subject| *subject < 10)
+    });
+    let failing = ensure_property_with_config(&(1_u32..32), "random failure", seeded_config(RngSeed::Random), |sample| {
+      ensure_that(sample, "below one", |subject| *subject < 1)
+    });
+    ensure_that(
+      [passing, failing],
+      "entropy preserves both passing and shrinking behavior",
+      |outcomes| matches!(*outcomes, [Ok(_), Err(ref report)] if matches!(report.cause, PropertyCause::Falsified { counterexample: 1, .. })),
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn strict_runs_never_write_persistence_files() -> Check<PersistenceProbe> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
       .join("proptest-regressions")
       .join("strict.txt");
-    ensure(
-      !counterfactual.exists(),
-      "a strict run must not write proptest-regressions/strict.txt",
+    let outcome = ensure_property(&(1_u32..32), "persistence probe", |input| {
+      ensure_that(input, "below one", |subject| *subject < 1)
+    });
+    let observed_path = metadata(&path);
+    ensure_that(
+      (strict_default_config(), outcome, path, observed_path),
+      "strict defaults disable persistence even after a minimized failure",
+      |observed| {
+        observed.0.failure_persistence.is_none()
+          && observed.3.as_ref().is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+          && observed.1.as_ref().is_err_and(|report| {
+            matches!(report.cause, PropertyCause::Falsified {
+              counterexample: 1,
+              ..
+            })
+          })
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

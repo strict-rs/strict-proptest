@@ -119,13 +119,13 @@ arbitrary!(
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_some;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
   use crate::arbitrary::any_with;
   use crate::collection::size_range;
+  use crate::strategy::NewTree;
   use crate::strategy::ValueTree as _;
   use crate::test_runner::TestRunner;
 
@@ -144,33 +144,44 @@ mod test {
       arc_os_str => Arc<OsStr>
   );
 
-  fn ensure_c_string_contract(bounds: SizeRange, expected: impl Fn(usize) -> bool, context: &'static str) -> Result<(), TestFailure> {
+  /// The native tree or generation error of every `CString` sample.
+  type CStringSamples = Vec<NewTree<StrategyFor<CString>>>;
+
+  fn ensure_c_string_contract(
+    bounds: SizeRange,
+    expected: impl Fn(usize) -> bool,
+    context: &'static str,
+  ) -> Result<CStringSamples, PredicateFailure<CStringSamples>> {
     let mut runner = TestRunner::deterministic();
     let strategy = any_with::<CString>(bounds);
-    for _ in 0..64 {
-      let value = ensure_some(strategy.new_tree(&mut runner).ok(), "CString strategy generates a value tree")?.current();
-      let bytes = value.as_bytes();
-      ensure(expected(bytes.len()), context)?;
-      ensure(!bytes.contains(&0), "generated CString bytes contain no interior NUL")?;
-    }
-    Ok(())
+    let samples = (0..64).map(|_| strategy.new_tree(&mut runner)).collect();
+    let valid_string = |sample: &NewTree<StrategyFor<CString>>| {
+      let Ok(ref tree) = *sample else {
+        return false;
+      };
+      let value = tree.current();
+      expected(value.as_bytes().len()) && !value.as_bytes().contains(&0)
+    };
+    ensure_that(samples, context, |subjects: &CStringSamples| subjects.iter().all(valid_string))
   }
 
   #[test]
-  fn c_string_respects_zero_length_range() -> Result<(), TestFailure> {
+  fn c_string_respects_zero_length_range() -> Result<(), PredicateFailure<CStringSamples>> {
     ensure_c_string_contract(
       size_range(0..=0),
       |len| len == 0,
       "zero-length CString range generates empty byte strings",
     )
+    .map(drop)
   }
 
   #[test]
-  fn c_string_respects_bounded_length_range() -> Result<(), TestFailure> {
+  fn c_string_respects_bounded_length_range() -> Result<(), PredicateFailure<CStringSamples>> {
     ensure_c_string_contract(
       size_range(3..=5),
       |len| (3..=5).contains(&len),
       "bounded CString range generates lengths inside the range",
     )
+    .map(drop)
   }
 }

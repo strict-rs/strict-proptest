@@ -18,24 +18,24 @@ Scope: `proptest/` — the core property-testing library crate (`proptest` v1.11
 Default set: `["std", "fork", "timeout", "bit-set", "strict-test"]`. The complete set, with what each pulls in and how they chain:
 
 - `std` — standard-library support; pulls `rand/std`, `rand/sys_rng`, the `regex-syntax` dep, and `num-traits/std`. Gates the `path`/`string`/`range_subset` modules and the `_std` arbitrary tier.
-- `libm` — enables `num-traits/libm` so float math such as `mul_add` works without `std`; use `--no-default-features` for the actual no-`std` build mode.
+- `libm` — enables `alloc` and `num-traits/libm` so allocation and trait-backed float math work without `std`; use `--no-default-features` for the actual no-`std` build mode.
 - `alloc` — empty toggle that turns on allocator-backed APIs in a `no_std` build (`Vec`, `String`, maps — resolved through `std_facade`).
 - `fork` — process-isolate each test case via `rusty-fork`; pulls `rusty-fork` + `tempfile` and **requires `std`**.
 - `timeout` — per-case time limits; pulls `rusty-fork/timeout` and **requires `fork`**.
-- `bit-set` — bitset strategies; pulls the `bit-set` + `bit-vec` deps (via `dep:` syntax).
-- `attr-macro` — pulls the optional `proptest-macro` dep and re-exports `#[property_test]`.
-- `unstable` — exact nightly-only standard-library and language API support; enables `f16`, but the `cfg_attr` gates in `lib.rs` request `allocator_api`, `coroutine_trait`, `never_type`, and `ip` only when `alt-stable` is not enabled.
-- `f16` — primitive `f16` float strategy support. It requires nightly unless `alt-stable` is also enabled, in which case the stable `half::f16` substitute is selected instead. Enabled implicitly by `unstable`.
-- `alt-stable` — stable substitutes for APIs that are still nightly in `std`/`core`/`alloc`; pulls `allocator-api2` and `half`, and wins over `unstable` in combined feature sets so stable `--all-features` builds do not request nightly crate attributes.
-- `hardware-rng` — use hardware/OS entropy instead of a static seed on supported no-`std` targets; pulls `getrandom`, with OS-less RDRAND consumers selecting getrandom's `rdrand` backend by cfg.
-- `atomic64bit` — gates `Arbitrary` for the 64-bit atomics (`AtomicI64`/`AtomicU64`); per its comment, excludable on no_std targets that lack 64-bit atomics.
+- `bit-set` — bitset strategies; enables `alloc` and pulls the `bit-set` + `bit-vec` deps (via `dep:` syntax).
+- `attr-macro` — pulls the optional `proptest-macro` dep, re-exports `#[property_test]`, and enables `strict-test` (therefore `std`) for generated property wrappers.
+- `unstable` — exact nightly-only standard-library and language API support; enables `f16`, but the `cfg_attr` gates in `lib.rs` request `allocator_api`, `coroutine_trait`, and `ip` only when `alt-stable` is not enabled. Uninhabited container impls use `core::convert::Infallible`, which also covers literal `!` on current nightly without a separate impl or language feature gate.
+- `f16` — primitive `f16` float strategy support; enables `alloc`. It requires nightly unless `alt-stable` is also enabled, in which case the stable `half::f16` substitute is selected instead. Enabled implicitly by `unstable`.
+- `alt-stable` — stable substitutes for APIs that are still nightly in `std`/`core`/`alloc`; enables `libm` (therefore `alloc`), pulls `allocator-api2` and `half`, and wins over `unstable` in combined feature sets so stable `--all-features` builds do not request nightly crate attributes.
+- `hardware-rng` — use hardware/OS entropy instead of a static seed on supported no-`std` targets; enables `alloc` and pulls `getrandom`, with OS-less RDRAND consumers selecting getrandom's `rdrand` backend by cfg.
+- `atomic64bit` — enables `alloc` and gates `Arbitrary` for the 64-bit atomics (`AtomicI64`/`AtomicU64`); leave it disabled on no_std targets that lack 64-bit atomics.
 - `handle-panics` — hide intermediate panic spew flowing to stderr during the shrink phase; **requires `std`**.
-- `strict-test` — gates the `strict` module (`proptest::strict`, the Result-returning property harness); pulls the optional `strict-test-support` dep (`TestFailure` and the `ensure*` helpers) and **requires `std`** (enables it explicitly). On by default.
+- `strict-test` — gates the `strict` module (`proptest::strict`, the native typed property harness) and **requires `std`**. On by default. Assertion vocabulary belongs to the caller; `strict-test-support` is a dev-dependency.
 - `default-code-coverage` — a coverage-friendly mirror of `default` (`std`, `fork`, `timeout`, `bit-set` — without `strict-test`).
 
 ## Dependencies (`Cargo.toml`)
 
-Always on: `bitflags`, `unarray`, `num-traits`, `rand` (with its `alloc` feature), `rand_chacha`, `rand_xorshift`. Optional / feature-gated: `regex-syntax` (`std`), `bit-set` + `bit-vec` (`bit-set`), `allocator-api2` + `half` (`alt-stable`), `getrandom` (`hardware-rng`), `rusty-fork` + `tempfile` (`fork`), `proptest-macro` (`attr-macro`), `strict-test-support` (`strict-test`). Dev-only: `regex`, `trybuild`, `strict-test-support` (the `ensure*` vocabulary for test targets and trybuild fixtures). Versions are pinned centrally in the workspace `[workspace.dependencies]`.
+Always on: `thiserror`, `bitflags`, `unarray`, `num-traits`, `rand` (with its `alloc` feature), `rand_chacha`, `rand_xorshift`. Optional / feature-gated: `regex-syntax` (`std`), `bit-set` + `bit-vec` (`bit-set`), `allocator-api2` + `half` (`alt-stable`), `getrandom` (`hardware-rng`), `rusty-fork` + `tempfile` (`fork`), `proptest-macro` (`attr-macro`). Dev-only: `regex`, `trybuild`, `strict-test-support` (the `ensure*` vocabulary for test targets and trybuild fixtures). Versions and sources are declared centrally in the workspace `[workspace.dependencies]`; this member inherits optional dependencies with `workspace = true, optional = true` and activates them through explicit `dep:` links in their owning features.
 
 ## Generated docs
 

@@ -130,6 +130,7 @@ impl UseTracker {
       .predicates
       .extend(self.where_types.iter().cloned().map(|ty| {
         syn::WherePredicate::Type(syn::PredicateType {
+          attrs:       vec![],
           lifetimes:   None,
           bounded_ty:  ty,
           colon_token: <Token![:]>::default(),
@@ -200,7 +201,7 @@ impl Visit<'_> for PathVisitor<'_> {
 
   fn visit_type_path(&mut self, tpath: &syn::TypePath) {
     if matches_prj_tyvar(self.0, tpath) {
-      self.0.use_type(adjust_simple_prj(tpath).into());
+      self.0.use_type(syn::Type::Path(adjust_simple_prj(tpath)));
       return;
     }
     visit_type_path(self, tpath);
@@ -272,6 +273,7 @@ fn adjust_simple_prj(tpath: &syn::TypePath) -> syn::TypePath {
       combined_segments.push_punct(<Token![::]>::default());
       combined_segments.extend(base_path.path.segments.into_pairs());
       syn::TypePath {
+        attrs: base_path.attrs,
         qself: None,
         path:  syn::Path {
           leading_colon: None,
@@ -288,5 +290,41 @@ const fn extract_path(ty: &syn::Type) -> Option<&syn::TypePath> {
     Some(tpath)
   } else {
     None
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use strict_test_support::ComparisonFailure;
+  use strict_test_support::ensure_eq;
+  use syn::parse_quote;
+
+  use super::adjust_simple_prj;
+
+  #[test]
+  fn projection_normalization_preserves_outer_attributes() -> Result<(), Box<ComparisonFailure<syn::TypePath, syn::TypePath>>> {
+    let mut original: syn::TypePath = parse_quote!(<T>::Assoc);
+    original.attrs.push(parse_quote!(#[cfg(enabled)]));
+    let mut expected: syn::TypePath = parse_quote!(T::Assoc);
+    expected.attrs = original.attrs.clone();
+    ensure_eq(
+      adjust_simple_prj(&original),
+      expected,
+      "normalizing a projection preserves source attributes",
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn trait_qualified_projection_remains_qualified() -> Result<(), Box<ComparisonFailure<syn::TypePath, syn::TypePath>>> {
+    let original: syn::TypePath = parse_quote!(<T as Trait>::Assoc);
+    ensure_eq(
+      adjust_simple_prj(&original),
+      original,
+      "trait-qualified projections retain their disambiguation",
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

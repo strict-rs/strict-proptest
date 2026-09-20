@@ -627,6 +627,7 @@ fn error_if_set<T>(ctx: Ctx<'_>, loc: Option<&T>, meta: &Meta) {
 )]
 fn ident_to_type(ident: Ident) -> Type {
   Type::Path(syn::TypePath {
+    attrs: vec![],
     qself: None,
     path:  ident.into(),
   })
@@ -652,12 +653,11 @@ fn extract_expr(lit: Lit) -> Option<Expr> {
 }
 
 /// Construct an expression from a literal.
-fn lit_to_expr(lit: Lit) -> Expr {
-  syn::ExprLit {
+const fn lit_to_expr(lit: Lit) -> Expr {
+  Expr::Lit(syn::ExprLit {
     attrs: vec![],
     lit,
-  }
-  .into()
+  })
 }
 
 /// Construct a function call expression for an identifier.

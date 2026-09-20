@@ -9,6 +9,11 @@
 
 //! Defines the core traits used by Proptest.
 
+#[cfg(test)]
+use crate::std_facade::Vec;
+#[cfg(test)]
+use crate::std_facade::vec;
+
 /// The `Filter` combinator (`Strategy::prop_filter`): rejection sampling
 /// that discards generated values a predicate does not accept.
 mod filter;
@@ -56,3 +61,13 @@ pub use self::traits::*;
 pub use self::unions::*;
 
 pub mod statics;
+
+/// Retain a value tree and the values reached by successful simplifications.
+#[cfg(test)]
+pub(crate) fn trace_shrink_steps<V: ValueTree>(mut tree: V) -> (V, Vec<V::Value>) {
+  let mut values = vec![tree.current()];
+  while tree.simplify() {
+    values.push(tree.current());
+  }
+  (tree, values)
+}

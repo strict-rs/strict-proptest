@@ -25,6 +25,7 @@ use std::string::String;
 
 /// One structured runner diagnostic, rendered to the exact text the
 /// runner has historically printed for that situation.
+#[derive(Debug)]
 pub(super) enum RunnerDiagnostic {
   /// A `PROPTEST_*` env-var value failed to parse as its target type.
   EnvVarUnparsable {
@@ -308,6 +309,9 @@ fn write_line(writer: &mut dyn Write, args: fmt::Arguments<'_>) -> io::Result<()
 
 #[cfg(test)]
 mod tests {
+  use std::boxed::Box;
+  /// A concrete allocation retains each complete assertion subject.
+  type Check<S> = Result<(), Box<PredicateFailure<S>>>;
   use std::borrow::ToOwned as _;
   use std::io;
   use std::path::PathBuf;
@@ -315,96 +319,97 @@ mod tests {
   use std::string::ToString as _;
   use std::vec::Vec;
 
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_all;
+  use strict_test_support::ComparisonFailure;
+  use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_eq;
+  use strict_test_support::ensure_that;
 
   use super::RunnerDiagnostic;
   use super::verbose_at_least;
   use super::write_line;
 
-  #[test]
-  fn rendered_texts_match_the_legacy_messages() -> Result<(), TestFailure> {
-    let unparsable = RunnerDiagnostic::EnvVarUnparsable {
-      var:     "PROPTEST_CASES",
-      value:   "many".to_owned(),
-      typ:     "u32",
-      default: "256".to_owned(),
-    }
-    .to_string();
-    ensure_eq(
-      &unparsable,
-      &"proptest: The env-var PROPTEST_CASES=many can't be parsed as u32, using default of 256.".to_owned(),
-      "env-var parse warning keeps its legacy text",
-    )?;
+  /// Four threshold decisions compared as one complete value.
+  type Verbosity = [bool; 4];
 
-    let unknown_path = RunnerDiagnostic::PersistenceOpenFailed {
-      path:  None,
-      error: io::Error::from(io::ErrorKind::PermissionDenied),
-    }
-    .to_string();
-    ensure(
-      unknown_path.starts_with("proptest: failed to open ??: "),
-      "an unknown persistence path renders as the legacy ?? marker",
-    )?;
-
-    let line = RunnerDiagnostic::UnparsableSeedLine {
-      path: PathBuf::from("proptest-regressions/demo.txt"),
-      line: 4,
-    }
-    .to_string();
-    ensure_eq(
-      &line,
-      &"proptest: proptest-regressions/demo.txt:4: unparsable line, ignoring".to_owned(),
-      "seed-line warnings render the display-ready line number",
-    )
+  /// Preserve the source diagnostic alongside the text whose contract is tested.
+  fn rendered(diagnostic: RunnerDiagnostic) -> (RunnerDiagnostic, String) {
+    let text = diagnostic.to_string();
+    (diagnostic, text)
   }
 
   #[test]
-  fn save_hint_gates_the_creation_suffix_on_created() -> Result<(), TestFailure> {
-    let render = |created: bool| {
-      RunnerDiagnostic::PersistenceSaved {
+  fn rendered_texts_match_the_legacy_messages() -> Check<[(RunnerDiagnostic, String); 3]> {
+    let subject = [
+      rendered(RunnerDiagnostic::EnvVarUnparsable {
+        var:     "PROPTEST_CASES",
+        value:   "many".to_owned(),
+        typ:     "u32",
+        default: "256".to_owned(),
+      }),
+      rendered(RunnerDiagnostic::PersistenceOpenFailed {
+        path:  None,
+        error: io::Error::from(io::ErrorKind::PermissionDenied),
+      }),
+      rendered(RunnerDiagnostic::UnparsableSeedLine {
+        path: PathBuf::from("proptest-regressions/demo.txt"),
+        line: 4,
+      }),
+    ];
+    ensure_that(subject, "runner diagnostics preserve their legacy rendering", |observed| {
+      let [(_, ref unparsable), (_, ref unknown_path), (_, ref line)] = *observed;
+      unparsable == "proptest: The env-var PROPTEST_CASES=many can't be parsed as u32, using default of 256."
+        && unknown_path.starts_with("proptest: failed to open ??: ")
+        && line == "proptest: proptest-regressions/demo.txt:4: unparsable line, ignoring"
+    })
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn save_hint_gates_the_creation_suffix_on_created() -> Check<[(RunnerDiagnostic, String); 2]> {
+    let subject = [true, false].map(|created| {
+      rendered(RunnerDiagnostic::PersistenceSaved {
         path: PathBuf::from("proptest-regressions/demo.txt"),
         created,
         seed: "cc demoseed".to_owned(),
-      }
-      .to_string()
-    };
-    let fresh = render(true);
-    let existing = render(false);
-    ensure_all(&[
-      (
-        fresh.contains(" (You may need to create it.)"),
-        "a newly created file advises creating the CI copy",
-      ),
-      (
-        !existing.contains("(You may need to create it.)"),
-        "an existing file omits the creation advice",
-      ),
-      (
-        fresh.ends_with("cc demoseed") && existing.ends_with("cc demoseed"),
-        "both renderings end with the replayable seed line",
-      ),
-      (
-        fresh.starts_with("proptest: Saving this and future failures in proptest-regressions/demo.txt\n"),
-        "the hint names the persistence file on its first line",
-      ),
-    ])
+      })
+    });
+    ensure_that(
+      subject,
+      "save hints retain the seed and add creation advice only for a new file",
+      |observed| {
+        let [(_, ref fresh), (_, ref existing)] = *observed;
+        fresh.contains(" (You may need to create it.)")
+          && !existing.contains("(You may need to create it.)")
+          && fresh.ends_with("cc demoseed")
+          && existing.ends_with("cc demoseed")
+          && fresh.starts_with("proptest: Saving this and future failures in proptest-regressions/demo.txt\n")
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn verbose_gate_admits_at_and_above_the_level() -> Result<(), TestFailure> {
-    ensure_all(&[
-      (verbose_at_least(0, 0), "ALWAYS-level messages always pass"),
-      (verbose_at_least(2, 1), "higher verbosity admits INFO_LOG"),
-      (!verbose_at_least(0, 1), "silent runs suppress INFO_LOG"),
-      (!verbose_at_least(1, 2), "INFO_LOG verbosity suppresses TRACE"),
-    ])
+  fn verbose_gate_admits_at_and_above_the_level() -> Result<(), ComparisonFailure<Verbosity, Verbosity>> {
+    ensure_eq(
+      [
+        verbose_at_least(0, 0),
+        verbose_at_least(2, 1),
+        verbose_at_least(0, 1),
+        verbose_at_least(1, 2),
+      ],
+      [true, true, false, false],
+      "verbosity includes the threshold and suppresses higher levels",
+    )
+    .map(drop)
   }
 
+  /// Successful captured bytes and both native writer results.
+  type WriterOutcomes = (Vec<u8>, io::Result<()>, io::Result<()>);
+
   #[test]
-  fn writer_core_appends_newline_and_survives_write_failure() -> Result<(), TestFailure> {
+  fn writer_core_appends_newline_and_survives_write_failure() -> Check<WriterOutcomes> {
     struct BrokenPipe;
     impl io::Write for BrokenPipe {
       fn write(&mut self, _: &[u8]) -> io::Result<usize> {
@@ -414,17 +419,22 @@ mod tests {
         Err(io::Error::from(io::ErrorKind::BrokenPipe))
       }
     }
-
     let mut captured = Vec::new();
     let written = write_line(&mut captured, format_args!("proptest: x"));
-    ensure(written.is_ok(), "writing into a buffer succeeds")?;
-    ensure_eq(
-      &String::from_utf8_lossy(&captured).into_owned(),
-      &"proptest: x\n".to_owned(),
-      "the seam writes the message plus exactly one newline",
-    )?;
-
     let failed = write_line(&mut BrokenPipe, format_args!("dropped"));
-    ensure(failed.is_err(), "a broken writer reports the error instead of panicking")
+    ensure_that(
+      (captured, written, failed),
+      "the writer appends one newline and preserves broken-pipe errors",
+      |observed| {
+        observed.0 == b"proptest: x\n"
+          && observed.1.is_ok()
+          && observed
+            .2
+            .as_ref()
+            .is_err_and(|error| error.kind() == io::ErrorKind::BrokenPipe)
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

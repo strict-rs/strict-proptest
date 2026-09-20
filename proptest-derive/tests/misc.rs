@@ -19,11 +19,11 @@ mod tests {
   use proptest::prelude::any;
   use proptest::prelude::any_with;
   use proptest::strategy::Just;
-  use proptest::strict::TestResult;
   use proptest::strict::ensure_property;
+  use proptest::test_runner::PropertyResult;
   use proptest_derive::Arbitrary;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_eq;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   // TODO: An idea.
   // #[derive(Debug, Arbitrary)]
@@ -122,54 +122,64 @@ mod tests {
   }
 
   #[test]
-  fn foo_value_constructor_sets_payload() -> TestResult {
-    ensure_property(&any::<Foo>(), "a variant value constructor pins the payload", |value| {
-      let (left, right) = value.payload();
-      ensure_eq(&left, &1, "the left payload is pinned")?;
-      ensure_eq(&right, &1, "the right payload is pinned")
+  fn foo_value_constructor_sets_payload() -> PropertyResult<Foo, Foo, PredicateFailure<Foo>> {
+    ensure_property(&any::<Foo>(), "a variant value constructor pins the payload", |generated| {
+      ensure_that(generated, "both differently typed payloads are pinned to one", |value| {
+        value.payload() == (1, 1)
+      })
     })
   }
 
   #[test]
-  fn a_custom_strategy_sets_c_payload() -> TestResult {
-    ensure_property(&any_with::<Custom>(0_usize), "a variant strategy pins the C payload", |value| {
-      if let Some(payload) = value.payload() {
-        ensure_eq(&payload, &1, "the strategy-built payload is one")?;
-      }
-      Ok(())
+  fn a_custom_strategy_sets_c_payload() -> PropertyResult<Custom, Custom, PredicateFailure<Custom>> {
+    ensure_property(&any_with::<Custom>(0_usize), "a variant strategy pins the C payload", |generated| {
+      ensure_that(generated, "the strategy-built payload is one whenever present", |value| {
+        value.payload().is_none_or(|payload| payload == 1)
+      })
     })
   }
 
   #[test]
-  fn bobby_attributes_keep_payloads_reachable() -> TestResult {
+  fn bobby_attributes_keep_payloads_reachable() -> PropertyResult<Bobby, Bobby, PredicateFailure<Bobby>> {
     ensure_property(
       &any::<Bobby>(),
       "per-variant params spellings keep payloads reachable",
-      |value| match &value {
-        &Bobby::Defaulted(payload) => ensure_eq(&value.payload(), &payload, "the defaulted payload is reachable"),
-        &Bobby::Valued(_) | &Bobby::Strategized(_) | &Bobby::ParamValued(_) | &Bobby::ParamStrategized(_) => {
-          ensure_eq(&value.payload(), &1, "the pinned payload is one")
-        }
+      |generated| {
+        ensure_that(
+          generated,
+          "default payloads are retained and explicit payloads are one",
+          |value| match *value {
+            Bobby::Defaulted(payload) => value.payload() == payload,
+            Bobby::Valued(_) | Bobby::Strategized(_) | Bobby::ParamValued(_) | Bobby::ParamStrategized(_) => value.payload() == 1,
+          },
+        )
       },
     )
   }
 
+  /// The generated variant and its observed score remain together in the report.
+  type ScoredQuux = PropertyResult<Quux, (Quux, usize), PredicateFailure<(Quux, usize)>>;
+
   #[test]
-  fn quux_attributes_keep_payloads_reachable() -> TestResult {
+  fn quux_attributes_keep_payloads_reachable() -> ScoredQuux {
     ensure_property(&any::<Quux>(), "mixed variant attributes keep payload scores reachable", |value| {
       let payload_score = value.payload_score();
-      match value {
-        Quux::Bare(payload) => ensure_eq(&payload_score, &payload, "the bare payload is reachable"),
-        Quux::Pair(payload, text) => {
-          let expected = payload.saturating_add(text.len());
-          ensure_eq(&payload_score, &expected, "the tuple payloads are reachable")
-        }
-        Quux::PinnedPair(..) => ensure_eq(&payload_score, &3, "the value variant scores three"),
-        Quux::PinnedWord(_) => ensure_eq(&payload_score, &1337, "the strategy variant scores 1337"),
-        Quux::Braced {
-          _foo: foo,
-        } => ensure((10..20).contains(&foo), "the range strategy stays in bounds"),
-      }
+      ensure_that(
+        (value, payload_score),
+        "variant attributes retain the expected payload and score",
+        |observed| match observed.0 {
+          Quux::Bare(payload) => observed.1 == payload,
+          Quux::Pair(payload, ref text) => {
+            let expected = payload.saturating_add(text.len());
+            observed.1 == expected
+          }
+          Quux::PinnedPair(..) => observed.1 == 3,
+          Quux::PinnedWord(_) => observed.1 == 1337,
+          Quux::Braced {
+            _foo: foo,
+          } => (10..20).contains(&foo),
+        },
+      )
     })
   }
 

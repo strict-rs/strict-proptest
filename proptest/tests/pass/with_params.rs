@@ -6,8 +6,8 @@ fn main() {}
         ..Default::default()
     }
 )]
-fn no_trailing_comma(x: i32) -> proptest::strict::TestResult {
-    strict_test_support::ensure_eq(&x, &x, "a value equals itself")
+fn no_trailing_comma(x: i32) -> Result<(i32, i32), strict_test_support::ComparisonFailure<i32, i32>> {
+    strict_test_support::ensure_eq(x, x, "a value equals itself")
 }
 
 #[proptest::property_test(
@@ -16,6 +16,6 @@ fn no_trailing_comma(x: i32) -> proptest::strict::TestResult {
         ..Default::default()
     }
 )]
-fn trailing_comma(x: i32,) -> proptest::strict::TestResult {
-    strict_test_support::ensure_eq(&x, &x, "a value equals itself")
+fn trailing_comma(x: i32,) -> Result<(i32, i32), strict_test_support::ComparisonFailure<i32, i32>> {
+    strict_test_support::ensure_eq(x, x, "a value equals itself")
 }

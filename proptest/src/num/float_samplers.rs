@@ -282,7 +282,6 @@ macro_rules! float_sampler {
         one_point_five = $one_point_five: expr,
         half = $half: expr
         $(, always_trait = $always_trait:path)?
-        $(, no_std_trait = $no_std_trait:path)?
     ) => {
         mod $module {
             use super::{IntoSamplerFloat, sampler_index_from_float};
@@ -295,10 +294,6 @@ macro_rules! float_sampler {
             )?
             $(
                 use $always_trait as _;
-            )?
-            $(
-                #[cfg(all(not(feature = "std"), not(test)))]
-                use $no_std_trait as _;
             )?
             const ZERO: $typ = $zero;
             const TWO: $typ = $two;
@@ -588,541 +583,290 @@ macro_rules! float_sampler {
 
             #[cfg(test)]
             mod test {
-
-                use strict_test_support::{
-                    TestFailure, ensure, ensure_eq, ensure_ok, ensure_some,
-                };
-
+                use strict_test_support::{ComparisonFailure, PredicateFailure, ensure_eq, ensure_that};
                 use super::*;
-                #[cfg(feature = "strict-test")]
-                use super::super::{
-                    sampler_count_to_usize, sampler_index_from_usize,
-                };
                 use super::super::sampler_round_trip_integer;
                 #[cfg(feature = "strict-test")]
+                use super::super::{sampler_count_to_usize, sampler_index_from_usize};
+                #[cfg(feature = "strict-test")]
                 use crate::prelude::*;
-                use crate::test_runner::test_runner_without_persistence;
+                use crate::std_facade::{Box, Vec};
+                use crate::strategy::{Strategy, ValueTree};
+                use crate::test_runner::{Reason, RngAlgorithm, TestRng, test_runner_without_persistence};
+                #[cfg(feature = "strict-test")]
+                use crate::test_runner::PropertyResult;
 
-                #[test]
-                fn uniform_constructors_accept_valid_ranges()
-                -> Result<(), TestFailure> {
-                    ensure(
-                        FloatUniform::new($wrapper(ONE), $wrapper(TWO)).is_ok(),
-                        "new accepts a finite non-empty range",
-                    )?;
-                    ensure(
-                        FloatUniform::new_inclusive(
-                            $wrapper(ONE),
-                            $wrapper(ONE),
-                        )
-                        .is_ok(),
-                        "new_inclusive accepts a single-point range",
-                    )
+                /// Native constructor outcomes are retained even for invalid bounds.
+                type Constructor = Result<FloatUniform, rand::distr::uniform::Error>;
+                /// The sampler remains available alongside every native sample.
+                type Samples = Result<(FloatUniform, Vec<$typ>), rand::distr::uniform::Error>;
+                /// Typed outcomes of the float properties using whole-subject predicates.
+                #[cfg(feature = "strict-test")]
+                type Property<V, A> = PropertyResult<V, A, Box<PredicateFailure<A>>>;
+                /// A concrete allocation preserves a complete assertion subject.
+                type Check<S> = Result<(), Box<PredicateFailure<S>>>;
+
+                /// Sample a constructed distribution without projecting construction errors.
+                fn samples(constructor: Constructor, count: usize) -> Samples {
+                    constructor.map(|uniform| {
+                        let mut rng = TestRng::deterministic_rng(RngAlgorithm::default());
+                        let values = (0..count).map(|_| $typ::from(uniform.sample(&mut rng))).collect();
+                        (uniform, values)
+                    })
                 }
 
                 #[test]
-                fn uniform_constructors_reject_invalid_ranges()
-                -> Result<(), TestFailure> {
-                    ensure(
-                        matches!(
-                            FloatUniform::new($wrapper(TWO), $wrapper(ONE)),
-                            Err(rand::distr::uniform::Error::EmptyRange)
-                        ),
-                        "new rejects a reversed range as empty",
-                    )?;
-                    ensure(
-                        matches!(
-                            FloatUniform::new($wrapper(ONE), $wrapper(ONE)),
-                            Err(rand::distr::uniform::Error::EmptyRange)
-                        ),
-                        "new rejects a single-point exclusive range as empty",
-                    )?;
-                    ensure(
-                        matches!(
-                            FloatUniform::new(
-                                $wrapper($typ::NAN),
-                                $wrapper(ONE),
-                            ),
-                            Err(rand::distr::uniform::Error::NonFinite)
-                        ),
-                        "new rejects a non-finite bound",
-                    )?;
-                    ensure(
-                        matches!(
-                            FloatUniform::new_inclusive(
-                                $wrapper(TWO),
-                                $wrapper(ONE),
-                            ),
-                            Err(rand::distr::uniform::Error::EmptyRange)
-                        ),
-                        "new_inclusive rejects a reversed range as empty",
-                    )
+                fn uniform_constructors_accept_valid_ranges() -> Check<[Constructor; 2]> {
+                    ensure_that([
+                        FloatUniform::new($wrapper(ONE), $wrapper(TWO)),
+                        FloatUniform::new_inclusive($wrapper(ONE), $wrapper(ONE)),
+                    ], "finite nonempty and inclusive single-point ranges construct samplers", |results| {
+                        results.iter().all(Result::is_ok)
+                    }).map_err(Box::new).map(drop)
+                }
+
+                #[test]
+                fn uniform_constructors_reject_invalid_ranges() -> Check<[Constructor; 5]> {
+                    use rand::distr::uniform::Error::{EmptyRange, NonFinite};
+                    ensure_that([
+                        FloatUniform::new($wrapper(TWO), $wrapper(ONE)),
+                        FloatUniform::new($wrapper(ONE), $wrapper(ONE)),
+                        FloatUniform::new($wrapper($typ::NAN), $wrapper(ONE)),
+                        FloatUniform::new_inclusive($wrapper(TWO), $wrapper(ONE)),
+                        FloatUniform::new_inclusive($wrapper(ONE), $wrapper($typ::INFINITY)),
+                    ], "invalid ranges preserve the native constructor errors", |results| {
+                        matches!(*results, [Err(EmptyRange), Err(EmptyRange), Err(NonFinite), Err(EmptyRange), Err(NonFinite)])
+                    }).map_err(Box::new).map(drop)
                 }
 
                 #[cfg(feature = "strict-test")]
-                #[allow(clippy::single_call_fn, reason = "test-only helper ordering a float pair before the uniform sampler round-trip check")]
+                #[allow(clippy::single_call_fn, reason = "sorting finite endpoints names the range invariant before constructing a sampler")]
                 fn sort((left, right): ($typ, $typ)) -> [$typ; 2] {
-                    if left < right {
-                        [left, right]
-                    } else {
-                        [right, left]
-                    }
+                    if left < right { [left, right] } else { [right, left] }
                 }
 
                 #[cfg(feature = "strict-test")]
                 fn finite() -> impl Strategy<Value = $typ> {
-                    prop::num::$module::NEGATIVE
-                    | prop::num::$module::POSITIVE
-                    | prop::num::$module::NORMAL
-                    | prop::num::$module::SUBNORMAL
-                    | prop::num::$module::ZERO
+                    prop::num::$module::NEGATIVE | prop::num::$module::POSITIVE
+                        | prop::num::$module::NORMAL | prop::num::$module::SUBNORMAL | prop::num::$module::ZERO
                 }
 
                 #[cfg(feature = "strict-test")]
                 fn finite_above_min() -> impl Strategy<Value = $typ> {
-                    // The legacy tests rejected `MIN` with `prop_assume!`;
-                    // the precondition lives in the strategy instead.
-                    finite().prop_filter(
-                        "value must be above the type minimum",
-                        |val| *val > $typ::MIN,
-                    )
+                    finite().prop_filter("value must be above the type minimum", |value| *value > $typ::MIN)
                 }
 
                 #[cfg(feature = "strict-test")]
                 fn bounds() -> impl Strategy<Value = [$typ; 2]> {
-                    (finite(), finite())
-                        .prop_filter("Bounds can't be equal", |&(left, right)| {
-                            !float_equal(left, right)
-                        })
-                        .prop_map(sort)
+                    (finite(), finite()).prop_filter("Bounds can't be equal", |&(left, right)| !float_equal(left, right)).prop_map(sort)
                 }
 
                 #[test]
-                fn range_test() -> Result<(), TestFailure> {
-                    use crate::test_runner::{RngAlgorithm, TestRng};
-
-                    let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
-                    let (low, high) = (NEG_ONE, TEN);
-                    let uniform = ensure_ok(
-                        FloatUniform::new($wrapper(low), $wrapper(high)),
-                        "the bounds form a uniform sampler",
-                    )?;
-
-                    let samples = (0..100)
-                        .map(|_| $typ::from(uniform.sample(&mut test_rng)));
-                    for sample in samples {
-                        ensure(
-                            low <= sample && sample < high,
-                            "every sample stays within the half-open range",
-                        )?;
-                    }
-                    Ok(())
+                fn range_test() -> Check<Samples> {
+                    ensure_that(samples(FloatUniform::new($wrapper(NEG_ONE), $wrapper(TEN)), 100),
+                        "every sample stays within the half-open range", |result| result.as_ref().is_ok_and(|observed| {
+                            observed.1.iter().all(|value| observed.0.low <= *value && *value < observed.0.high)
+                        })).map_err(Box::new).map(drop)
                 }
 
                 #[test]
-                fn range_end_bound_test() -> Result<(), TestFailure> {
-                    use crate::test_runner::{RngAlgorithm, TestRng};
-
-                    let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
-                    let (low, high) = (ONE, ONE + $typ::EPSILON);
-                    let uniform = ensure_ok(
-                        FloatUniform::new($wrapper(low), $wrapper(high)),
-                        "the bounds form a uniform sampler",
-                    )?;
-
-                    let mut samples = (0..100)
-                        .map(|_| $typ::from(uniform.sample(&mut test_rng)));
-                    ensure(
-                        samples.all(|x| float_bits_equal(x, ONE)),
-                        "a one-ulp half-open range only yields its base",
-                    )
+                fn range_end_bound_test() -> Check<Samples> {
+                    ensure_that(samples(FloatUniform::new($wrapper(ONE), $wrapper(ONE + $typ::EPSILON)), 100),
+                        "a one-ulp half-open range only yields its base", |result| result.as_ref().is_ok_and(|observed| {
+                            observed.1.iter().all(|value| float_bits_equal(*value, ONE))
+                        })).map_err(Box::new).map(drop)
                 }
 
                 #[test]
-                fn inclusive_range_test() -> Result<(), TestFailure> {
-                    use crate::test_runner::{RngAlgorithm, TestRng};
-
-                    let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
-                    let (low, high) = (NEG_ONE, TEN);
-                    let uniform = ensure_ok(
-                        FloatUniform::new_inclusive($wrapper(low), $wrapper(high)),
-                        "the bounds form a uniform sampler",
-                    )?;
-
-                    let samples = (0..100)
-                        .map(|_| $typ::from(uniform.sample(&mut test_rng)));
-                    for sample in samples {
-                        ensure(
-                            low <= sample && sample <= high,
-                            "every sample stays within the inclusive range",
-                        )?;
-                    }
-                    Ok(())
+                fn inclusive_range_test() -> Check<Samples> {
+                    ensure_that(samples(FloatUniform::new_inclusive($wrapper(NEG_ONE), $wrapper(TEN)), 100),
+                        "every sample stays within the inclusive range", |result| result.as_ref().is_ok_and(|observed| {
+                            observed.1.iter().all(|value| observed.0.low <= *value && *value <= observed.0.high)
+                        })).map_err(Box::new).map(drop)
                 }
 
                 #[test]
-                fn inclusive_range_end_bound_test() -> Result<(), TestFailure> {
-                    use crate::test_runner::{RngAlgorithm, TestRng};
-
-                    let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
-                    let (low, high) = (ONE, ONE + $typ::EPSILON);
-                    let uniform = ensure_ok(
-                        FloatUniform::new_inclusive($wrapper(low), $wrapper(high)),
-                        "the bounds form a uniform sampler",
-                    )?;
-
-                    let mut samples = (0..100)
-                        .map(|_| $typ::from(uniform.sample(&mut test_rng)));
-                    ensure(
-                        samples.any(|x| {
-                            float_bits_equal(x, ONE + $typ::EPSILON)
-                        }),
-                        "the inclusive end bound is sampled",
-                    )
+                fn inclusive_range_end_bound_test() -> Check<Samples> {
+                    ensure_that(samples(FloatUniform::new_inclusive($wrapper(ONE), $wrapper(ONE + $typ::EPSILON)), 100),
+                        "the inclusive end bound is sampled", |result| result.as_ref().is_ok_and(|observed| {
+                            observed.1.iter().any(|value| float_bits_equal(*value, observed.0.high))
+                        })).map_err(Box::new).map(drop)
                 }
 
                 #[test]
-                fn inclusive_range_single_point() -> Result<(), TestFailure> {
-                    use crate::test_runner::{RngAlgorithm, TestRng};
-
-                    let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
-                    let point: $typ = ZERO;
-                    let uniform = ensure_ok(
-                        FloatUniform::new_inclusive($wrapper(point), $wrapper(point)),
-                        "a single-point range forms a uniform sampler",
-                    )?;
-                    for _ in 0..16 {
-                        ensure_eq(
-                            &$typ::from(uniform.sample(&mut test_rng)),
-                            &point,
-                            "a single-point range always yields its point",
-                        )?;
-                    }
-                    Ok(())
+                fn inclusive_range_single_point() -> Check<Samples> {
+                    ensure_that(samples(FloatUniform::new_inclusive($wrapper(ZERO), $wrapper(ZERO)), 16),
+                        "a single-point range always yields its point", |result| result.as_ref().is_ok_and(|observed| {
+                            observed.1.iter().all(|value| float_bits_equal(*value, ZERO))
+                        })).map_err(Box::new).map(drop)
                 }
 
                 #[test]
-                fn inclusive_range_single_point_strategy() -> Result<(), TestFailure> {
-                    use crate::strategy::{Strategy, ValueTree};
-
+                fn inclusive_range_single_point_strategy()
+                    -> Check<Result<crate::num::$module::BinarySearch, Reason>> {
                     let mut runner = test_runner_without_persistence();
-                    let mid: $typ = ONE_POINT_FIVE;
-                    let tree = ensure_some(
-                        (mid..=mid).new_tree(&mut runner).ok(),
-                        "a single-point inclusive range generates a value tree",
-                    )?;
-                    ensure_eq(
-                        &tree.current(),
-                        &mid,
-                        "the single-point strategy yields its point",
-                    )
+                    ensure_that((ONE_POINT_FIVE..=ONE_POINT_FIVE).new_tree(&mut runner),
+                        "the single-point strategy yields its point", |result| result.as_ref().is_ok_and(|tree| {
+                            float_bits_equal(tree.current(), ONE_POINT_FIVE)
+                        })).map_err(Box::new).map(drop)
                 }
 
                 #[test]
-                fn all_floats_in_range_are_possible_1() -> Result<(), TestFailure> {
-                    use crate::test_runner::{RngAlgorithm, TestRng};
-
-                    let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
-                    let (low, high) = (ONE - $typ::EPSILON, ONE + $typ::EPSILON);
-                    let uniform = ensure_ok(
-                        FloatUniform::new_inclusive($wrapper(low), $wrapper(high)),
-                        "the bounds form a uniform sampler",
-                    )?;
-
-                    let mut samples = (0..100)
-                        .map(|_| $typ::from(uniform.sample(&mut test_rng)));
-                    ensure(
-                        samples.any(|x| {
-                            float_bits_equal(x, ONE - $typ::EPSILON * HALF)
-                        }),
-                        "an interior float of the range is sampled",
-                    )
+                fn all_floats_in_range_are_possible_1() -> Check<Samples> {
+                    ensure_that(samples(FloatUniform::new_inclusive($wrapper(ONE - $typ::EPSILON), $wrapper(ONE + $typ::EPSILON)), 100),
+                        "an interior float of the range is sampled", |result| result.as_ref().is_ok_and(|observed| {
+                            observed.1.iter().any(|value| float_bits_equal(*value, ONE - $typ::EPSILON * HALF))
+                        })).map_err(Box::new).map(drop)
                 }
 
                 #[test]
-                fn all_floats_in_range_are_possible_2() -> Result<(), TestFailure> {
-                    use crate::test_runner::{RngAlgorithm, TestRng};
-
-                    let mut test_rng = TestRng::deterministic_rng(RngAlgorithm::default());
-                    let (low, high) =
-                        (ZERO, MAX_PRECISE_INT.into_sampler_float());
-                    let uniform = ensure_ok(
-                        FloatUniform::new_inclusive($wrapper(low), $wrapper(high)),
-                        "the bounds form a uniform sampler",
-                    )?;
-
-                    let mut samples = (0..100)
-                        .map(|_| $typ::from(uniform.sample(&mut test_rng)))
-                        .map(|x| x.fract());
-
-                    ensure(
-                        samples.any(|x| !float_is_zero(x)),
-                        "fractional values are sampled across the range",
-                    )
+                fn all_floats_in_range_are_possible_2() -> Check<Samples> {
+                    ensure_that(samples(FloatUniform::new_inclusive($wrapper(ZERO), $wrapper(MAX_PRECISE_INT.into_sampler_float())), 100),
+                        "fractional values are sampled across the range", |result| result.as_ref().is_ok_and(|observed| {
+                            observed.1.iter().any(|value| !float_is_zero(value.fract()))
+                        })).map_err(Box::new).map(drop)
                 }
 
                 #[test]
-                fn max_precise_int_plus_one_is_rounded_down() -> Result<(), TestFailure> {
-                    ensure_eq(
-                        &sampler_round_trip_integer::<$typ, $int_typ>(
-                            MAX_PRECISE_INT + 1,
-                        ),
-                        &MAX_PRECISE_INT,
-                        "the first imprecise integer rounds back down",
-                    )
+                fn max_precise_int_plus_one_is_rounded_down() -> Result<(), ComparisonFailure<$int_typ, $int_typ>> {
+                    ensure_eq(sampler_round_trip_integer::<$typ, $int_typ>(MAX_PRECISE_INT.saturating_add(1)), MAX_PRECISE_INT,
+                        "the first imprecise integer rounds back down").map(drop)
                 }
 
                 #[cfg(feature = "strict-test")]
                 #[test]
-                fn next_down_less_than_float() -> Result<(), TestFailure> {
-                    crate::strict::ensure_property(
-                        &finite_above_min(),
-                        "next_down is strictly below its input",
-                        |val| {
-                            ensure(
-                                next_down(val) < val,
-                                "next_down yields a smaller float",
-                            )
-                        },
-                    )
+                fn next_down_less_than_float() -> Property<$typ, ($typ, $typ)> {
+                    crate::strict::ensure_property(&finite_above_min(), "next_down is strictly below its input", |value| {
+                        ensure_that((value, next_down(value)), "next_down yields a smaller float", |observed| observed.1 < observed.0).map_err(Box::new)
+                    })
                 }
 
                 #[cfg(feature = "strict-test")]
                 #[test]
-                fn no_value_between_float_and_next_down() -> Result<(), TestFailure> {
-                    crate::strict::ensure_property(
-                        &finite_above_min(),
-                        "next_down is the immediate predecessor",
-                        |val| {
-                            let prev = next_down(val);
-                            let avg = prev * HALF + val * HALF;
-                            ensure(
-                                float_bits_equal(avg, prev) ||
-                                    float_bits_equal(avg, val),
-                                "no float lies between a value and its \
-                                 next_down",
-                            )
-                        },
-                    )
+                fn no_value_between_float_and_next_down() -> Property<$typ, ($typ, $typ, $typ)> {
+                    crate::strict::ensure_property(&finite_above_min(), "next_down is the immediate predecessor", |value| {
+                        let previous = next_down(value);
+                        let average = previous * HALF + value * HALF;
+                        ensure_that((value, previous, average), "no float lies between a value and its next_down", |observed| {
+                            float_bits_equal(observed.2, observed.1) || float_bits_equal(observed.2, observed.0)
+                        }).map_err(Box::new)
+                    })
                 }
 
                 #[cfg(feature = "strict-test")]
                 #[test]
-                fn values_less_than_or_equal_to_max_precise_int_are_not_rounded() -> Result<(), TestFailure> {
-                    crate::strict::ensure_property(
-                        &(0..=MAX_PRECISE_INT),
-                        "precise integers survive a float round trip",
-                        |i| {
-                            ensure_eq(
-                                &sampler_round_trip_integer::<$typ, $int_typ>(i),
-                                &i,
-                                "the round-tripped integer is unchanged",
-                            )
-                        },
-                    )
+                fn values_less_than_or_equal_to_max_precise_int_are_not_rounded()
+                    -> PropertyResult<$int_typ, ($int_typ, $int_typ), ComparisonFailure<$int_typ, $int_typ>> {
+                    crate::strict::ensure_property(&(0..=MAX_PRECISE_INT), "precise integers survive a float round trip", |value| {
+                        ensure_eq(sampler_round_trip_integer::<$typ, $int_typ>(value), value, "the round-tripped integer is unchanged")
+                    })
                 }
 
                 #[cfg(feature = "strict-test")]
                 #[test]
-                fn indivisible_intervals_are_split_to_self() -> Result<(), TestFailure> {
-                    crate::strict::ensure_property(
-                        &finite_above_min(),
-                        "a one-ulp interval is indivisible",
-                        |val| {
-                            let prev = next_down(val);
-                            let intervals = split_interval([prev, val]);
-                            ensure_eq(
-                                &intervals.count,
-                                &1,
-                                "the indivisible interval splits to itself",
-                            )
-                        },
-                    )
+                fn indivisible_intervals_are_split_to_self() -> Property<$typ, ([$typ; 2], IntervalCollection)> {
+                    crate::strict::ensure_property(&finite_above_min(), "a one-ulp interval is indivisible", |value| {
+                        let bounds = [next_down(value), value];
+                        ensure_that((bounds, split_interval(bounds)), "the indivisible interval splits to itself", |observed| observed.1.count == 1).map_err(Box::new)
+                    })
                 }
+
+                /// All sampled intervals retain their native index and endpoints.
+                #[cfg(feature = "strict-test")]
+                type IntervalSamples = ([$typ; 2], [prop::sample::Index; 32], IntervalCollection, [Option<[$typ; 2]>; 32]);
+                /// Concrete input of interval-sampling properties.
+                #[cfg(feature = "strict-test")]
+                type IntervalInput = ([$typ; 2], [prop::sample::Index; 32]);
 
                 #[cfg(feature = "strict-test")]
                 #[test]
-                fn split_intervals_are_the_same_size() -> Result<(), TestFailure> {
-                    // The legacy test `prop_assume!`d a non-trivial split;
-                    // the precondition lives in the strategy filter instead.
+                fn split_intervals_are_the_same_size() -> Property<IntervalInput, IntervalSamples> {
                     let inputs = (bounds(), any::<[prop::sample::Index; 32]>())
-                        .prop_filter(
-                            "the bounds must split into at least two \
-                             intervals",
-                            |&(bounds, _)| {
-                                split_interval(bounds).count > 1
-                            },
-                        );
-                    crate::strict::ensure_property(
-                        &inputs,
-                        "split intervals share one width",
-                        |(bounds, indices)| {
-                            let intervals = split_interval(bounds);
-                            let size = sampler_count_to_usize::<$typ, $int_typ>(
-                                intervals.count - 1,
-                            );
-
-                            let (first_index, remaining_indices) = ensure_some(
-                                indices.split_first(),
-                                "at least one interval is sampled",
-                            )?;
-                            let first_index = ensure_some(
-                                first_index.index(size),
-                                "the first sampled split index is in range",
-                            )?;
-                            let [low, high] = intervals.get(
-                                sampler_index_from_usize::<$typ, $int_typ>(
-                                    first_index,
-                                ),
-                            );
-                            let interval_size = high - low;
-
-                            for index in remaining_indices {
-                                let index = ensure_some(
-                                    index.index(size),
-                                    "the sampled split index is in range",
-                                )?;
-                                let [low, high] = intervals.get(
-                                    sampler_index_from_usize::<$typ, $int_typ>(
-                                        index,
-                                    ),
-                                );
-                                let width = high - low;
-                                ensure(
-                                    float_bits_equal(width, interval_size),
-                                    "every sampled interval has the same \
-                                     width",
-                                )?;
-                            }
-                            Ok(())
-                        },
-                    )
+                        .prop_filter("the bounds must split into at least two intervals", |&(bounds, _)| split_interval(bounds).count > 1);
+                    crate::strict::ensure_property(&inputs, "split intervals share one width", |(bounds, indices)| {
+                        let intervals = split_interval(bounds);
+                        let size = sampler_count_to_usize::<$typ, $int_typ>(intervals.count.saturating_sub(1));
+                        let sampled = indices.map(|index| index.index(size).map(|index| {
+                            intervals.get(sampler_index_from_usize::<$typ, $int_typ>(index))
+                        }));
+                        ensure_that((bounds, indices, intervals, sampled), "every sampled interval has the same width", |observed| {
+                            observed.3.first().copied().flatten().is_some_and(|[low, high]| observed.3.iter().all(|sample| {
+                                sample.is_some_and(|[other_low, other_high]| float_bits_equal(high - low, other_high - other_low))
+                            }))
+                        }).map_err(Box::new)
+                    })
                 }
+
+                /// Adjacent interval observations, including any invalid sample index.
+                #[cfg(feature = "strict-test")]
+                type AdjacentSamples = ([$typ; 2], [prop::sample::Index; 32], IntervalCollection, [Option<[[$typ; 2]; 2]>; 32]);
 
                 #[cfg(feature = "strict-test")]
                 #[test]
-                fn split_intervals_are_consecutive() -> Result<(), TestFailure> {
+                fn split_intervals_are_consecutive() -> Property<IntervalInput, AdjacentSamples> {
                     let inputs = (bounds(), any::<[prop::sample::Index; 32]>())
-                        .prop_filter(
-                            "the bounds must split into at least three \
-                             intervals",
-                            |&(bounds, _)| {
-                                split_interval(bounds).count > 2
-                            },
-                        );
-                    crate::strict::ensure_property(
-                        &inputs,
-                        "split intervals are consecutive",
-                        |(bounds, indices)| {
-                            let intervals = split_interval(bounds);
-                            let size = sampler_count_to_usize::<$typ, $int_typ>(
-                                intervals.count - 1,
-                            );
-
-                            let mut ascending = true;
-                            let mut descending = true;
-                            for index in &indices {
-                                let index = ensure_some(
-                                    index.index(size - 1),
-                                    "the sampled adjacent split index is in \
-                                     range",
-                                )?;
-                                let index =
-                                    sampler_index_from_usize::<$typ, $int_typ>(
-                                        index,
-                                    );
-                                let [l1, h1] = intervals.get(index);
-                                let [l2, h2] = intervals.get(index + 1);
-                                ascending &= float_bits_equal(h1, l2);
-                                descending &= float_bits_equal(l1, h2);
-                            }
-
-                            ensure(
-                                ascending || descending,
-                                "adjacent intervals share a bound in one \
-                                 direction",
-                            )
-                        },
-                    )
+                        .prop_filter("the bounds must split into at least three intervals", |&(bounds, _)| split_interval(bounds).count > 2);
+                    crate::strict::ensure_property(&inputs, "split intervals are consecutive", |(bounds, indices)| {
+                        let intervals = split_interval(bounds);
+                        let size = sampler_count_to_usize::<$typ, $int_typ>(intervals.count.saturating_sub(1)).saturating_sub(1);
+                        let sampled = indices.map(|index| index.index(size).map(|index| {
+                            let index = sampler_index_from_usize::<$typ, $int_typ>(index);
+                            [intervals.get(index), intervals.get(index.saturating_add(1))]
+                        }));
+                        ensure_that((bounds, indices, intervals, sampled), "adjacent intervals share a bound in one direction", |observed| {
+                            observed.3.iter().all(|sample| sample.is_some_and(|[[_, high], [low, _]]| float_bits_equal(high, low)))
+                                || observed.3.iter().all(|sample| sample.is_some_and(|[[low, _], [_, high]]| float_bits_equal(low, high)))
+                        }).map_err(Box::new)
+                    })
                 }
+
+                /// Requested interval, its subdivision, and both extreme subintervals.
+                #[cfg(feature = "strict-test")]
+                type Split = ([$typ; 2], IntervalCollection, [$typ; 2], [$typ; 2]);
 
                 #[cfg(feature = "strict-test")]
                 #[test]
-                fn first_split_might_slightly_overshoot_one_bound() -> Result<(), TestFailure> {
-                    crate::strict::ensure_property(
-                        &bounds(),
-                        "the first split covers the bounds with at most one \
-                         overshoot",
-                        |bounds| {
-                            let [low, high] = bounds;
-                            let intervals = split_interval(bounds);
-                            let start = intervals.get(0);
-                            let end = intervals.get(intervals.count - 1);
-                            let (low_interval, high_interval) = if start[0] < end[0] {
-                                (start, end)
-                            } else {
-                                (end, start)
-                            };
-                            let lower_bound_matches =
-                                float_bits_equal(low, low_interval[0]) &&
-                                    high_interval[0] < high &&
-                                    high <= high_interval[1];
-                            let upper_bound_matches =
-                                low_interval[0] <= low &&
-                                    low < low_interval[1] &&
-                                    float_bits_equal(high, high_interval[1]);
-
-                            ensure(
-                                lower_bound_matches || upper_bound_matches,
-                                "exactly one bound may overshoot",
-                            )
-                        },
-                    )
+                fn first_split_might_slightly_overshoot_one_bound() -> Property<[$typ; 2], Split> {
+                    crate::strict::ensure_property(&bounds(), "the first split covers the bounds with at most one overshoot", |bounds| {
+                        let intervals = split_interval(bounds);
+                        let start = intervals.get(0);
+                        let end = intervals.get(intervals.count.saturating_sub(1));
+                        let (low_interval, high_interval) = if start[0] < end[0] { (start, end) } else { (end, start) };
+                        ensure_that((bounds, intervals, low_interval, high_interval), "exactly one bound may overshoot",
+                            |observed| {
+                                let [low, high] = observed.0;
+                                let [low_start, low_end] = observed.2;
+                                let [high_start, high_end] = observed.3;
+                                (float_bits_equal(low, low_start) && high_start < high && high <= high_end)
+                                    || (low_start <= low && low < low_end && float_bits_equal(high, high_end))
+                            }).map_err(Box::new)
+                    })
                 }
+
+                /// A recursive split retains both the parent and its sampled child.
+                #[cfg(feature = "strict-test")]
+                type RecursiveSplit = ([$typ; 2], prop::sample::Index, IntervalCollection, Option<Split>);
 
                 #[cfg(feature = "strict-test")]
                 #[test]
-                fn subsequent_splits_always_match_bounds() -> Result<(), TestFailure> {
-                    crate::strict::ensure_property(
-                        &(bounds(), any::<prop::sample::Index>()),
-                        "recursive splits stay within their interval",
-                        |(bounds, index)| {
-                            // This property is true because the distances of split intervals of
-                            // are powers of two so the smaller one always divides the larger.
-
-                            let intervals = split_interval(bounds);
-                            let size = sampler_count_to_usize::<$typ, $int_typ>(
-                                intervals.count - 1,
-                            );
-
-                            let index = ensure_some(
-                                index.index(size),
-                                "the sampled recursive split index is in \
-                                 range",
-                            )?;
-                            let interval = intervals.get(
-                                sampler_index_from_usize::<$typ, $int_typ>(
-                                    index,
-                                ),
-                            );
+                fn subsequent_splits_always_match_bounds() -> Property<([$typ; 2], prop::sample::Index), RecursiveSplit> {
+                    crate::strict::ensure_property(&(bounds(), any::<prop::sample::Index>()), "recursive splits stay within their interval", |(bounds, index)| {
+                        let intervals = split_interval(bounds);
+                        let size = sampler_count_to_usize::<$typ, $int_typ>(intervals.count.saturating_sub(1));
+                        let sampled = index.index(size).map(|index| {
+                            let interval = intervals.get(sampler_index_from_usize::<$typ, $int_typ>(index));
                             let small_intervals = split_interval(interval);
-
                             let start = small_intervals.get(0);
-                            let end = small_intervals.get(small_intervals.count - 1);
-                            let (low_interval, high_interval) = if start[0] < end[0] {
-                                (start, end)
-                            } else {
-                                (end, start)
-                            };
-
-                            ensure(
-                                float_bits_equal(interval[0], low_interval[0]) &&
-                                float_bits_equal(interval[1], high_interval[1]),
-                                "the sub-split spans exactly its parent \
-                                 interval",
-                            )
-                        },
-                    )
+                            let end = small_intervals.get(small_intervals.count.saturating_sub(1));
+                            let (low_interval, high_interval) = if start[0] < end[0] { (start, end) } else { (end, start) };
+                            (interval, small_intervals, low_interval, high_interval)
+                        });
+                        ensure_that((bounds, index, intervals, sampled), "the sub-split spans exactly its parent interval", |observed| {
+                            observed.3.as_ref().is_some_and(|reached| {
+                                float_bits_equal(reached.0[0], reached.2[0]) && float_bits_equal(reached.0[1], reached.3[1])
+                            })
+                        }).map_err(Box::new)
+                    })
                 }
             }
         }
@@ -1170,8 +914,7 @@ float_sampler!(
     two = 2.0,
     ten = 10.0,
     one_point_five = 1.5,
-    half = 0.5,
-    no_std_trait = num_traits::float::Float
+    half = 0.5
 );
 float_sampler!(
     module = f64,
@@ -1184,6 +927,5 @@ float_sampler!(
     two = 2.0,
     ten = 10.0,
     one_point_five = 1.5,
-    half = 0.5,
-    no_std_trait = num_traits::float::Float
+    half = 0.5
 );

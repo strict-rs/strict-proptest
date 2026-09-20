@@ -19,10 +19,11 @@
 mod tests {
   use proptest::prelude::Arbitrary;
   use proptest::prelude::any;
-  use proptest::strict::TestResult;
   use proptest::strict::ensure_property;
+  use proptest::test_runner::PropertyResult;
   use proptest_derive::Arbitrary;
-  use strict_test_support::ensure;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   #[derive(Debug, Arbitrary)]
   enum T1 {
@@ -547,8 +548,11 @@ mod tests {
     }
   }
 
+  /// Every generated enum is retained alongside the complete property verdict.
+  type Payloads = (Alan, SameType, OneTwo, ZeroOneTwo, Nested);
+
   #[test]
-  fn generated_payload_fixtures_are_consumed() -> TestResult {
+  fn generated_payload_fixtures_are_consumed() -> PropertyResult<Payloads, Payloads, PredicateFailure<Payloads>> {
     ensure_property(
       &(
         any::<Alan>(),
@@ -558,18 +562,14 @@ mod tests {
         any::<Nested>(),
       ),
       "derived enum payloads stay within their scoring bounds",
-      |(alan, same_type, one_two, zero_one_two, nested)| {
-        ensure(alan.payload_score() <= 6, "Alan's payloads stay bounded")?;
-        ensure(same_type.payload_score() <= 2, "SameType's payloads stay bounded")?;
-        ensure(
-          (1..=4).contains(&one_two.payload_score()),
-          "OneTwo consumes generated payloads in its score",
-        )?;
-        ensure(
-          zero_one_two.payload_score() <= 4,
-          "ZeroOneTwo consumes generated payloads in its score",
-        )?;
-        ensure(nested.payload_score() <= 8, "Nested composes the inner scores")
+      |values| {
+        ensure_that(values, "all generated enum payload scores stay bounded", |observed| {
+          observed.0.payload_score() <= 6
+            && observed.1.payload_score() <= 2
+            && (1..=4).contains(&observed.2.payload_score())
+            && observed.3.payload_score() <= 4
+            && observed.4.payload_score() <= 8
+        })
       },
     )
   }

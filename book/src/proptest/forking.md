@@ -14,10 +14,21 @@ may make using a debugger more difficult, and makes test output harder to
 interpret, but allows proptest to find and minimise test cases for these
 situations as well.
 
-To use these features, simply set the `fork` and/or `timeout` fields on the
-`Config`. (Setting `timeout` implies `fork`.)
+Set the `fork` and/or `timeout` fields on `Config`; a nonzero timeout implies forking. Typed properties additionally require an explicit transport.
 
-Here is a simple example of using both features:
+## Typed properties
+
+Call `proptest::strict::ensure_property_with_transport` with a `PropertyTransport<V, A, E>`, where `V` is the strategy's native case and the callback returns `Result<A, E>`. The codec defines representations for cases, successful evidence, concrete assertion failures, and its own typed errors. It also restores strategy state when a child replays a completed or interrupted case. Ordinary in-process properties need no codec or serialization bounds.
+
+The parent supervises children and decodes their versioned, framed records without invoking the property callback. Successful values and failures both reach the returned report. Partial payloads never become completed evaluations; malformed framing, codec errors, native I/O errors, child termination, and timeout remain distinguishable, preserving all already-decoded evidence. A child that cannot return does not produce an invented assertion failure.
+
+Set `Config::test_name` to the test's full harness name so child re-execution selects the same property. `#[property_test]` supplies that name automatically and accepts `transport = CodecType => codec_expression` together with its `config` option. Typed entry points without a codec reject fork or timeout settings before the first callback.
+
+The complete `proptest/examples/fib.rs` example declares a fixed-width codec for `(input, Option<fib_value>)` and its native predicate failure. It deliberately uses exponential recursion to demonstrate child interruption and shrinking. Run it with `cargo run -p proptest --example fib`; failure is expected. A codec's faithful domain must include every value and failure the property promises to return. Process-local resource owners require a deliberate transferable representation.
+
+## Legacy runner
+
+The legacy `TestRunner::run` and `proptest!` contract uses its existing marker replay protocol. This example uses both settings:
 
 ```rust,should_panic
 # extern crate proptest;
@@ -61,7 +72,7 @@ due to stack overflow or time out along the way.
 If you just want to run tests in subprocesses or with a timeout every now
 and then, you can do that by setting the `PROPTEST_FORK` or
 `PROPTEST_TIMEOUT` environment variables to alter the default
-configuration. For example, on Unix,
+configuration. Typed properties still need their explicit codec when these environment variables enable isolation. For example, on Unix,
 
 ```sh
 # Run all the proptest tests in subprocesses with no timeout.

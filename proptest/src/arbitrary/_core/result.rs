@@ -9,7 +9,6 @@
 
 //! Arbitrary implementations for `std::result`.
 
-#[cfg(feature = "alt-stable")]
 use core::convert::Infallible;
 use core::fmt;
 use core::result::IntoIter;
@@ -21,51 +20,22 @@ use crate::arbitrary::functor;
 use crate::result::MaybeOk;
 use crate::result::Probability;
 use crate::result::maybe_ok_weighted;
-#[cfg(not(feature = "alt-stable"))]
-use crate::std_facade::string;
 use crate::strategy::BoxedStrategy;
 use crate::strategy::Just;
 use crate::strategy::Strategy;
 use crate::strategy::statics::static_map;
 
-// These are Result with uninhabited type in some variant:
-#[cfg(not(feature = "alt-stable"))]
-arbitrary!([A: Arbitrary] Result<A, string::ParseError>,
-    SMapped<A, Self>, A::Parameters;
-    args => static_map(any_with::<A>(args), Ok::<A, string::ParseError>)
-);
-#[cfg(feature = "alt-stable")]
+// `string::ParseError` aliases `Infallible`, which also aliases `!` on current
+// nightly Rust. One implementation per inhabited side covers all those names.
 arbitrary!([A: Arbitrary] Result<A, Infallible>,
     SMapped<A, Self>, A::Parameters;
     args => static_map(any_with::<A>(args), Ok::<A, Infallible>)
 );
-#[cfg(not(feature = "alt-stable"))]
-arbitrary!([A: Arbitrary] Result<string::ParseError, A>,
-    SMapped<A, Self>, A::Parameters;
-    args => static_map(any_with::<A>(args), Err::<string::ParseError, A>)
-);
-#[cfg(feature = "alt-stable")]
 arbitrary!([A: Arbitrary] Result<Infallible, A>,
     SMapped<A, Self>, A::Parameters;
     args => static_map(any_with::<A>(args), Err::<Infallible, A>)
 );
-#[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
-arbitrary!([A: Arbitrary] Result<A, !>,
-    SMapped<A, Self>, A::Parameters;
-    args => static_map(any_with::<A>(args), Ok)
-);
-#[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
-arbitrary!([A: Arbitrary] Result<!, A>,
-    SMapped<A, Self>, A::Parameters;
-    args => static_map(any_with::<A>(args), Err)
-);
-
-#[cfg(not(feature = "alt-stable"))]
-lift1!([] Result<A, string::ParseError>; Ok);
-#[cfg(feature = "alt-stable")]
 lift1!([] Result<A, Infallible>; Ok);
-#[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
-lift1!([] Result<A, !>; Ok);
 
 // We assume that `MaybeOk` is canonical as it's the most likely Strategy
 // a user wants.
@@ -124,6 +94,10 @@ mod test {
   use std::string::ParseError;
 
   use super::*;
+  use crate::arbitrary::StrategyFor;
+  use crate::strategy::NewTree;
+  #[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
+  use crate::test_runner::PropertyResult;
 
   no_panic_test!(
       result    => Result<u8, u16>,
@@ -132,25 +106,53 @@ mod test {
       result_parse_error_a => Result<ParseError, u8>
   );
 
-  #[cfg(feature = "alt-stable")]
+  #[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
+  no_panic_test!(
+      result_ok_never => Result<u8, !>,
+      result_never_err => Result<!, u8>
+  );
+
+  /// Preserve generated values and comparisons for a native never-error result.
+  #[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
+  type NeverLiftResult =
+    PropertyResult<Result<u8, !>, (Result<u8, !>, Result<u8, !>), strict_test_support::ComparisonFailure<Result<u8, !>, Result<u8, !>>>;
+
+  #[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
   #[test]
-  fn result_infallible_variants_generate_only_inhabited_side() -> Result<(), strict_test_support::TestFailure> {
+  fn result_never_lift_preserves_payload() -> NeverLiftResult {
+    use crate::arbitrary::functor::ArbitraryF1 as _;
+    use crate::test_runner::TestRunner;
+
+    let mut runner = TestRunner::deterministic();
+    let strategy = Result::<u8, !>::lift1_with(Just(37), ());
+    runner.run_typed(&strategy, |value| {
+      strict_test_support::ensure_eq(value, Ok(37), "lifting a strategy into Result<T, !> preserves its Ok payload")
+    })
+  }
+
+  /// Native tree results for both one-sided inhabited Result strategies.
+  type InhabitedTrees = (
+    NewTree<StrategyFor<Result<u8, Infallible>>>,
+    NewTree<StrategyFor<Result<Infallible, u8>>>,
+  );
+
+  #[test]
+  fn result_infallible_variants_generate_only_inhabited_side() -> Result<(), strict_test_support::PredicateFailure<InhabitedTrees>> {
     use crate::arbitrary::any;
     use crate::strategy::Strategy as _;
     use crate::strategy::ValueTree as _;
     use crate::test_runner::TestRunner;
 
     let mut runner = TestRunner::deterministic();
-    let ok_tree = strict_test_support::ensure_some(
-      any::<Result<u8, Infallible>>().new_tree(&mut runner).ok(),
-      "Result<T, Infallible> generates a value tree",
-    )?;
-    strict_test_support::ensure(ok_tree.current().is_ok(), "Result<T, Infallible> always generates Ok")?;
-
-    let err_tree = strict_test_support::ensure_some(
-      any::<Result<Infallible, u8>>().new_tree(&mut runner).ok(),
-      "Result<Infallible, T> generates a value tree",
-    )?;
-    strict_test_support::ensure(err_tree.current().is_err(), "Result<Infallible, T> always generates Err")
+    let ok_tree = any::<Result<u8, Infallible>>().new_tree(&mut runner);
+    let err_tree = any::<Result<Infallible, u8>>().new_tree(&mut runner);
+    strict_test_support::ensure_that(
+      (ok_tree, err_tree),
+      "Result with an uninhabited variant generates only its inhabited side",
+      |observed| {
+        observed.0.as_ref().is_ok_and(|tree| tree.current().is_ok()) && observed.1.as_ref().is_ok_and(|tree| tree.current().is_err())
+      },
+    )
+    .map(drop)
   }
 }

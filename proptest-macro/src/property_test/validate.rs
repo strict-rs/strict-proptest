@@ -32,13 +32,13 @@ pub(super) fn validate(f: &mut ItemFn) -> Result<(), TokenStream> {
 
 /// The error emitted for property tests whose signature declares no return
 /// type or the literal `-> ()`.
-const UNIT_RETURN_ERROR: &str = "strict property tests must return `Result<(), TestFailure>` (`proptest::strict::TestResult`), not `()`; \
-                                 declare `-> proptest::strict::TestResult` and end the body with `Ok(())`";
+const UNIT_RETURN_ERROR: &str =
+  "strict property tests must return `Result<A, E>`, not `()`; declare a concrete assertion result or result alias";
 
 /// Reject a property test whose signature returns `()`.
 ///
 /// The generated wrapper drives the body through the strict runner as
-/// `Result<(), TestFailure>` (`proptest::strict::TestResult`), so a unit body
+/// `Result<A, E>`, so a unit body
 /// would otherwise only surface as a cryptic type-inference error inside the
 /// generated `ensure_property` call; rejecting it here gives a spanned,
 /// actionable diagnostic instead. Like the rest of this module the check is
@@ -46,7 +46,7 @@ const UNIT_RETURN_ERROR: &str = "strict property tests must return `Result<(), T
 /// and is left to rustc's type error.
 #[allow(
   clippy::single_call_fn,
-  reason = "reject a property test signature that returns unit instead of TestResult"
+  reason = "reject a property test signature that returns unit instead of a typed result"
 )]
 fn returns_strict_result(f: &ItemFn) -> Result<(), TokenStream> {
   match f.sig.output {
@@ -54,7 +54,7 @@ fn returns_strict_result(f: &ItemFn) -> Result<(), TokenStream> {
     ReturnType::Type(_, ref ty) => match **ty {
       Type::Tuple(ref tuple) if tuple.elems.is_empty() => err(ty, UNIT_RETURN_ERROR),
       Type::Array(_)
-      | Type::BareFn(_)
+      | Type::FnPtr(_)
       | Type::Group(_)
       | Type::ImplTrait(_)
       | Type::Infer(_)
@@ -164,87 +164,106 @@ fn err(span: &impl Spanned, message: &str) -> Result<(), TokenStream> {
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_contains;
-  use strict_test_support::ensure_some;
-  use syn::parse_quote;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
 
-  #[test]
-  fn validate_fails_with_self_arg() -> Result<(), TestFailure> {
-    let invalids = [
-      parse_quote! {fn foo(self) {}},
-      parse_quote! {fn foo(&self) {}},
-      parse_quote! {fn foo(&mut self) {}},
-      parse_quote! {fn foo(self: Self) {}},
-      parse_quote! {fn foo(self: &Self) {}},
-      parse_quote! {fn foo(self: &mut Self) {}},
-      parse_quote! {fn foo(self: Box<Self>) {}},
-      parse_quote! {fn foo(self: Rc<Self>) {}},
-      parse_quote! {fn foo(self: Arc<Self>) {}},
-    ];
+  /// The full function after validation and its native diagnostic tokens.
+  type Observation = (ItemFn, Result<(), TokenStream>);
 
-    for mut invalid in invalids {
-      ensure(validate(&mut invalid).is_err(), "every self-receiver form is rejected")?;
-    }
-    Ok(())
+  /// Parsing failures and retained validation evidence.
+  #[derive(Debug, thiserror::Error)]
+  enum ValidationFailure {
+    /// The parser rejected a fixture.
+    #[error(transparent)]
+    Parse(#[from] syn::Error),
+    /// The complete validation observations did not match the contract.
+    #[error(transparent)]
+    Observation(#[from] PredicateFailure<Vec<Observation>>),
+  }
+
+  /// Validate every fixture while preserving its transformed syntax and diagnostics.
+  fn observations(fixtures: &[&str]) -> Result<Vec<Observation>, syn::Error> {
+    fixtures
+      .iter()
+      .map(|source| {
+        let mut function = syn::parse_str(source)?;
+        let result = validate(&mut function);
+        Ok((function, result))
+      })
+      .collect()
   }
 
   #[test]
-  fn validate_fails_with_duplicate() -> Result<(), TestFailure> {
-    let mut function = parse_quote! {
-        fn foo(#[strategy = 1] #[strategy = 2] x: i32) {}
-    };
-
-    let error = ensure_some(validate(&mut function).err(), "duplicate strategy attributes are rejected")?;
-    ensure_contains(&error.to_string(), "compile_error", "the duplicate rejection emits a compile_error")
+  fn validate_fails_with_self_arg() -> Result<(), ValidationFailure> {
+    let observed = observations(&[
+      "fn f(self) {}", "fn f(&self) {}", "fn f(&mut self) {}", "fn f(self: Self) {}", "fn f(self: &Self) {}", "fn f(self: &mut Self) {}",
+      "fn f(self: Box<Self>) {}", "fn f(self: Rc<Self>) {}", "fn f(self: Arc<Self>) {}",
+    ])?;
+    ensure_that(observed, "receivers are rejected before unit return diagnostics", |cases| {
+      cases.iter().all(|case| {
+        case
+          .1
+          .as_ref()
+          .is_err_and(|error| error.to_string().contains("`self` parameters are forbidden"))
+      })
+    })
+    .map(drop)
+    .map_err(ValidationFailure::Observation)
   }
 
   #[test]
-  fn validate_accepts_result_returning_fn() -> Result<(), TestFailure> {
-    let mut valid: ItemFn = parse_quote! {
-        fn foo(x: i32) -> proptest::strict::TestResult {
-            Ok(())
-        }
-    };
-    ensure(validate(&mut valid).is_ok(), "a TestResult-returning fn is accepted")?;
-
-    let mut spelled_out: ItemFn = parse_quote! {
-        fn foo(x: i32) -> Result<(), TestFailure> {
-            Ok(())
-        }
-    };
-    ensure(validate(&mut spelled_out).is_ok(), "a spelled-out Result-returning fn is accepted")
-  }
-
-  /// Check one unit-returning fixture: validate must reject it with a
-  /// `compile_error` naming the strict return type.
-  fn ensure_unit_fixture_rejected(mut fixture: ItemFn, rejection_context: &'static str) -> Result<(), TestFailure> {
-    let error = ensure_some(validate(&mut fixture).err(), rejection_context)?;
-    let rendered = error.to_string();
-    ensure_contains(&rendered, "compile_error", "the unit rejection emits a compile_error")?;
-    ensure_contains(
-      &rendered,
-      "proptest::strict::TestResult",
-      "the unit rejection names the strict return type",
-    )
-  }
-
-  #[test]
-  fn validate_rejects_unit_returning_fn() -> Result<(), TestFailure> {
-    ensure_unit_fixture_rejected(
-      parse_quote! {
-          fn foo(x: i32) {}
+  fn validate_fails_with_duplicate() -> Result<(), ValidationFailure> {
+    let observed = observations(&["fn f(#[strategy = 1] #[strategy = 2] x: i32) {}"])?;
+    ensure_that(
+      observed,
+      "duplicate strategies are diagnosed before the return type and retain the first strategy",
+      |cases| {
+        cases.iter().all(|case| {
+          case.1.as_ref().is_err_and(|error| error.to_string().contains("duplicate"))
+            && case
+              .0
+              .sig
+              .inputs
+              .iter()
+              .all(|input| matches!(input, FnArg::Typed(parameter) if parameter.attrs.len() == 1))
+        })
       },
-      "an implicit unit return is rejected",
-    )?;
-    ensure_unit_fixture_rejected(
-      parse_quote! {
-          fn foo(x: i32) -> () {}
-      },
-      "an explicit unit return is rejected",
     )
+    .map(drop)
+    .map_err(ValidationFailure::Observation)
+  }
+
+  #[test]
+  fn validate_accepts_result_returning_fn() -> Result<(), ValidationFailure> {
+    let observed = observations(&[
+      "fn f(x: i32) -> Result<i32, Failure> { check(x) }",
+      "fn f(x: i32) -> AssertionResult { check(x) }",
+      "fn f(x: i32) -> fn(i32) -> i32 { identity }",
+    ])?;
+    ensure_that(
+      observed,
+      "result aliases are resolved by Rust and syn function-pointer nodes remain valid syntax",
+      |cases| cases.iter().all(|case| case.1.is_ok()),
+    )
+    .map(drop)
+    .map_err(ValidationFailure::Observation)
+  }
+
+  #[test]
+  fn validate_rejects_unit_returning_fn() -> Result<(), ValidationFailure> {
+    let observed = observations(&["fn f(x: i32) {}", "fn f(x: i32) -> () {}"])?;
+    ensure_that(
+      observed,
+      "implicit and explicit unit returns receive the typed-result diagnostic",
+      |cases| {
+        cases
+          .iter()
+          .all(|case| case.1.as_ref().is_err_and(|error| error.to_string().contains("Result<A, E>")))
+      },
+    )
+    .map(drop)
+    .map_err(ValidationFailure::Observation)
   }
 }

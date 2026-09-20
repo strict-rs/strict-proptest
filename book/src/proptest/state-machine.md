@@ -22,7 +22,7 @@ Before using state machine testing, it is recommended to be at least familiar wi
 
 - Strategies are composed from common proptest constructs and used to generate inputs to a state machine test.
 - Because the generated transitions sequence is a strategy itself, a test will attempt to shrink them on a discovery of a case that breaks some properties.
-- It will capture regressions file with a seed that can be used to deterministically repeat the found case.
+- The strict runner uses a deterministic seed and returns the minimized native case. An explicitly configured runner can also persist regression seeds.
 
 In short, use `ReferenceStateMachine` and `StateMachineTest` to implement your state machine test and `prop_state_machine!` macro to run it.
 
@@ -81,10 +81,13 @@ You can either implement `ReferenceStateMachine` for:
 
 ### Definition of a state machine test
 
-With that out of the way, you can go ahead and implement `StateMachineTest`. This also requires two associated types:
+With that out of the way, you can go ahead and implement `StateMachineTest`. The associated types describe the system and its native assertion contract:
 
 - `type SystemUnderTest` which is the type that represents the SUT.
 - `type Reference` with the type for which you implemented the `ReferenceStateMachine`.
+- `type Failure` for concrete hook failures, often a test-owned `thiserror` enum.
+- `type TransitionEvidence` for each successful application's native observations.
+- `type InvariantEvidence` for each successful invariant check's native observations.
 
 There are also three associated functions to be implemented here (some types are slightly simplified for clarity):
 
@@ -103,24 +106,26 @@ There are also three associated functions to be implemented here (some types are
     mut state: Self::SystemUnderTest,
     ref_state: &Self::Reference::State,
     transition: Transition
-  ) -> Result<Self::SystemUnderTest, TestFailure>
+  ) -> Result<(Self::SystemUnderTest, Self::TransitionEvidence), Self::Failure>
   ```
   
-  This is also where you'll want to check any post-conditions that apply to a given transition, so after you apply the transition to the state, you check properties with the `strict_test_support` `ensure*` helpers (`ensure`, `ensure_eq`, `ensure_some`, ...) and propagate failures with `?` — a violated post-condition returns a `TestFailure` instead of panicking. Alternatively or additionally, you can use the `ref_state` for comparison, which will have the same transition that is given to this function already applied to it.
+  This is also where you'll want to check any post-conditions that apply to a given transition, so after you apply the transition to the state, you check properties with the `strict_test_support` `ensure*` helpers (`ensure`, `ensure_eq`, `ensure_some`, ...) and propagate failures with `?` — a violated post-condition returns your concrete `Failure`. Successful applications return the next SUT and the complete assertion evidence. A consuming hook must preserve any resources or prior observations that its failure promises to return. Alternatively or additionally, you can use the `ref_state` for comparison, which will have the same transition that is given to this function already applied to it.
 
 - Check properties that apply in any state:
 
   ```rust,ignore
-  fn check_invariants(state: &Self::SystemUnderTest, ref_state: &Self::Reference::State) -> proptest::strict::TestResult
+  fn check_invariants(state: &Self::SystemUnderTest, ref_state: &Self::Reference::State) -> Result<Self::InvariantEvidence, Self::Failure>
   ```
 
-  These must always hold and will be checked after every transition (the default implementation returns `Ok(())`). Just like with `apply`, you have the option to use the `ref_state` for comparison.
+  These checks run initially and after every successful application. Implement this hook explicitly; when there are no additional invariants, choose `InvariantEvidence = ()` and return `Ok(())`. Just like with `apply`, you have the option to use the `ref_state` for comparison.
 
 To add some teardown logic to run at the end of each test case, you can override the `teardown` function, which by default simply drops the state and returns `Ok(())`:
 
 ```rust,ignore
-fn teardown(state: Self::SystemUnderTest, ref_state: Self::Reference::State) -> proptest::strict::TestResult
+fn teardown(state: Self::SystemUnderTest, ref_state: Self::Reference::State) -> Result<(), Self::Failure>
 ```
+
+`test_sequential` returns `SequentialResult<Self>`. Successful runs retain the initial invariant and ordered `TransitionEvidence` records. A failure retains the stopping `SequentialStage`, original hook failure, all completed observations, driver-owned states, and unattempted transitions. The model advances before SUT application, and the seen counter increments before that application. Failures short-circuit; teardown runs only after all transitions succeed. Returning evidence does not add recovery or change shutdown order.
 
 ### Make the state machine test runnable
 
@@ -135,13 +140,13 @@ prop_state_machine! {
 
 You pick a `name_of_the_test` and a single numerical value or a range after the `sequential` keyword for a number of transitions to be generated for the state machine execution. The `MyStateMachineTest` is whatever you've implemented the `StateMachineTest` for.
 
-The macro expands to an ordinary `#[test]` function returning `proptest::strict::TestResult` that runs the generated transition sequences through `proptest::strict::ensure_property` (see the [Strict property tests](strict.md) chapter): runs are seeded deterministically by default (`STRICT_TEST_SEED` selects the seed), no `proptest-regressions/` files are written, and a falsified property comes back as `TestFailure::PropertyFalsified` carrying the shrunk minimal failing transition sequence.
+The macro expands to an ordinary `#[test]` function returning `StateMachinePropertyResult<MyStateMachineTest>` and runs generated sequences through `proptest::strict::ensure_property` (see [Strict property tests](strict.md)). Runs are deterministically seeded by default (`STRICT_TEST_SEED` selects the seed) and write no regression files. `PropertyCause::Falsified` carries the minimized `(initial_state, transitions, seen_counter)` and its matching typed sequential failure.
 
 And that's it. You can run the test, perhaps with `cargo watch` as you develop it further, and see if it can find some interesting counter-examples to your properties.
 
 ### Extra tips
 
-Because a state machine test may be heavier than regular prop tests, if you're running your tests in a CI you may want to override the default `proptest_config`'s `cases` to include more or fewer cases in a single run. You can also use `PROPTEST_CASES` environment variable and during development it is preferable to override this to run many cases to get a better chance of catching those pesky ~~bugs~~, erm, defects.
+Use `PROPTEST_CASES` to control the strict macro runner's case count. The macro's `#![proptest_config(...)]` expression is evaluated for each case and configures the inner sequential driver, including verbose logging. For explicit outer-runner case counts, shrink budgets, seeds, or persistence, pass the sequence strategy to `ensure_property_with_config` and call `test_sequential` from its callback.
 
 > Given that there are thought to be in the region of another four million species that we have not yet even named, there is no doubt that scientists will be kept happily occupied studying them for millennia, so long as the insects remain to be studied. Would the world not be less rich, less surprising, less wonderful, if these peculiar creatures did not exist?
 >
@@ -151,7 +156,7 @@ So let's leave bugs alone and only squash defects instead!
 
 Because the output of a failed test case can be a bit hard to read, it is often convenient to print the transitions. You can do that by simply setting the `proptest_config`'s `verbose` to `1` or higher. Again, if you don't want to keep this in your test's config or if you'd prefer to override the config, you could also use the `PROPTEST_VERBOSE` environment variable instead.
 
-Another helpful config option that is good to know about is `timeout` (`PROPTEST_TIMEOUT` via an env var) for tests that may take longer to execute.
+For forked or timeout-limited runs, pass the sequence strategy to `ensure_property_with_transport`. Its codec must preserve every hook outcome and restore the seen-transition counter before the next shrink step. Configuring fork or timeout without a transport returns `ExecutionError::TransportRequired` before the callback. The ordinary state-machine macro does not supply a codec for your model or SUT resources.
 
 ## How does it work
 
@@ -161,7 +166,7 @@ The `ReferenceStateMachine::sequential_strategy` sets up a `Sequential` strategy
 
 The `Sequential` strategy is then fed into Proptest like any other strategy via the `prop_state_machine!` macro and it produces a `Vec<Transition>` that gets passed into `StateMachineTest::test_sequential` where it is applied one by one to the SUT. Its post-conditions and invariants are checked during this process and if a failing case is found, the shrinking process kicks in until it can shrink no longer.
 
-The shrinking strategy which is defined by the associated `type Tree = SequentialValueTree` of the `Sequential` strategy is to iteratively apply `Shrink::InitialState`, `Shrink::DeleteTransition` and `Shrink::Transition` (this can be found in `proptest/src/strategy/state_machine.rs`):
+The shrinking strategy which is defined by the associated `type Tree = SequentialValueTree` of the `Sequential` strategy is to iteratively apply `Shrink::InitialState`, `Shrink::DeleteTransition` and `Shrink::Transition` (this can be found in `proptest-state-machine/src/strategy.rs`):
 
 1. We start by trying to delete transitions from the back of the list until we can do so no further (the list has reached the `min_size` - that is the variable that gets set from the chosen range for the number of transitions in the `prop_state_machine!` invocation).
 2. Then, we again iteratively attempt to shrink the individual transitions, but this time starting from the front of the list from the first transition to be applied.

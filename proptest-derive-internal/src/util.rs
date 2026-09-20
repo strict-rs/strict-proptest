@@ -12,7 +12,6 @@ use std::borrow::Borrow;
 
 use syn::Token;
 use syn::parse_quote;
-use syn::punctuated::Pair;
 use syn::punctuated::Punctuated;
 
 //==============================================================================
@@ -158,7 +157,7 @@ pub(crate) fn is_phantom_data(path: &syn::Path) -> bool {
   }
 
   let mut prefix_path = path.clone();
-  let Some(lseg) = prefix_path.segments.pop().map(Pair::into_value) else {
+  let Some(lseg) = prefix_path.segments.pop() else {
     return false;
   };
 
@@ -192,4 +191,36 @@ pub(crate) const fn path_is_global(path: &syn::Path) -> bool {
 pub(crate) fn match_singleton<T>(it: impl IntoIterator<Item = T>) -> Option<T> {
   let mut iter = it.into_iter();
   iter.next().filter(|_| iter.next().is_none())
+}
+
+#[cfg(test)]
+mod tests {
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
+  use syn::parse_quote;
+
+  use super::is_phantom_data;
+
+  /// Candidate paths and their expected `PhantomData` classification.
+  type PhantomDataCases = Vec<(syn::Path, bool)>;
+
+  #[test]
+  fn phantom_data_requires_a_known_prefix_and_one_type_argument() -> Result<(), PredicateFailure<PhantomDataCases>> {
+    ensure_that(
+      vec![
+        (parse_quote!(PhantomData<T>), true),
+        (parse_quote!(marker::PhantomData<T>), true),
+        (parse_quote!(std::marker::PhantomData<T>), true),
+        (parse_quote!(::core::marker::PhantomData<T>), true),
+        (parse_quote!(different::PhantomData<T>), false),
+        (parse_quote!(core::marker::<T>::PhantomData<T>), false),
+        (parse_quote!(PhantomData), false),
+        (parse_quote!(PhantomData<T, U>), false),
+        (parse_quote!(PhantomData<'a>), false),
+      ],
+      "PhantomData recognition preserves path and generic-argument boundaries",
+      |cases: &PhantomDataCases| cases.iter().all(|&(ref path, expected)| is_phantom_data(path) == expected),
+    )
+    .map(drop)
+  }
 }

@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use proptest::strategy::{Just, Strategy, ValueTree};
 use proptest::test_runner::TestRunner;
 
-fn main() -> proptest::strict::TestResult {
+fn main() -> Result<(), impl std::fmt::Debug> {
     let strategy = proptest::prop_oneof![
         1 => Just(0u8),
         1 => Just(1),
@@ -25,24 +25,12 @@ fn main() -> proptest::strict::TestResult {
     ];
 
     let mut runner = TestRunner::deterministic();
-    let mut seen = BTreeSet::new();
-    for _ in 0..1024 {
-        let tree = strict_test_support::ensure_some(
-            strategy.new_tree(&mut runner).ok(),
-            "the eleven-arm union generates a value tree",
-        )?;
-        let _newly_seen = seen.insert(tree.current());
-    }
-    let expected = (0u8..=10).collect::<BTreeSet<_>>();
-    strict_test_support::ensure(
-        seen == expected,
-        "every alternative of the vec-backed union is generated",
-    )?;
-
-    proptest::strict::ensure_property(&strategy, "prop_oneof_general_arm", |value| {
-        strict_test_support::ensure(
-            value <= 10,
-            "generated values stay within the listed alternatives",
-        )
-    })
+    let samples: Vec<_> = (0..1024).map(|_| strategy.new_tree(&mut runner).map(|tree| tree.current())).collect();
+    let property = proptest::strict::ensure_property(&strategy, "prop_oneof_general_arm", |value| {
+        strict_test_support::ensure_that(value, "generated values stay within the listed alternatives", |value| *value <= 10)
+    });
+    strict_test_support::ensure_that((samples, property), "every general-arm alternative is generated and the strict property passes", |(samples, property)| {
+        samples.iter().all(Result::is_ok) && samples.iter().filter_map(|result| result.as_ref().ok()).copied().collect::<BTreeSet<_>>()
+            == (0u8..=10).collect::<BTreeSet<_>>() && property.is_ok()
+    }).map(drop)
 }

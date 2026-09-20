@@ -347,61 +347,66 @@ impl ValueTree for CharValueTree {
 mod test {
   use core::slice;
   #[cfg(feature = "strict-test")]
+  use std::boxed::Box;
+  #[cfg(feature = "strict-test")]
   use std::char::from_u32 as std_from_u32;
   #[cfg(feature = "strict-test")]
   use std::cmp::max;
   #[cfg(feature = "strict-test")]
   use std::cmp::min;
-  #[cfg(feature = "strict-test")]
   use std::vec::Vec;
 
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_some;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
   #[cfg(feature = "strict-test")]
   use crate::collection;
+  use crate::strategy::trace_shrink_steps;
   #[cfg(feature = "strict-test")]
   use crate::strict::ensure_property;
+  #[cfg(feature = "strict-test")]
+  use crate::test_runner::PropertyResult;
   use crate::test_runner::Reason;
   #[cfg(feature = "strict-test")]
   use crate::test_runner::test_runner_without_persistence;
 
+  /// Reached character shrinker and every character it produced.
+  type CharWalk = (CharValueTree, Vec<char>);
+  /// Native character generation outcomes, including the complete shrink walk.
+  type CharWalks = Vec<Result<CharWalk, Reason>>;
+  /// Native ranges, their strategy, and all observed character shrink walks.
   #[cfg(feature = "strict-test")]
-  fn ensure_current_char_in_input_ranges<V>(value: &V, input_ranges: &[(u32, u32)]) -> Result<(), TestFailure>
-  where
-    V: ValueTree<Value = char>,
-  {
-    let ch = u32::from(value.current());
-    ensure(
-      input_ranges.iter().any(|&(lo, hi)| ch >= min(lo, hi) && ch <= max(lo, hi)),
-      "generated char lies in one of the input ranges",
-    )
-  }
+  type RangeWalks = (Vec<(u32, u32)>, CharStrategy<'static>, CharWalks);
 
+  /// Concrete result for a property over native requested character ranges.
+  #[cfg(feature = "strict-test")]
+  type RangeProperty = PropertyResult<(Vec<(u32, u32)>, Vec<CharRange>), RangeWalks, Box<PredicateFailure<RangeWalks>>>;
+  /// Native generated character trees and failures.
+  type CharSamples = Vec<NewTree<CharStrategy<'static>>>;
+
+  /// Requested numeric ranges constrain every generated and simplified character.
   #[cfg(feature = "strict-test")]
   #[allow(
     clippy::single_call_fn,
-    reason = "the range property names the generated-char shrink walk separately from strategy construction"
+    reason = "range membership is checked independently of property input construction and character sampling"
   )]
-  fn ensure_generated_chars_stay_within_input_ranges(input_ranges: &[(u32, u32)], char_ranges: Vec<CharRange>) -> Result<(), TestFailure> {
-    let input = ranges(Cow::Owned(char_ranges));
-    let mut runner = test_runner_without_persistence();
-    for _ in 0..256 {
-      let mut value = ensure_some(input.new_tree(&mut runner).ok(), "char strategy generates a value tree")?;
-
-      ensure_current_char_in_input_ranges(&value, input_ranges)?;
-      while value.simplify() {
-        ensure_current_char_in_input_ranges(&value, input_ranges)?;
-      }
-    }
-    Ok(())
+  fn range_characters_match(observed: &RangeWalks) -> bool {
+    observed.2.iter().all(Result::is_ok)
+      && observed
+        .2
+        .iter()
+        .filter_map(|walk| walk.as_ref().ok())
+        .flat_map(|reached| &reached.1)
+        .all(|ch| {
+          let code = u32::from(*ch);
+          observed.0.iter().any(|&(lo, hi)| code >= min(lo, hi) && code <= max(lo, hi))
+        })
   }
 
   #[cfg(feature = "strict-test")]
   #[test]
-  fn stays_in_range() -> Result<(), TestFailure> {
+  fn stays_in_range() -> RangeProperty {
     // The non-char pairs are filtered out in the strategy (the legacy
     // test rejected them from inside the test body instead).
     let valid_range_pairs = Strategy::prop_filter_map(
@@ -422,54 +427,76 @@ mod test {
     ensure_property(
       &valid_range_pairs,
       "generated chars stay within the requested ranges",
-      |(input_ranges, char_ranges)| ensure_generated_chars_stay_within_input_ranges(&input_ranges, char_ranges),
+      |(input_ranges, char_ranges)| {
+        let strategy = ranges(Cow::Owned(char_ranges));
+        let mut runner = test_runner_without_persistence();
+        let walks = (0..256)
+          .map(|_| strategy.new_tree(&mut runner).map(trace_shrink_steps))
+          .collect::<CharWalks>();
+        ensure_that(
+          (input_ranges, strategy, walks),
+          "all generated and shrunken characters lie within the input ranges",
+          range_characters_match,
+        )
+        .map_err(Box::new)
+      },
     )
   }
 
   #[test]
-  fn applies_desired_bias() -> Result<(), TestFailure> {
-    let mut men_in_business_suits_levitating = 0;
-    let mut ascii_printable = 0;
+  fn applies_desired_bias() -> Result<(), PredicateFailure<CharSamples>> {
     let mut runner = TestRunner::deterministic();
-
-    for _ in 0..1024 {
-      let ch = ensure_some(any().new_tree(&mut runner).ok(), "char strategy generates a value tree")?.current();
-      if '\u{1f574}' == ch {
-        men_in_business_suits_levitating += 1;
-        continue;
-      }
-
-      if (' '..='~').contains(&ch) {
-        ascii_printable += 1;
-      }
-    }
-
-    ensure(ascii_printable >= 256, "the bias favors ASCII printable chars")?;
-    ensure(
-      men_in_business_suits_levitating >= 1,
-      "the special-char bias emits the levitating man",
+    let samples: Vec<_> = (0..1024).map(|_| any().new_tree(&mut runner)).collect();
+    ensure_that(
+      samples,
+      "ASCII printable characters and the levitating man receive the desired bias",
+      |observed| {
+        observed.iter().all(Result::is_ok)
+          && observed
+            .iter()
+            .filter(|sample| sample.as_ref().is_ok_and(|tree| (' '..='~').contains(&tree.current())))
+            .count()
+            >= 256
+          && observed
+            .iter()
+            .any(|sample| sample.as_ref().is_ok_and(|tree| tree.current() == '\u{1f574}'))
+      },
     )
+    .map(drop)
   }
 
   #[test]
-  fn doesnt_shrink_to_ascii_control() -> Result<(), TestFailure> {
-    let mut accepted = 0;
+  fn doesnt_shrink_to_ascii_control() -> Result<(), PredicateFailure<CharWalks>> {
     let mut runner = TestRunner::deterministic();
-
-    for _ in 0..256 {
-      let mut value = ensure_some(any().new_tree(&mut runner).ok(), "char strategy generates a value tree")?;
-
-      if value.current() <= ' ' {
-        continue;
+    let shrink_noncontrol = |tree: CharValueTree| {
+      let initial = tree.current();
+      if initial <= ' ' {
+        (tree, vec![initial])
+      } else {
+        trace_shrink_steps(tree)
       }
-
-      while value.simplify() {}
-
-      ensure(value.current() >= ' ', "shrinking never lands on an ASCII control char")?;
-      accepted += 1;
-    }
-
-    ensure(accepted >= 200, "enough shrink runs were accepted")
+    };
+    let keeps_noncontrol = |reached: &CharWalk| {
+      reached
+        .1
+        .first()
+        .is_some_and(|first| *first <= ' ' || reached.0.current() >= ' ')
+    };
+    let is_noncontrol = |first: &char| *first > ' ';
+    let starts_noncontrol =
+      |walk: &&Result<CharWalk, Reason>| walk.as_ref().is_ok_and(|reached| reached.1.first().is_some_and(is_noncontrol));
+    let walks = (0..256)
+      .map(|_| any().new_tree(&mut runner))
+      .map(|generated| generated.map(shrink_noncontrol))
+      .collect::<CharWalks>();
+    ensure_that(
+      walks,
+      "at least 200 non-control characters shrink without entering ASCII controls",
+      |observed| {
+        observed.iter().all(|walk| walk.as_ref().is_ok_and(keeps_noncontrol)) && observed.iter().filter(starts_noncontrol).count() >= 200
+      },
+    )
+    .map(drop)
   }
 
   #[test]
@@ -486,15 +513,16 @@ mod test {
     )
   }
   #[test]
-  fn select_char_degrades_to_ascii_a_on_empty_ranges() -> Result<(), TestFailure> {
+  fn select_char_degrades_to_ascii_a_on_empty_ranges() -> Result<(), PredicateFailure<(char, char)>> {
     let mut runner = TestRunner::deterministic();
     let selected = select_char(runner.rng(), &['x'], &[], &[]);
-    ensure('a' == selected, "an empty range list degrades to the canonical 'a' target")?;
     let allowed_range = 'p'..='t';
     let in_range = select_char(runner.rng(), &[], &[], slice::from_ref(&allowed_range));
-    ensure(
-      ('p'..='t').contains(&in_range),
-      "a non-empty range list still selects from the ranges",
+    ensure_that(
+      (selected, in_range),
+      "empty ranges fall back to a while nonempty ranges constrain selection",
+      |observed| observed.0 == 'a' && ('p'..='t').contains(&observed.1),
     )
+    .map(drop)
   }
 }

@@ -1,10 +1,3 @@
-// Test handling of a test function that spells the strict result type out
-// rather than using the `::proptest::strict::TestResult` alias.
-
-fn return_value(
-    x: i32,
-    y: i32,
-) -> Result<(), ::proptest::strict::TestFailure> {
-    let _ = (x, y);
-    Ok(())
+fn return_value(x: i32, y: i32) -> Result<(i32, i32), ComparisonFailure<i32, i32>> {
+    ensure_eq(x, y, "values agree")
 }

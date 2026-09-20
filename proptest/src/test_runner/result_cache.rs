@@ -12,7 +12,16 @@ use std::collections::HashMap;
 
 use crate::std_facade::Box;
 use crate::std_facade::fmt;
-use crate::test_runner::errors::TestCaseResult;
+
+/// Identity of an evaluation owned by the current runner execution.
+///
+/// A cache stores this identity, never the property's success or failure payload.
+/// Identities are valid only within the execution that inserted them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EvaluationId(
+  /// Position in the execution's ordered evaluation records.
+  pub usize,
+);
 
 /// A key used for the result cache.
 ///
@@ -65,14 +74,11 @@ pub trait ResultCache {
   /// This is a separate step so that ownership of the key value can be
   /// handed off to user code without needing to be able to clone it.
   fn key(&self, key: &ResultCacheKey<'_>) -> u64;
-  /// Save `result` as the outcome associated with the test input in `key`.
-  ///
-  /// `result` is passed as a reference so that the decision to clone depends
-  /// on whether the cache actually plans on storing it.
-  fn put(&mut self, key: u64, result: &TestCaseResult);
+  /// Save the identity of the evaluation associated with this input.
+  fn put(&mut self, key: u64, evaluation: EvaluationId);
   /// If `put()` has been called with a semantically equivalent `key`, return
   /// the saved result. Otherwise, return `None`.
-  fn get(&self, key: u64) -> Option<&TestCaseResult>;
+  fn get(&self, key: u64) -> Option<EvaluationId>;
 }
 
 /// The `basic_result_cache` backend: a `HashMap` keyed by input hash.
@@ -80,7 +86,7 @@ pub trait ResultCache {
 #[derive(Debug, Default, Clone)]
 struct BasicResultCache {
   /// Outcomes keyed by the hash of the input's `Debug` string.
-  entries: HashMap<u64, TestCaseResult>,
+  entries: HashMap<u64, EvaluationId>,
 }
 
 #[cfg(feature = "std")]
@@ -106,12 +112,12 @@ impl ResultCache for BasicResultCache {
     hash.0.finish()
   }
 
-  fn put(&mut self, key: u64, result: &TestCaseResult) {
-    let _previous = self.entries.insert(key, result.clone());
+  fn put(&mut self, key: u64, evaluation: EvaluationId) {
+    let _previous = self.entries.insert(key, evaluation);
   }
 
-  fn get(&self, key: u64) -> Option<&TestCaseResult> {
-    self.entries.get(&key)
+  fn get(&self, key: u64) -> Option<EvaluationId> {
+    self.entries.get(&key).copied()
   }
 }
 
@@ -135,8 +141,8 @@ impl ResultCache for NoOpResultCache {
   fn key(&self, _: &ResultCacheKey<'_>) -> u64 {
     0
   }
-  fn put(&mut self, _: u64, _: &TestCaseResult) {}
-  fn get(&self, _: u64) -> Option<&TestCaseResult> {
+  fn put(&mut self, _: u64, _: EvaluationId) {}
+  fn get(&self, _: u64) -> Option<EvaluationId> {
     None
   }
 }
@@ -156,31 +162,28 @@ pub fn noop_result_cache() -> Box<dyn ResultCache> {
 #[cfg(test)]
 #[cfg(feature = "std")]
 mod tests {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_some;
+  use strict_test_support::ComparisonFailure;
+  use strict_test_support::ensure_eq;
 
   use super::*;
-  use crate::test_runner::TestCaseError;
+
+  /// Absent, initial, and replaced evaluation identities.
+  type Observations = [Option<EvaluationId>; 3];
 
   #[test]
-  fn basic_result_cache_replaces_existing_key() -> Result<(), TestFailure> {
+  fn basic_result_cache_replaces_existing_key() -> Result<(), ComparisonFailure<Observations, Observations>> {
     let key = 42;
     let mut cache = BasicResultCache::default();
 
-    cache.put(key, &Ok(()));
-    ensure(
-      ensure_some(cache.get(key), "the first cache result is stored")?.is_ok(),
-      "the first cached result is successful",
-    )?;
-
-    cache.put(key, &Err(TestCaseError::fail("replacement")));
-    ensure(
-      matches!(
-        ensure_some(cache.get(key), "the replacement cache result is stored")?,
-        Err(TestCaseError::Fail(_))
-      ),
-      "the replacement result overwrites the original entry",
+    let absent = cache.get(key);
+    cache.put(key, EvaluationId(2));
+    let original = cache.get(key);
+    cache.put(key, EvaluationId(5));
+    ensure_eq(
+      [absent, original, cache.get(key)],
+      [None, Some(EvaluationId(2)), Some(EvaluationId(5))],
+      "cache entries reference evaluations and replace an existing identity",
     )
+    .map(drop)
   }
 }

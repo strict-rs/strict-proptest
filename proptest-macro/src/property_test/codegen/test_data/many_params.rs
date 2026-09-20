@@ -1,4 +1,1 @@
-fn foo(x: i32, y: i32) -> ::proptest::strict::TestResult {
-    let _sum = x + y;
-    Ok(())
-}
+fn foo(x: i32, y: i32) -> CheckResult { check((x, y)) }

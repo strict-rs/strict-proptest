@@ -104,6 +104,7 @@ macro_rules! opaque_strategy_wrapper {
 /// Binds the error to the given identifier for use in the fallback, e.g.
 /// `unwrap_or!(result, err => handle_err(err))`. Unlike `Result::unwrap_or`
 /// the fallback can reference the error and may diverge (`return`/`continue`).
+#[cfg(feature = "std")]
 macro_rules! unwrap_or {
   ($unwrap:expr, $err:ident => $on_err:expr) => {
     match $unwrap {

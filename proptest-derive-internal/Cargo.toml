@@ -3,9 +3,8 @@ name = "proptest-derive-internal"
 version.workspace = true
 authors = ["Takumi Shimada <hello@takumi.earth>", "Mazdak Farrokhzad <twingoow@gmail.com>"]
 license.workspace = true
-readme = "README.md"
-edition.workspace = true
-rust-version.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
 repository.workspace = true
 documentation.workspace = true
 keywords = ["derive", "arbitrary", "proptest", "testing", "quickcheck"]
@@ -24,6 +23,7 @@ syn = { workspace = true, features = ["visit", "extra-traits", "full"] }
 quote = { workspace = true }
 
 [dev-dependencies]
+thiserror = { workspace = true }
 strict-test-support = { workspace = true }
 
 [features]

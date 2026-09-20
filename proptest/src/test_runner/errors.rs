@@ -96,6 +96,10 @@ impl TestCaseError {
   ///
   /// The string should indicate the location of the failure, but may
   /// generally be any string.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "public constructor names the failure arm used by legacy property consumers"
+  )]
   pub fn fail(reason: impl Into<Reason>) -> Self {
     Self::Fail(reason.into())
   }

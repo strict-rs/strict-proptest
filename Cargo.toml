@@ -7,7 +7,6 @@ members = [
     "proptest-macro",
     "stask",
 ]
-
 resolver = "3"
 exclude = ["proptest/test-persistence-location/*"]
 
@@ -19,15 +18,15 @@ homepage = "https://proptest-rs.github.io/proptest/proptest/"
 documentation = "https://docs.rs/proptest/latest/proptest/"
 categories = ["development-tools::testing"]
 edition = "2024"
-rust-version = "1.97"
-version = "2.0.0"
+rust-version = "1.98"
+version = "2.1.0"
 authors = ["The Proptest Developers", "Takumi Shimada <hello@takumi.earth>"]
 publish = false
 
 [workspace.dependencies]
 
 # Internal deps
-proptest = { version = "2", path = "proptest", features = ["std", "strict-test"], default-features = false }
+proptest = { version = "2",  features = ["std", "strict-test"], default-features = false, path = "proptest" }
 proptest-macro = { version = "2", path = "proptest-macro" }
 proptest-derive-internal = { version = "2", path = "proptest-derive-internal" }
 
@@ -37,11 +36,9 @@ bit-vec = "0.10.1"
 bitflags = "2.13"
 allocator-api2 = { version = "0.4.0", default-features = false }
 compiletest_rs = "0.11"
-convert_case = "0.11"
 criterion = "0.8"
 getrandom = { version = "0.4.3", default-features = false }
 half = { version = "2.7.1", default-features = false }
-insta = "1"
 message-io = { version = "0.19.0", default-features = false }
 num-traits = { version = "0.2.19", default-features = false }
 prettyplease = "0.3"
@@ -56,33 +53,27 @@ tempfile = "3.27"
 unarray = "0.1.4"
 
 # strict-* ecosystem dependencies.
-bpaf = {  version = "0.10", default-features = false, git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync" }
-mutant_fleet = { version = "0.1.0", git = "https://github.com/earthlings-dev/rust-mutant-fleet.git", branch = "main"}
 strict-test-support = { version = "0.1.0", git = "https://github.com/earthlings-dev/strict-test-support-rs.git", branch = "main"}
 template-core = { version = "0.3.0", git = "https://github.com/earthlings-dev/template-rs.git", branch = "main"}
 template-stask = { version = "0.3.0", git = "https://github.com/earthlings-dev/template-rs.git", branch = "main"}
-trybuild = {  version = "1", git = "https://github.com/strict-rs/strict-trybuild.git", branch = "strict" }
+trybuild = { version = "1", git = "https://github.com/strict-rs/strict-trybuild.git", branch = "strict" }
 syn = { version = "3", features = ["full", "visit"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
-serde = { version = "1", features = ["derive"] }
-thiserror = {  version = "2", git = "https://github.com/strict-rs/strict-thiserror.git", branch = "upgrade" }
+thiserror = { version = "2", git = "https://github.com/strict-rs/strict-thiserror.git", branch = "upgrade" }
 serde_json = "1"
-cargo_metadata = "0.23"
-ignore = "0.4"
-globset = "0.4"
-toml = "1.1"
-toml_edit = "0.25"
-anstyle = "1"
-snapbox = { version = "1.2", features = ["diff"], default-features = false }
-parking_lot = "0.12"
 
 [patch.crates-io]
 bpaf = {  version = "0.10", git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync" }
 proptest = { path = "proptest", version = "2" }
 trybuild = {  version = "1", git = "https://github.com/strict-rs/strict-trybuild.git", branch = "strict" }
-tracing = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict" }
-tracing-core = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict" }
 thiserror = {  version = "2.1.0", git = "https://github.com/strict-rs/strict-thiserror.git", branch = "upgrade" }
+
+[patch."https://github.com/strict-rs/strict-proptest.git"]
+proptest = { path = "proptest" }
+proptest-derive = { path = "proptest-derive" }
+proptest-derive-internal = { path = "proptest-derive-internal" }
+proptest-macro = { path = "proptest-macro" }
+proptest-state-machine = { path = "proptest-state-machine" }
 
 # strict-proptest (comment out if unused, do not remove)
 # proptest = { version = "2", git = "https://github.com/strict-rs/strict-proptest.git", branch = "strict" }

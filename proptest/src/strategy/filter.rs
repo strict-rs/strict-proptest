@@ -125,29 +125,35 @@ impl<S: ValueTree, F: Fn(&S::Value) -> bool> ValueTree for Filter<S, F> {
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_some;
+  use strict_test_support::ensure_that;
 
   use super::*;
+  use crate::std_facade::Vec;
+  use crate::strategy::traits::trace_simplifications;
   use crate::test_runner::test_runner_without_persistence;
 
   #[test]
-  fn test_filter() -> Result<(), TestFailure> {
+  fn test_filter() -> Result<(), impl fmt::Debug> {
     let input = (0..256_i32).prop_filter("%3", |&candidate| 0 == candidate.rem_euclid(3));
-
-    for _ in 0..256 {
-      let mut runner = test_runner_without_persistence();
-      let mut case = ensure_some(input.new_tree(&mut runner).ok(), "filter strategy generates a value tree")?;
-
-      ensure(0 == case.current().rem_euclid(3), "the generated value satisfies the filter")?;
-
-      while case.simplify() {
-        ensure(0 == case.current().rem_euclid(3), "every simplified value satisfies the filter")?;
-      }
-      ensure(0 == case.current().rem_euclid(3), "the fully simplified value satisfies the filter")?;
-    }
-    Ok(())
+    let walks: Vec<_> = (0..256)
+      .map(|_| {
+        input
+          .new_tree(&mut test_runner_without_persistence())
+          .map(trace_simplifications)
+      })
+      .collect();
+    ensure_that(
+      walks,
+      "generation and every shrink state preserve the filter contract",
+      |observed| {
+        observed.iter().all(|walk| {
+          walk
+            .as_ref()
+            .is_ok_and(|reached| reached.1.iter().all(|value| value.rem_euclid(3) == 0))
+        })
+      },
+    )
+    .map(drop)
   }
 
   #[test]

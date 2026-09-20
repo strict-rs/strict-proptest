@@ -611,7 +611,7 @@ macro_rules! prop_oneof {
 /// `prop_flat_map()`, then `prop_map()`.
 ///
 /// Visibility modifiers are supported directly before the `fn` token. Other
-/// bracketed function modifiers are rejected; use [`prop_compose_ffi!`] when a
+/// bracketed function modifiers are rejected; use [`crate::prop_compose_ffi!`] when a
 /// generated strategy should call a C-ABI mapper.
 ///
 /// ```rust,no_run
@@ -1410,41 +1410,54 @@ pub const fn force_no_fork(_: &mut Config) {}
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_some;
+  use std::collections::HashSet;
 
-  use crate::std_facade::ToOwned as _;
+  use strict_test_support::ComparisonFailure;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_eq;
+  use strict_test_support::ensure_that;
+
+  use crate::std_facade::Box;
+  use crate::std_facade::String;
+  /// Assertions retain complete generation evidence in a concrete allocation.
+  type Check<S> = Result<(), Box<PredicateFailure<S>>>;
+  /// All documented argument renderings, paired with their expected text.
+  type ArgumentFormats = ComparisonFailure<[String; 12], [&'static str; 12]>;
+  use crate::std_facade::Vec;
   use crate::strategy::Just;
   use crate::strategy::Strategy;
   use crate::strategy::TupleUnion;
   use crate::strategy::Union;
   use crate::strategy::ValueTree as _;
+  use crate::test_runner::Reason;
   use crate::test_runner::TestCaseError;
   use crate::test_runner::TestRunner;
   use crate::test_runner::test_runner_without_persistence;
 
-  /// Ensure a `prop_oneof!` strategy can generate every expected arm.
-  fn expect_oneof_count(n: usize, strategy: impl Strategy<Value = i32>) -> Result<(), TestFailure> {
-    use std::collections::HashSet;
+  /// Every generated arm, including any native generation failure.
+  type ArmSamples = (usize, Vec<Result<i32, Reason>>);
 
+  /// Draw all samples before checking the requested arm coverage.
+  fn sample_oneof(n: usize, strategy: impl Strategy<Value = i32>) -> ArmSamples {
     let mut runner = test_runner_without_persistence();
-    let mut seen = HashSet::new();
-    for _ in 0..1024 {
-      let tree = match strategy.new_tree(&mut runner) {
-        Ok(tree) => tree,
-        Err(reason) => {
-          return Err(TestFailure::WasErr {
-            context: "oneof strategy generates a value tree",
-            cause:   reason.message().into(),
-          });
-        }
-      };
-      let _was_new = seen.insert(tree.current());
-    }
+    (
+      n,
+      (0..1024)
+        .map(|_| strategy.new_tree(&mut runner).map(|tree| tree.current()))
+        .collect(),
+    )
+  }
 
-    ensure_eq(&n, &seen.len(), "oneof strategy covers every arm")
+  /// Every draw succeeds and the generated values cover all expected arms.
+  fn covers_arms(observed: &ArmSamples) -> bool {
+    observed.1.iter().all(Result::is_ok)
+      && observed
+        .1
+        .iter()
+        .filter_map(|sample| sample.as_ref().ok())
+        .collect::<HashSet<_>>()
+        .len()
+        == observed.0
   }
 
   /// Type-check that `prop_oneof!` selected the tuple-union strategy.
@@ -1643,169 +1656,196 @@ mod test {
     }
   }
 
-  fn draw<S: Strategy>(strategy: S) -> Result<S::Value, TestFailure> {
-    let mut runner = TestRunner::deterministic();
-    Ok(ensure_some(strategy.new_tree(&mut runner).ok(), "strategy generates a value tree")?.current())
+  /// Draw a native value while preserving the strategy's generation error.
+  fn draw<S: Strategy>(strategy: S) -> Result<S::Value, Reason> {
+    strategy.new_tree(&mut TestRunner::deterministic()).map(|tree| tree.current())
   }
 
+  /// Outputs of the six composition forms and their native generation errors.
+  type ComposedDraws = (
+    Result<(i32, i32), Reason>,
+    Result<(i32, i32), Reason>,
+    Result<u64, Reason>,
+    Result<i32, Reason>,
+    Result<i32, Reason>,
+    Result<u64, Reason>,
+  );
+
   #[test]
-  fn prop_compose_fixtures_generate_values() -> Result<(), TestFailure> {
-    let (low, high) = draw(two_ints(10))?;
-    ensure(low < 10, "lower value honors the first strategy")?;
-    ensure(high >= 10, "higher value honors the second strategy")?;
-
-    let (lesser, greater) = draw(a_less_than_b())?;
-    ensure(lesser < greater, "dependent strategy keeps lesser below greater")?;
-
-    let single = draw(single_closure_is_move(10))?;
-    ensure((10..20).contains(&single), "single closure strategy captures the base argument")?;
-
-    let ffi_gap = draw(two_ints_pub_with_ffi_mapper(10))?;
-    ensure(ffi_gap > 0, "one-layer ffi mapper receives generated scalar values")?;
-
-    let ffi_span = draw(two_stage_ffi_mapper(10))?;
-    ensure(ffi_span > 0, "two-layer ffi mapper receives dependent generated scalar values")?;
-
-    let double = draw(double_closure_is_move(10))?;
-    ensure(
-      (10..29).contains(&double),
-      "double closure strategy captures the base argument through both stages",
+  fn prop_compose_fixtures_generate_values() -> Check<ComposedDraws> {
+    let draws = (
+      draw(two_ints(10)),
+      draw(a_less_than_b()),
+      draw(single_closure_is_move(10)),
+      draw(two_ints_pub_with_ffi_mapper(10)),
+      draw(two_stage_ffi_mapper(10)),
+      draw(double_closure_is_move(10)),
+    );
+    ensure_that(
+      draws,
+      "each composition preserves its independent and dependent bounds",
+      |observed| {
+        observed.0.as_ref().is_ok_and(|&(low, high)| low < 10 && high >= 10)
+          && observed.1.as_ref().is_ok_and(|&(lesser, greater)| lesser < greater)
+          && observed.2.as_ref().is_ok_and(|value| (10..20).contains(value))
+          && observed.3.as_ref().is_ok_and(|value| *value > 0)
+          && observed.4.as_ref().is_ok_and(|value| *value > 0)
+          && observed.5.as_ref().is_ok_and(|value| (10..29).contains(value))
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn named_arguments_is_debug_for_needed_cases() -> Result<(), TestFailure> {
+  fn named_arguments_is_debug_for_needed_cases() -> Result<(), Box<ArgumentFormats>> {
     use super::NamedArguments;
 
+    let rendered = [
+      std::format!("{:?}", NamedArguments("foo", &"bar")),
+      std::format!("{:?}", NamedArguments(("foo",), &(1,))),
+      std::format!("{:?}", NamedArguments(("foo", "bar"), &(1, 2))),
+      std::format!("{:?}", NamedArguments(("a", "b", "c"), &(1, 2, 3))),
+      std::format!("{:?}", NamedArguments(("a", "b", "c", "d"), &(1, 2, 3, 4))),
+      std::format!("{:?}", NamedArguments(("a", "b", "c", "d", "e"), &(1, 2, 3, 4, 5))),
+      std::format!("{:?}", NamedArguments(("a", "b", "c", "d", "e", "f"), &(1, 2, 3, 4, 5, 6))),
+      std::format!("{:?}", NamedArguments(("a", "b", "c", "d", "e", "f", "g"), &(1, 2, 3, 4, 5, 6, 7))),
+      std::format!(
+        "{:?}",
+        NamedArguments(("a", "b", "c", "d", "e", "f", "g", "h"), &(1, 2, 3, 4, 5, 6, 7, 8))
+      ),
+      std::format!(
+        "{:?}",
+        NamedArguments(("a", "b", "c", "d", "e", "f", "g", "h", "i"), &(1, 2, 3, 4, 5, 6, 7, 8, 9))
+      ),
+      std::format!(
+        "{:?}",
+        NamedArguments(("a", "b", "c", "d", "e", "f", "g", "h", "i", "j"), &(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
+      ),
+      std::format!("{:?}", NamedArguments((("a", "b"), "c", "d"), &((1, 2), 3, 4))),
+    ];
     ensure_eq(
-      &std::format!("{:?}", NamedArguments("foo", &"bar")),
-      &"foo = \"bar\"".to_owned(),
-      "single named value keeps the name/value format",
-    )?;
-
-    let one = std::format!("{:?}", NamedArguments(("foo",), &(1,)));
-    ensure_eq(&one, &"foo = 1".to_owned(), "one tuple argument formats without tuple punctuation")?;
-    ensure(!one.contains(','), "one tuple argument formatting does not contain a comma")?;
-
-    ensure_eq(
-      &std::format!("{:?}", NamedArguments(("foo", "bar"), &(1, 2))),
-      &"foo = 1, bar = 2".to_owned(),
-      "two tuple arguments are comma separated",
-    )?;
-
-    drop(std::format!("{:?}", NamedArguments(("a", "b", "c"), &(1, 2, 3))));
-    drop(std::format!("{:?}", NamedArguments(("a", "b", "c", "d"), &(1, 2, 3, 4))));
-    drop(std::format!("{:?}", NamedArguments(("a", "b", "c", "d", "e"), &(1, 2, 3, 4, 5))));
-    drop(std::format!(
-      "{:?}",
-      NamedArguments(("a", "b", "c", "d", "e", "f"), &(1, 2, 3, 4, 5, 6))
-    ));
-    drop(std::format!(
-      "{:?}",
-      NamedArguments(("a", "b", "c", "d", "e", "f", "g"), &(1, 2, 3, 4, 5, 6, 7))
-    ));
-    drop(std::format!(
-      "{:?}",
-      NamedArguments(("a", "b", "c", "d", "e", "f", "g", "h"), &(1, 2, 3, 4, 5, 6, 7, 8))
-    ));
-    drop(std::format!(
-      "{:?}",
-      NamedArguments(("a", "b", "c", "d", "e", "f", "g", "h", "i"), &(1, 2, 3, 4, 5, 6, 7, 8, 9))
-    ));
-    drop(std::format!(
-      "{:?}",
-      NamedArguments(("a", "b", "c", "d", "e", "f", "g", "h", "i", "j"), &(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
-    ));
-    drop(std::format!("{:?}", NamedArguments((("a", "b"), "c", "d"), &((1, 2), 3, 4))));
-    Ok(())
-  }
-
-  #[test]
-  fn oneof_static_counts_through_five() -> Result<(), TestFailure> {
-    expect_oneof_count(1, prop_oneof![Just(0_i32)])?;
-    expect_oneof_count(2, assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32),]))?;
-    expect_oneof_count(3, assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32), Just(2_i32),]))?;
-    expect_oneof_count(
-      4,
-      assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32), Just(2_i32), Just(3_i32),]),
-    )?;
-    expect_oneof_count(
-      5,
-      assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32), Just(2_i32), Just(3_i32), Just(4_i32),]),
+      rendered,
+      [
+        "foo = \"bar\"",
+        "foo = 1",
+        "foo = 1, bar = 2",
+        "a = 1, b = 2, c = 3",
+        "a = 1, b = 2, c = 3, d = 4",
+        "a = 1, b = 2, c = 3, d = 4, e = 5",
+        "a = 1, b = 2, c = 3, d = 4, e = 5, f = 6",
+        "a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7",
+        "a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8",
+        "a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8, i = 9",
+        "a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8, i = 9, j = 10",
+        "a = 1, b = 2, c = 3, d = 4",
+      ],
+      "named arguments retain their documented debug format at every tuple arity",
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn oneof_static_counts_six_through_ten() -> Result<(), TestFailure> {
-    expect_oneof_count(
-      6,
-      assert_static_oneof(prop_oneof![
-        Just(0_i32),
-        Just(1_i32),
-        Just(2_i32),
-        Just(3_i32),
-        Just(4_i32),
-        Just(5_i32),
-      ]),
-    )?;
-    expect_oneof_count(
-      7,
-      assert_static_oneof(prop_oneof![
-        Just(0_i32),
-        Just(1_i32),
-        Just(2_i32),
-        Just(3_i32),
-        Just(4_i32),
-        Just(5_i32),
-        Just(6_i32),
-      ]),
-    )?;
-    expect_oneof_count(
-      8,
-      assert_static_oneof(prop_oneof![
-        Just(0_i32),
-        Just(1_i32),
-        Just(2_i32),
-        Just(3_i32),
-        Just(4_i32),
-        Just(5_i32),
-        Just(6_i32),
-        Just(7_i32),
-      ]),
-    )?;
-    expect_oneof_count(
-      9,
-      assert_static_oneof(prop_oneof![
-        Just(0_i32),
-        Just(1_i32),
-        Just(2_i32),
-        Just(3_i32),
-        Just(4_i32),
-        Just(5_i32),
-        Just(6_i32),
-        Just(7_i32),
-        Just(8_i32),
-      ]),
-    )?;
-    expect_oneof_count(
-      10,
-      assert_static_oneof(prop_oneof![
-        Just(0_i32),
-        Just(1_i32),
-        Just(2_i32),
-        Just(3_i32),
-        Just(4_i32),
-        Just(5_i32),
-        Just(6_i32),
-        Just(7_i32),
-        Just(8_i32),
-        Just(9_i32),
-      ]),
-    )
+  fn oneof_static_counts_through_five() -> Check<[ArmSamples; 5]> {
+    let samples = [
+      sample_oneof(1, prop_oneof![Just(0_i32)]),
+      sample_oneof(2, assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32),])),
+      sample_oneof(3, assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32), Just(2_i32),])),
+      sample_oneof(
+        4,
+        assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32), Just(2_i32), Just(3_i32),]),
+      ),
+      sample_oneof(
+        5,
+        assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32), Just(2_i32), Just(3_i32), Just(4_i32),]),
+      ),
+    ];
+    ensure_that(samples, "each static union generates all of its arms", |observed| {
+      observed.iter().all(covers_arms)
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn oneof_dynamic_count_after_tuple_limit() -> Result<(), TestFailure> {
+  fn oneof_static_counts_six_through_ten() -> Check<[ArmSamples; 5]> {
+    let samples = [
+      sample_oneof(
+        6,
+        assert_static_oneof(prop_oneof![
+          Just(0_i32),
+          Just(1_i32),
+          Just(2_i32),
+          Just(3_i32),
+          Just(4_i32),
+          Just(5_i32),
+        ]),
+      ),
+      sample_oneof(
+        7,
+        assert_static_oneof(prop_oneof![
+          Just(0_i32),
+          Just(1_i32),
+          Just(2_i32),
+          Just(3_i32),
+          Just(4_i32),
+          Just(5_i32),
+          Just(6_i32),
+        ]),
+      ),
+      sample_oneof(
+        8,
+        assert_static_oneof(prop_oneof![
+          Just(0_i32),
+          Just(1_i32),
+          Just(2_i32),
+          Just(3_i32),
+          Just(4_i32),
+          Just(5_i32),
+          Just(6_i32),
+          Just(7_i32),
+        ]),
+      ),
+      sample_oneof(
+        9,
+        assert_static_oneof(prop_oneof![
+          Just(0_i32),
+          Just(1_i32),
+          Just(2_i32),
+          Just(3_i32),
+          Just(4_i32),
+          Just(5_i32),
+          Just(6_i32),
+          Just(7_i32),
+          Just(8_i32),
+        ]),
+      ),
+      sample_oneof(
+        10,
+        assert_static_oneof(prop_oneof![
+          Just(0_i32),
+          Just(1_i32),
+          Just(2_i32),
+          Just(3_i32),
+          Just(4_i32),
+          Just(5_i32),
+          Just(6_i32),
+          Just(7_i32),
+          Just(8_i32),
+          Just(9_i32),
+        ]),
+      ),
+    ];
+    ensure_that(samples, "each static union generates all of its arms", |observed| {
+      observed.iter().all(covers_arms)
+    })
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn oneof_dynamic_count_after_tuple_limit() -> Check<ArmSamples> {
     let dynamic_oneof: Union<_> = prop_oneof![
       Just(0_i32),
       Just(1_i32),
@@ -1819,7 +1859,13 @@ mod test {
       Just(9_i32),
       Just(10_i32),
     ];
-    expect_oneof_count(11, dynamic_oneof)
+    ensure_that(
+      sample_oneof(11, dynamic_oneof),
+      "the dynamic union generates every arm",
+      covers_arms,
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 }
 
@@ -1894,80 +1940,70 @@ mod ownership_tests {
 
 #[cfg(test)]
 mod closure_tests {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
+  use core::fmt::Debug;
 
+  use strict_test_support::ensure_that;
+
+  use crate::std_facade::Box;
   use crate::test_runner::TestCaseError;
   use crate::test_runner::runner_test_config;
 
   #[test]
-  fn test_simple() -> Result<(), TestFailure> {
+  fn test_simple() -> Result<(), impl Debug> {
     let x = 420;
 
-    ensure(
-      __proptest_internal!(|(y: i32)| {
-          let _: (i32, i32) = (x, y);
-      })
-      .is_ok(),
-      "typed closure-style syntax runs",
-    )?;
+    let result_1 = __proptest_internal!(|(y: i32)| {
+        let _: (i32, i32) = (x, y);
+    });
 
-    ensure(
-      __proptest_internal!(|(y in 0..100)| {
-          let _: (i32, i32) = (x, y);
-      })
-      .is_ok(),
-      "strategy closure-style syntax runs",
-    )?;
+    let result_2 = __proptest_internal!(|(y in 0..100)| {
+        let _: (i32, i32) = (x, y);
+    });
 
-    ensure(
-      __proptest_internal!(|(y: i32,)| {
-          let _: (i32, i32) = (x, y);
-      })
-      .is_ok(),
-      "typed closure-style syntax accepts a trailing comma",
-    )?;
+    let result_3 = __proptest_internal!(|(y: i32,)| {
+        let _: (i32, i32) = (x, y);
+    });
 
-    ensure(
-      __proptest_internal!(|(y in 0..100,)| {
-          let _: (i32, i32) = (x, y);
-      })
-      .is_ok(),
-      "strategy closure-style syntax accepts a trailing comma",
+    let result_4 = __proptest_internal!(|(y in 0..100,)| {
+        let _: (i32, i32) = (x, y);
+    });
+    ensure_that(
+      [result_1, result_2, result_3, result_4],
+      "every declared closure form succeeds",
+      |results| results.iter().all(Result::is_ok),
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn test_move() -> Result<(), TestFailure> {
+  fn test_move() -> Result<(), impl Debug> {
     #[derive(Debug)]
     struct Foo;
 
     let first_foo = Foo;
 
-    ensure(
-      __proptest_internal!(move |(x in 1_i32..100_i32, y in 0_i32..100_i32)| {
-          let _: (i32, &Foo) = (x.saturating_add(y), &first_foo);
-      })
-      .is_ok(),
-      "move closure captures surrounding state",
-    )?;
+    let result_1 = __proptest_internal!(move |(x in 1_i32..100_i32, y in 0_i32..100_i32)| {
+        let _: (i32, &Foo) = (x.saturating_add(y), &first_foo);
+    });
 
     let second_foo = Foo;
-    ensure(
-      __proptest_internal!(move |(x: (), y: ())| {
-          fn accept_units(_: (), _: ()) -> usize {
-              2
-          }
+    let result_2 = __proptest_internal!(move |(x: (), y: ())| {
+        fn accept_units(_: (), _: ()) -> usize {
+            2
+        }
 
-          let _: (usize, &Foo) = (accept_units(x, y), &second_foo);
-      })
-      .is_ok(),
-      "typed move closure captures surrounding state",
-    )
+        let _: (usize, &Foo) = (accept_units(x, y), &second_foo);
+    });
+    ensure_that([result_1, result_2], "every declared closure form succeeds", |results| {
+      results.iter().all(Result::is_ok)
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn returns_error_if_closure_fails() -> Result<(), TestFailure> {
+  fn returns_error_if_closure_fails() -> Result<(), impl Debug> {
     let result = __proptest_internal!(|(_ in 0..1)| {
         let should_fail = true;
         if should_fail {
@@ -1976,97 +2012,71 @@ mod closure_tests {
             ));
         }
     });
-    ensure(result.is_err(), "closure-style failure is returned")
+    ensure_that(result, "closure-style failure is returned", Result::is_err)
+      .map(drop)
+      .map_err(Box::new)
   }
 
   #[test]
-  fn accepts_unblocked_syntax() -> Result<(), TestFailure> {
-    ensure(
-      __proptest_internal!(|(x in 0_u32..10, y in 10_u32..20)| {
-          let _: (u32, u32) = (x, y);
-      })
-      .is_ok(),
-      "closure-style syntax accepts two generated values",
-    )?;
-    ensure(
-      __proptest_internal!(|(x in 0_u32..10, y in 10_u32..20,)| {
-          let _: (u32, u32) = (x, y);
-      })
-      .is_ok(),
-      "closure-style syntax accepts a trailing comma",
-    )
+  fn accepts_unblocked_syntax() -> Result<(), impl Debug> {
+    let result_1 = __proptest_internal!(|(x in 0_u32..10, y in 10_u32..20)| {
+        let _: (u32, u32) = (x, y);
+    });
+    let result_2 = __proptest_internal!(|(x in 0_u32..10, y in 10_u32..20,)| {
+        let _: (u32, u32) = (x, y);
+    });
+    ensure_that([result_1, result_2], "every declared closure form succeeds", |results| {
+      results.iter().all(Result::is_ok)
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn accepts_custom_config() -> Result<(), TestFailure> {
+  fn accepts_custom_config() -> Result<(), impl Debug> {
     let conf = runner_test_config();
 
-    ensure(
-      __proptest_internal!(conf, |(x in 0_u32..10, y in 10_u32..20)| {
-          let _: (u32, u32) = (x, y);
-      })
-      .is_ok(),
-      "owned custom config is accepted",
-    )?;
-    ensure(
-      __proptest_internal!(&conf, |(x in 0_u32..10, y in 10_u32..20)| {
-          let _: (u32, u32) = (x, y);
-      })
-      .is_ok(),
-      "borrowed custom config is accepted",
-    )?;
-    ensure(
-      __proptest_internal!(conf, move |(x in 0_u32..10, y in 10_u32..20)| {
-          let _: (u32, u32) = (x, y);
-      })
-      .is_ok(),
-      "move closure accepts an owned custom config",
-    )?;
-    ensure(
-      __proptest_internal!(conf, |(_x: u32, _y: u32)| {}).is_ok(),
-      "typed closure accepts an owned custom config",
-    )?;
-    ensure(
-      __proptest_internal!(conf, move |(_x: u32, _y: u32)| {}).is_ok(),
-      "typed move closure accepts an owned custom config",
-    )?;
+    let result_1 = __proptest_internal!(conf, |(x in 0_u32..10, y in 10_u32..20)| {
+        let _: (u32, u32) = (x, y);
+    });
+    let result_2 = __proptest_internal!(&conf, |(x in 0_u32..10, y in 10_u32..20)| {
+        let _: (u32, u32) = (x, y);
+    });
+    let result_3 = __proptest_internal!(conf, move |(x in 0_u32..10, y in 10_u32..20)| {
+        let _: (u32, u32) = (x, y);
+    });
+    let result_4 = __proptest_internal!(conf, |(_x: u32, _y: u32)| {});
+    let result_5 = __proptest_internal!(conf, move |(_x: u32, _y: u32)| {});
 
     // Same as above, but with extra trailing comma
-    ensure(
-      __proptest_internal!(conf, |(x in 0_u32..10, y in 10_u32..20,)| {
-          let _: (u32, u32) = (x, y);
-      })
-      .is_ok(),
-      "owned custom config accepts a trailing comma",
-    )?;
-    ensure(
-      __proptest_internal!(&conf, |(x in 0_u32..10, y in 10_u32..20,)| {
-          let _: (u32, u32) = (x, y);
-      })
-      .is_ok(),
-      "borrowed custom config accepts a trailing comma",
-    )?;
-    ensure(
-      __proptest_internal!(conf, move |(x in 0_u32..10, y in 10_u32..20,)| {
-          let _: (u32, u32) = (x, y);
-      })
-      .is_ok(),
-      "move closure with custom config accepts a trailing comma",
-    )?;
-    ensure(
-      __proptest_internal!(conf, |(_x: u32, _y: u32,)| {}).is_ok(),
-      "typed closure with custom config accepts a trailing comma",
-    )?;
-    ensure(
-      __proptest_internal!(conf, move |(_x: u32, _y: u32,)| {}).is_ok(),
-      "typed move closure with custom config accepts a trailing comma",
+    let result_6 = __proptest_internal!(conf, |(x in 0_u32..10, y in 10_u32..20,)| {
+        let _: (u32, u32) = (x, y);
+    });
+    let result_7 = __proptest_internal!(&conf, |(x in 0_u32..10, y in 10_u32..20,)| {
+        let _: (u32, u32) = (x, y);
+    });
+    let result_8 = __proptest_internal!(conf, move |(x in 0_u32..10, y in 10_u32..20,)| {
+        let _: (u32, u32) = (x, y);
+    });
+    let result_9 = __proptest_internal!(conf, |(_x: u32, _y: u32,)| {});
+    let result_10 = __proptest_internal!(conf, move |(_x: u32, _y: u32,)| {});
+    ensure_that(
+      [
+        result_1, result_2, result_3, result_4, result_5, result_6, result_7, result_8, result_9, result_10,
+      ],
+      "every declared closure form succeeds",
+      |results| results.iter().all(Result::is_ok),
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 }
 
 #[cfg(test)]
 mod any_tests {
-  use strict_test_support::TestFailure;
+  use strict_test_support::ComparisonFailure;
+  /// Native values bound by named, mutable, range, and reference patterns.
+  type PatternValues = (u8, u8, i32, u8, u8);
 
   __proptest_internal! {
       #[test]
@@ -2088,7 +2098,7 @@ mod any_tests {
 
   // Test that the macro accepts some of the inputs we expect it to:
   #[test]
-  fn proptest_ext_test() -> Result<(), TestFailure> {
+  fn proptest_ext_test() -> Result<(), ComparisonFailure<PatternValues, PatternValues>> {
     use strict_test_support::ensure_eq;
 
     struct Wrapper(pub u8);
@@ -2105,17 +2115,21 @@ mod any_tests {
     accept_strategy(proptest_helper!(@_EXT _STRAT( x in 1..2 )));
 
     let proptest_helper!(@_EXT _PAT( _ : u8 )): u8 = 1;
-    let proptest_helper!(@_EXT _PAT( _name : u8 )) = 1;
-    let proptest_helper!(@_EXT _PAT( mut _mut_name : u8 )) = 1;
+    let proptest_helper!(@_EXT _PAT( named : u8 )) = 1_u8;
+    let proptest_helper!(@_EXT _PAT( mut mutable : u8 )) = 1_u8;
+    mutable = mutable.saturating_add(1);
     let proptest_helper!(@_EXT _PAT( [_, _] : u8 )) = [1, 2];
     let proptest_helper!(@_EXT _PAT( (&mut Wrapper(_wrapped)) : u8 )) = &mut Wrapper(1);
     let proptest_helper!(@_EXT _PAT( ranged in 1..2 )) = 1;
-    ensure_eq(&ranged, &1, "ranged pattern binds the generated value")?;
     let matched_ref = u8::from(matches!(Some(1), Some(proptest_helper!(@_EXT _PAT( ref _x : u8 )))));
-    ensure_eq(&matched_ref, &1, "ref pattern matches the generated value")?;
 
     let matched_ref_mut = u8::from(matches!(Some(1), Some(proptest_helper!(@_EXT _PAT( ref mut _x : u8 )))));
-    ensure_eq(&matched_ref_mut, &1, "ref mut pattern matches the generated value")
+    ensure_eq(
+      (named, mutable, ranged, matched_ref, matched_ref_mut),
+      (1, 2, 1, 1, 1),
+      "named, mutable, range, ref, and ref mut patterns bind the generated value",
+    )
+    .map(drop)
   }
 }
 
@@ -2126,20 +2140,23 @@ mod any_tests {
 // to `+`, and the two-list `prop_compose!` rule additionally had an unbound
 // `$strategy` metavariable replaced with the intended `@_EXT _STRAT` call, so
 // this module drives each form end to end through the strict runner: a
-// regression surfaces as a returned `TestFailure`, never a panic.
+// regression surfaces as a native typed property failure, never a panic.
 #[cfg(test)]
 #[cfg(feature = "strict-test")]
 mod macro_hygiene {
-  use std::string::ToString as _;
-
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_contains;
-  use strict_test_support::ensure_some;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use crate::strategy::Just;
   use crate::strategy::Strategy;
-  use crate::strict::TestResult;
   use crate::strict::ensure_property;
+  use crate::test_runner::PropertyCause;
+  use crate::test_runner::PropertyResult;
+
+  /// A checked union value with all runner evidence retained.
+  type UnionRun = PropertyResult<i32, i32, PredicateFailure<i32>>;
+  /// A checked dependent pair with all runner evidence retained.
+  type BoundedRun = PropertyResult<(u8, u8), (u8, u8), PredicateFailure<(u8, u8)>>;
 
   // Eleven arms with no trailing comma drives the general `prop_oneof!`
   // arm whose transcriber previously repeated `$weight`/`$item` under
@@ -2163,26 +2180,28 @@ mod macro_hygiene {
   }
 
   #[test]
-  fn prop_oneof_dynamic_union_stays_within_its_arms() -> TestResult {
+  fn prop_oneof_dynamic_union_stays_within_its_arms() -> UnionRun {
     ensure_property(&eleven_way_union(), "every sample comes from one of the eleven arms", |sample| {
-      ensure((0..=10).contains(&sample), "sample in 0..=10")
+      ensure_that(sample, "sample in 0..=10", |subject| (0..=10).contains(subject))
     })
   }
 
   #[test]
-  fn prop_oneof_dynamic_union_reports_a_falsified_bound() -> TestResult {
-    let failure = ensure_some(
-      ensure_property(&eleven_way_union(), "no sample reaches the eleventh arm", |sample| {
-        ensure(sample < 10, "sample below ten")
-      })
-      .err(),
-      "the eleventh arm must falsify the below-ten property",
-    )?;
-    ensure_contains(
-      &failure.to_string(),
-      "property falsified",
-      "the falsification surfaces through the strict runner",
+  fn prop_oneof_dynamic_union_reports_a_falsified_bound() -> Result<(), PredicateFailure<UnionRun>> {
+    let result = ensure_property(&eleven_way_union(), "no sample reaches the eleventh arm", |sample| {
+      ensure_that(sample, "sample below ten", |subject| *subject < 10)
+    });
+    ensure_that(
+      result,
+      "the eleventh arm supplies the original assertion failure and counterexample",
+      |observed| {
+        observed.as_ref().is_err_and(|report| {
+          matches!(report.cause,
+        PropertyCause::Falsified { counterexample: 10, ref failure, .. } if failure.subject == 10)
+        })
+      },
     )
+    .map(drop)
   }
 
   // `prop_compose!` with two closure lists where the first list uses the
@@ -2202,29 +2221,30 @@ mod macro_hygiene {
   }
 
   #[test]
-  fn prop_compose_typed_two_stage_bounds_hold() -> TestResult {
+  fn prop_compose_typed_two_stage_bounds_hold() -> BoundedRun {
     ensure_property(
       &ceiling_then_bounded(),
       "the second-stage draw never exceeds the first-stage ceiling",
-      |(drawn, ceiling)| ensure(drawn <= ceiling, "draw within the drawn ceiling"),
+      |pair| ensure_that(pair, "draw within the drawn ceiling", |subject| subject.0 <= subject.1),
     )
   }
 
   #[test]
-  fn prop_compose_typed_two_stage_reports_falsification() -> TestResult {
-    let failure = ensure_some(
-      ensure_property(
-        &ceiling_then_bounded(),
-        "the second draw never equals the ceiling",
-        |(drawn, ceiling)| ensure(drawn != ceiling, "draw differs from the ceiling"),
-      )
-      .err(),
-      "a draw equal to the ceiling must falsify the property",
-    )?;
-    ensure_contains(
-      &failure.to_string(),
-      "property falsified",
-      "the falsification surfaces through the strict runner",
+  fn prop_compose_typed_two_stage_reports_falsification() -> Result<(), PredicateFailure<BoundedRun>> {
+    let result = ensure_property(&ceiling_then_bounded(), "the second draw never equals the ceiling", |pair| {
+      ensure_that(pair, "draw differs from the ceiling", |subject| subject.0 != subject.1)
+    });
+    ensure_that(
+      result,
+      "equal draws retain their exact counterexample and assertion subject",
+      |observed| {
+        observed.as_ref().is_err_and(|report| {
+          matches!(report.cause,
+        PropertyCause::Falsified { counterexample, ref failure, .. }
+          if counterexample.0 == counterexample.1 && failure.subject == counterexample)
+        })
+      },
     )
+    .map(drop)
   }
 }

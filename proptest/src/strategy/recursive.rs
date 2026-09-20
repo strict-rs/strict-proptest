@@ -7,8 +7,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(all(not(feature = "std"), not(test)))]
-use num_traits::MulAdd as _;
 use num_traits::ToPrimitive as _;
 
 use crate::std_facade::Arc;
@@ -156,13 +154,17 @@ impl<T: fmt::Debug + 'static, R: Strategy<Value = T> + 'static, F: Fn(BoxedStrat
 mod test {
   use std::cmp::max;
 
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_some;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
   use crate::collection::vec;
   use crate::strategy::just::Just;
+  use crate::strategy::trace_shrink_steps;
+  use crate::test_runner::Reason;
+
+  /// Native generation or observation result for every sampled recursive case.
+  type Samples<T> = Vec<Result<T, Reason>>;
 
   #[derive(Clone, Debug, PartialEq)]
   enum Tree {
@@ -182,38 +184,78 @@ mod test {
     }
   }
 
-  #[test]
-  fn test_recursive() -> Result<(), TestFailure> {
-    let mut max_depth = 0;
-    let mut max_count = 0;
+  /// Native recursive shrinker and its complete sequence of observed trees.
+  struct RecursiveWalk {
+    /// Preserve the existing recursively boxed value tree without adding erasure.
+    tree:   <BoxedStrategy<Tree> as Strategy>::Tree,
+    /// Owned trees observed before and during simplification.
+    values: Vec<Tree>,
+  }
 
-    let strat = Just(Tree::Leaf).prop_recursive(4, 64, 16, |element| vec(element, 8..16).prop_map(Tree::Branch));
-
-    let mut runner = TestRunner::deterministic();
-    for _ in 0..65536 {
-      let tree = ensure_some(strat.new_tree(&mut runner).ok(), "recursive strategy generates a value tree")?.current();
-      let (depth, count) = tree.stats();
-      ensure(depth <= 4, "the depth budget is respected")?;
-      ensure(count <= 128, "the size budget is respected")?;
-      max_depth = max(depth, max_depth);
-      max_count = max(count, max_count);
+  impl fmt::Debug for RecursiveWalk {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+      f.debug_struct("RecursiveWalk")
+        .field("current", &self.tree.current())
+        .field("values", &self.values)
+        .finish()
     }
-
-    ensure(max_depth >= 3, "deep trees are actually generated")?;
-    ensure(max_count > 48, "large trees are actually generated")
   }
 
   #[test]
-  fn simplifies_to_non_recursive() -> Result<(), TestFailure> {
-    let strat = Just(Tree::Leaf).prop_recursive(4, 64, 16, |element| vec(element, 8..16).prop_map(Tree::Branch));
-
+  fn test_recursive() -> Result<(), PredicateFailure<Samples<Tree>>> {
+    let strategy = Just(Tree::Leaf).prop_recursive(4, 64, 16, |element| vec(element, 8..16).prop_map(Tree::Branch));
     let mut runner = TestRunner::deterministic();
-    for _ in 0..256 {
-      let mut value = ensure_some(strat.new_tree(&mut runner).ok(), "recursive strategy generates a value tree")?;
-      while value.simplify() {}
+    let trees: Vec<_> = (0..65536)
+      .map(|_| strategy.new_tree(&mut runner).map(|tree| tree.current()))
+      .collect();
+    let within_budget = |sample: &Result<Tree, Reason>| {
+      let Ok(ref generated) = *sample else {
+        return false;
+      };
+      let (depth, count) = generated.stats();
+      depth <= 4 && count <= 128
+    };
+    ensure_that(
+      trees,
+      "recursive trees respect their budgets and attain meaningful depth and size",
+      |observed| {
+        observed.iter().all(within_budget)
+          && observed
+            .iter()
+            .any(|sample| sample.as_ref().is_ok_and(|generated| generated.stats().0 >= 3))
+          && observed
+            .iter()
+            .any(|sample| sample.as_ref().is_ok_and(|generated| generated.stats().1 > 48))
+      },
+    )
+    .map(drop)
+  }
 
-      ensure(Tree::Leaf == value.current(), "shrinking converges to the non-recursive case")?;
-    }
-    Ok(())
+  #[test]
+  fn simplifies_to_non_recursive() -> Result<(), PredicateFailure<Samples<RecursiveWalk>>> {
+    let strategy = Just(Tree::Leaf).prop_recursive(4, 64, 16, |element| vec(element, 8..16).prop_map(Tree::Branch));
+    let mut runner = TestRunner::deterministic();
+    let walks: Vec<_> = (0..256)
+      .map(|_| strategy.new_tree(&mut runner))
+      .map(|generation| {
+        generation.map(|initial_tree| {
+          let (tree, values) = trace_shrink_steps(initial_tree);
+          RecursiveWalk {
+            tree,
+            values,
+          }
+        })
+      })
+      .collect();
+    ensure_that(
+      walks,
+      "every recursive shrink walk converges to its non-recursive leaf",
+      |observed| {
+        observed
+          .iter()
+          .all(|walk| walk.as_ref().is_ok_and(|reached| reached.tree.current() == Tree::Leaf))
+      },
+    )
+    .map(drop)
   }
 }

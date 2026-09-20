@@ -17,16 +17,28 @@
 
 #[cfg(test)]
 mod tests {
+  use std::fmt::Debug;
+  use std::num::ParseIntError;
+
   use proptest::prelude::Arbitrary;
   use proptest::prelude::BoxedStrategy;
   use proptest::prelude::Strategy as _;
   use proptest::prelude::any;
-  use proptest::strict::TestResult;
   use proptest::strict::ensure_property;
   use proptest::string::StrategyFromRegex;
+  use proptest::test_runner::PropertyResult;
   use proptest_derive::Arbitrary;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_ok;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
+
+  /// Original field owner and the native decimal parse result.
+  type Observation<T> = (T, Result<u8, ParseIntError>);
+  /// A failed field contract keeps its complete owner and parsing result.
+  type AdherenceFailure<T> = Box<PredicateFailure<Observation<T>>>;
+  /// Property execution retains every field and parsing outcome.
+  type Checked<T> = PropertyResult<T, Observation<T>, AdherenceFailure<T>>;
+  /// Borrow the six regex-controlled fields without consuming their owner.
+  type Fields<'a> = (&'a str, &'a str, &'a str, &'a [u8], &'a [u8], &'a [u8]);
 
   const fn mk_regex() -> &'static str {
     "[0-9][0-9]"
@@ -119,94 +131,91 @@ mod tests {
   #[derive(Debug, Arbitrary)]
   struct T4(#[proptest(regex = "a+")] NewString);
 
-  fn ensure_aplus(x0: &str) -> TestResult {
-    ensure(x0.chars().count() > 0, "the a+ string is non-empty")?;
-    ensure(x0.chars().all(|letter: char| letter == 'a'), "the a+ string is all a's")
+  /// The positive closure of the ASCII letter a contains no empty string.
+  fn is_aplus(value: &str) -> bool {
+    !value.is_empty() && value.chars().all(|letter| letter == 'a')
   }
 
-  fn ensure_adherence(x0: &str, x1: &str, x2: &str, y0: &[u8], y1: &[u8], y2: &[u8]) -> TestResult {
-    ensure_aplus(x0)?;
-
-    ensure(x1.chars().count() > 0, "the b+ string is non-empty")?;
-    ensure(x1.chars().all(|letter: char| letter == 'b'), "the b+ string is all b's")?;
-
-    let parsed = ensure_ok(x2.parse::<u8>(), "the two-digit regex string parses as u8")?;
-    ensure(parsed < 100, "the two-digit value stays below one hundred")?;
-
-    ensure(!y0.is_empty(), "the (a|b)+ bytes are non-empty")?;
-    ensure(
-      y0.iter().all(|byte: &u8| b"ab".contains(byte)),
-      "the (a|b)+ bytes stay in the alphabet",
-    )?;
-
-    ensure(!y1.is_empty() && y1.len() < 4, "the filtered [abc]+ bytes keep the length filter")?;
-    ensure(
-      y1.iter().all(|byte: &u8| b"abc".contains(byte)),
-      "the [abc]+ bytes stay in the alphabet",
-    )?;
-
-    ensure(!y2.is_empty(), "the fn-regex bytes are non-empty")?;
-    ensure(y2.iter().all(u8::is_ascii_digit), "the fn-regex bytes are all digits")
+  /// Check the complete owner while preserving the fallible decimal observation.
+  fn ensure_adherence<T: Debug>(sample: T, fields: fn(&T) -> Fields<'_>) -> Result<Observation<T>, AdherenceFailure<T>> {
+    let parsed = fields(&sample).2.parse::<u8>();
+    ensure_that((sample, parsed), "every regex and length filter holds", |observed| {
+      let (x0, x1, _, y0, y1, y2) = fields(&observed.0);
+      is_aplus(x0)
+        && !x1.is_empty()
+        && x1.chars().all(|letter| letter == 'b')
+        && observed.1.as_ref().is_ok_and(|value| *value < 100)
+        && !y0.is_empty()
+        && y0.iter().all(|byte| b"ab".contains(byte))
+        && !y1.is_empty()
+        && y1.len() < 4
+        && y1.iter().all(|byte| b"abc".contains(byte))
+        && !y2.is_empty()
+        && y2.iter().all(u8::is_ascii_digit)
+    })
+    .map_err(Box::new)
   }
 
   #[test]
-  fn t0_adhering_to_regex() -> TestResult {
-    ensure_property(&any::<T0>(), "named struct regex fields adhere to their regexes", |sample| {
-      let T0 {
-        foo: x0,
-        bar: x1,
-        baz: x2,
-        quux: y0,
-        wibble: y1,
-        wobble: y2,
-      } = sample;
-      ensure_adherence(&x0, &x1, &x2, &y0, &y1, &y2)
+  fn t0_adhering_to_regex() -> Checked<T0> {
+    ensure_property(&any::<T0>(), "named struct regex fields adhere to their regexes", |generated| {
+      ensure_adherence(generated, |sample| {
+        (&sample.foo, &sample.bar, &sample.baz, &sample.quux, &sample.wibble, &sample.wobble)
+      })
     })
   }
 
   #[test]
-  fn t1_adhering_to_regex() -> TestResult {
-    ensure_property(&any::<T1>(), "tuple struct regex fields adhere to their regexes", |sample| {
-      let T1(x0, x1, x2, y0, y1, y2) = sample;
-      ensure_adherence(&x0, &x1, &x2, &y0, &y1, &y2)
+  fn t1_adhering_to_regex() -> Checked<T1> {
+    ensure_property(&any::<T1>(), "tuple struct regex fields adhere to their regexes", |generated| {
+      ensure_adherence(generated, |sample| {
+        (&sample.0, &sample.1, &sample.2, &sample.3, &sample.4, &sample.5)
+      })
     })
   }
 
   #[test]
-  fn t1_r_adhering_to_regex() -> TestResult {
-    ensure_property(&any::<T1r>(), "raw-string regex fields adhere to their regexes", |sample| {
-      let T1r(x0, x1, x2, y0, y1, y2) = sample;
-      ensure_adherence(&x0, &x1, &x2, &y0, &y1, &y2)
+  fn t1_r_adhering_to_regex() -> Checked<T1r> {
+    ensure_property(&any::<T1r>(), "raw-string regex fields adhere to their regexes", |generated| {
+      ensure_adherence(generated, |sample| {
+        (&sample.0, &sample.1, &sample.2, &sample.3, &sample.4, &sample.5)
+      })
     })
   }
 
   #[test]
-  fn t2_adhering_to_regex() -> TestResult {
-    ensure_property(&any::<T2>(), "struct-variant regex fields adhere to their regexes", |sample| {
-      let T2::V0 {
-        foo: x0,
-        bar: x1,
-        baz: x2,
-        quux: y0,
-        wibble: y1,
-        wobble: y2,
-      } = sample;
-      ensure_adherence(&x0, &x1, &x2, &y0, &y1, &y2)
+  fn t2_adhering_to_regex() -> Checked<T2> {
+    ensure_property(&any::<T2>(), "struct-variant regex fields adhere to their regexes", |generated| {
+      ensure_adherence(generated, |sample| {
+        let T2::V0 {
+          ref foo,
+          ref bar,
+          ref baz,
+          ref quux,
+          ref wibble,
+          ref wobble,
+        } = *sample;
+        (foo, bar, baz, quux, wibble, wobble)
+      })
     })
   }
 
   #[test]
-  fn t3_adhering_to_regex() -> TestResult {
-    ensure_property(&any::<T3>(), "tuple-variant regex fields adhere to their regexes", |sample| {
-      let T3::V0(x0, x1, x2, y0, y1, y2) = sample;
-      ensure_adherence(&x0, &x1, &x2, &y0, &y1, &y2)
+  fn t3_adhering_to_regex() -> Checked<T3> {
+    ensure_property(&any::<T3>(), "tuple-variant regex fields adhere to their regexes", |generated| {
+      ensure_adherence(generated, |sample| {
+        let T3::V0(ref x0, ref x1, ref x2, ref y0, ref y1, ref y2) = *sample;
+        (x0, x1, x2, y0, y1, y2)
+      })
     })
   }
 
   #[test]
-  fn t4_adhering_to_regex() -> TestResult {
-    ensure_property(&any::<T4>(), "a custom StrategyFromRegex type adheres to its regex", |sample| {
-      ensure_aplus(&(sample.0).0)
+  fn t4_adhering_to_regex() -> PropertyResult<T4, T4, PredicateFailure<T4>> {
+    ensure_property(&any::<T4>(), "a custom StrategyFromRegex type adheres to its regex", |generated| {
+      ensure_that(generated, "the custom string is non-empty and contains only a", |sample| {
+        is_aplus(&(sample.0).0)
+      })
     })
   }
 

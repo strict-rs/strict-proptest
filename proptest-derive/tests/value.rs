@@ -18,11 +18,14 @@
 mod tests {
   use proptest::prelude::Arbitrary;
   use proptest::prelude::any;
-  use proptest::strict::TestResult;
   use proptest::strict::ensure_property;
+  use proptest::test_runner::PropertyResult;
   use proptest_derive::Arbitrary;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_eq;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
+
+  /// Each assertion retains the complete generated value.
+  type Checked<T> = PropertyResult<T, T, PredicateFailure<T>>;
 
   #[derive(Debug, Arbitrary)]
   struct T0 {
@@ -107,115 +110,113 @@ mod tests {
   struct ValueFnCollision {
     #[proptest(value = "value_fn()")]
     field:    usize,
-    #[proptest(value = "value_fn() + 1")]
+    #[proptest(value = "value_fn().saturating_add(1)")]
     plus_one: usize,
   }
 
   #[test]
-  fn t0_fixed_fields() -> TestResult {
-    ensure_property(&any::<T0>(), "every value spelling pins its struct field", |sample| {
-      ensure_eq(&sample.field, &42, "string-literal value")?;
-      ensure_eq(&sample.bar, &24, "call-form string value")?;
-      ensure_eq(&sample.baz, &48, "expression value")?;
-      ensure_eq(&sample.quux, &1337, "bare integer value")?;
-      ensure_eq(&sample.wibble, &7331, "call-form integer value")?;
-      ensure_eq(&sample.wobble, &7, "arithmetic expression value")
+  fn t0_fixed_fields() -> Checked<T0> {
+    ensure_property(&any::<T0>(), "every value spelling pins its struct field", |generated| {
+      ensure_that(generated, "every value spelling pins its struct field", |sample| {
+        (sample.field, sample.bar, sample.baz, sample.quux, sample.wibble, sample.wobble) == (42, 24, 48, 1337, 7331, 7)
+      })
     })
   }
 
   #[test]
-  fn t1_field_always_24() -> TestResult {
-    ensure_property(&any::<T1>(), "a tuple-struct value pins its field", |sample| {
-      ensure_eq(&sample.0, &24, "the tuple field carries the value")
+  fn t1_field_always_24() -> Checked<T1> {
+    ensure_property(&any::<T1>(), "a tuple-struct value pins its field", |generated| {
+      ensure_that(generated, "a tuple-struct value pins its field", |sample| sample.0 == 24)
     })
   }
 
   #[test]
-  fn t2_v1_always_1337() -> TestResult {
-    ensure_property(&any::<T2>(), "a struct-variant value pins its field", |sample| {
-      if let T2::V1 {
-        field,
-      } = sample
-      {
-        ensure_eq(&field, &1337, "the variant field carries the value")?;
-      }
-      Ok(())
+  fn t2_v1_always_1337() -> Checked<T2> {
+    ensure_property(&any::<T2>(), "a struct-variant value pins its field", |generated| {
+      ensure_that(generated, "a struct-variant value pins its field", |sample| match *sample {
+        T2::V0 => true,
+        T2::V1 {
+          field,
+        } => field == 1337,
+      })
     })
   }
 
   #[test]
-  fn t3_v1_always_7331() -> TestResult {
-    ensure_property(&any::<T3>(), "a tuple-variant value pins its field", |sample| {
-      if let T3::V1(field) = sample {
-        ensure_eq(&field, &7331, "the variant field carries the value")?;
-      }
-      Ok(())
+  fn t3_v1_always_7331() -> Checked<T3> {
+    ensure_property(&any::<T3>(), "a tuple-variant value pins its field", |generated| {
+      ensure_that(generated, "a tuple-variant value pins its field", |sample| match *sample {
+        T3::V0 => true,
+        T3::V1(field) => field == 7331,
+      })
     })
   }
 
   #[test]
-  fn t4_v1_always_1337() -> TestResult {
+  fn t4_v1_always_1337() -> Checked<T4> {
     ensure_property(
       &any::<T4>(),
       "a field-level value inside a struct variant pins the field",
-      |sample| {
-        if let T4::V1 {
-          field,
-        } = sample
-        {
-          ensure_eq(&field, &6, "the variant field carries the value")?;
-        }
-        Ok(())
+      |generated| {
+        ensure_that(
+          generated,
+          "a field-level value inside a struct variant pins the field",
+          |sample| match *sample {
+            T4::V0 => true,
+            T4::V1 {
+              field,
+            } => field == 6,
+          },
+        )
       },
     )
   }
 
   #[test]
-  fn t5_v1_always_7331() -> TestResult {
+  fn t5_v1_always_7331() -> Checked<T5> {
     ensure_property(
       &any::<T5>(),
       "a field-level value inside a tuple variant pins the field",
-      |sample| {
-        if let T5::V1(field) = sample {
-          ensure_eq(&field, &9, "the variant field carries the value")?;
-        }
-        Ok(())
+      |generated| {
+        ensure_that(
+          generated,
+          "a field-level value inside a tuple variant pins the field",
+          |sample| match *sample {
+            T5::V0 => true,
+            T5::V1(field) => field == 9,
+          },
+        )
       },
     )
   }
 
   #[test]
-  fn t6_alpha_beta() -> TestResult {
-    ensure_property(&any::<T6>(), "value and strategy fields coexist on one struct", |sample| {
-      ensure_eq(&sample.alpha, &"alpha".to_owned(), "the value field is pinned")?;
-      ensure(sample.beta < 100, "the strategy field stays in range")
+  fn t6_alpha_beta() -> Checked<T6> {
+    ensure_property(&any::<T6>(), "value and strategy fields coexist on one struct", |generated| {
+      ensure_that(generated, "value and strategy fields coexist on one struct", |sample| {
+        sample.alpha == "alpha" && sample.beta < 100
+      })
     })
   }
 
   #[test]
-  fn call_fun_always_42() -> TestResult {
-    ensure_property(&any::<CallFun>(), "fn-path value spellings call the function", |sample| {
-      ensure_eq(&sample.foo, &42, "the string call-form value")?;
-      ensure_eq(&sample.bar, &42, "the bare fn-path value")
+  fn call_fun_always_42() -> Checked<CallFun> {
+    ensure_property(&any::<CallFun>(), "fn-path value spellings call the function", |generated| {
+      ensure_that(generated, "fn-path value spellings call the function", |sample| {
+        (sample.foo, sample.bar) == (42, 42)
+      })
     })
   }
 
   #[test]
-  fn value_fn_name_collision_resolves_to_user_fn() -> TestResult {
+  fn value_fn_name_collision_resolves_to_user_fn() -> Checked<ValueFnCollision> {
     ensure_property(
       &any::<ValueFnCollision>(),
-      "a `value_fn`-named user fn wins over the generated binding of the same name",
-      |sample| {
-        ensure_eq(
-          &sample.field,
-          &7788,
-          "the pinned expression calls the user's value_fn, not the generated local",
-        )?;
-        ensure_eq(
-          &sample.plus_one,
-          &7789,
-          "a second collision site resolves to the user's value_fn too",
-        )
+      "both value_fn expressions resolve to the user function",
+      |generated| {
+        ensure_that(generated, "both value_fn expressions resolve to the user function", |sample| {
+          (sample.field, sample.plus_one) == (7788, 7789)
+        })
       },
     )
   }

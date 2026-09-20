@@ -10,33 +10,43 @@
 //! In this example, we're using the state machine testing to test interactions
 //! of arbitrary client with an echo server, implemented using `message-io`
 //! crate in the `system_under_test` module.
+//! Pass `--correct` to wait for connection readiness before sending.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::env;
+use std::fmt;
+use std::io::Error as IoError;
 use std::io::Result as IoResult;
 use std::mem::take;
+use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
 use std::string::FromUtf8Error;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::thread;
 use std::time::Duration;
+use std::vec::IntoIter;
 
 use message_io::network::SendStatus;
 use message_io::network::ToRemoteAddr;
 use message_io::network::Transport;
 use proptest::prelude::*;
 use proptest::sample::select;
-use proptest::strict::TestFailure;
-use proptest::strict::TestResult;
 use proptest::test_runner::Config;
 use proptest_state_machine::ReferenceStateMachine;
+use proptest_state_machine::StateMachinePropertyResult;
 use proptest_state_machine::StateMachineTest;
 use proptest_state_machine::prop_state_machine;
 use proptest_state_machine::strict_state_machine_config;
-use strict_test_support::ensure;
+use strict_test_support::ComparisonFailure;
+use strict_test_support::OptionFailure;
+use strict_test_support::PredicateFailure;
+use strict_test_support::ResultFailure;
+use strict_test_support::ensure_eq;
 use strict_test_support::ensure_ok;
 use strict_test_support::ensure_some;
+use strict_test_support::ensure_that;
 use system_under_test::ClientDialer;
 use system_under_test::ClientListener;
 use system_under_test::Msg;
@@ -91,9 +101,6 @@ impl SendImplementation {
   const BUGGY_DEFAULT: Self = Self::Immediate;
   /// The corrected implementation that waits for connection readiness.
   const CORRECT: Self = Self::WaitUntilConnected;
-  /// All supported send implementations, keeping the teaching alternatives
-  /// visible in the example binary.
-  const OPTIONS: [Self; 2] = [Self::BUGGY_DEFAULT, Self::CORRECT];
 }
 
 // Setup the state machine test using the `prop_state_machine!` macro
@@ -102,8 +109,8 @@ prop_state_machine! {
         // Enable verbose mode to make the state machine test print the
         // transitions for each case.
         verbose: 1,
-        // Only run 10 cases by default to avoid running out of system resources
-        // and taking too long to finish.
+        // This is the inner driver config. Set PROPTEST_CASES=10 when running
+        // the example to cap the outer runner's thread/socket workload.
         cases: 10,
         .. strict_state_machine_config()
     })]
@@ -125,11 +132,7 @@ prop_state_machine! {
     );
 }
 
-fn main() -> TestResult {
-  ensure(
-    !SendImplementation::OPTIONS.is_empty(),
-    "the echo-server example exposes at least one send implementation",
-  )?;
+fn main() -> StateMachinePropertyResult<EchoServerTest> {
   // The generated test fn returns the strict verdict; returning it from
   // `main` reports a falsified property through the process exit status
   // instead of a panic.
@@ -163,7 +166,7 @@ enum Transition {
 }
 
 /// The state of the concrete server and clients under test.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct EchoServerTest {
   /// The running server, if the model says it has been started.
   server:  Option<TestServer>,
@@ -172,6 +175,7 @@ struct EchoServerTest {
 }
 
 /// Running server resources held by the concrete state machine.
+#[derive(Debug)]
 struct TestServer {
   /// A server dialer can be used to send message to clients and to shut-down
   /// the server.
@@ -181,6 +185,7 @@ struct TestServer {
 }
 
 /// Running client resources held by the concrete state machine.
+#[derive(Debug)]
 struct TestClient {
   /// A client dialer can send messages to the server.
   dialer:          ClientDialer,
@@ -193,6 +198,215 @@ struct TestClient {
 
 /// Stable identifier assigned to a generated client.
 type ClientId = usize;
+
+/// Native server resources and the completed listener join.
+struct StoppedServer {
+  /// The handler and bound address remain inspectable after shutdown.
+  dialer: ServerDialer,
+  /// Preserve a listener's native panic payload if joining failed.
+  joined: thread::Result<()>,
+}
+
+/// Native client resources and the completed listener join.
+struct StoppedClient {
+  /// The model identity of the stopped listener.
+  id:        ClientId,
+  /// The handler and endpoint remain inspectable after shutdown.
+  dialer:    ClientDialer,
+  /// Preserve unread messages and their native decode results.
+  msgs_recv: Receiver<Result<Msg, FromUtf8Error>>,
+  /// Preserve a listener's native panic payload if joining failed.
+  joined:    thread::Result<()>,
+}
+
+/// Evidence returned by the concrete transition that produced it.
+enum EchoObservation {
+  /// The address bound for the running server.
+  ServerStarted(SocketAddr),
+  /// Completed server shutdown followed by completed client shutdowns.
+  ServerStopped(StoppedServer, Vec<StoppedClient>),
+  /// Client identity, connected server address, and prior map entry.
+  ClientStarted(ClientId, SocketAddr, Option<TestClient>),
+  /// Completed shutdown of one client.
+  ClientStopped(StoppedClient),
+  /// The native send result and both compared messages.
+  Message(ClientId, SendStatus, (Msg, Msg)),
+}
+
+impl fmt::Debug for StoppedServer {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter
+      .debug_struct("StoppedServer")
+      .field("dialer", &self.dialer)
+      .field("joined", &self.joined)
+      .finish()
+  }
+}
+
+impl fmt::Debug for StoppedClient {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter
+      .debug_struct("StoppedClient")
+      .field("id", &self.id)
+      .field("dialer", &self.dialer)
+      .field("msgs_recv", &self.msgs_recv)
+      .field("joined", &self.joined)
+      .finish()
+  }
+}
+
+impl fmt::Debug for EchoObservation {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match *self {
+      Self::ServerStarted(address) => formatter.debug_tuple("ServerStarted").field(&address).finish(),
+      Self::ServerStopped(ref server, ref clients) => formatter.debug_tuple("ServerStopped").field(server).field(clients).finish(),
+      Self::ClientStarted(id, address, ref previous) => formatter
+        .debug_tuple("ClientStarted")
+        .field(&id)
+        .field(&address)
+        .field(previous)
+        .finish(),
+      Self::ClientStopped(ref client) => formatter.debug_tuple("ClientStopped").field(client).finish(),
+      Self::Message(id, status, ref messages) => formatter
+        .debug_tuple("Message")
+        .field(&id)
+        .field(&status)
+        .field(messages)
+        .finish(),
+    }
+  }
+}
+
+/// Operation failures retain observations and resources consumed before stopping.
+#[derive(Debug, thiserror::Error)]
+enum EchoOperationFailure {
+  /// A socket operation failed before creating the listener thread.
+  #[error(transparent)]
+  Socket(#[from] ResultFailure<IoError>),
+  /// The server bound its socket, but its listener thread could not start.
+  #[error("could not start the listener for {dialer:?}: {source}")]
+  ServerSpawn {
+    /// The bound server remains identifiable after the spawn failure.
+    dialer: ServerDialer,
+    /// The native operating-system thread creation failure.
+    source: ResultFailure<IoError>,
+  },
+  /// The client connected its socket, but its listener thread could not start.
+  #[error("could not start client {id} with {dialer:?} and receiver {msgs_recv:?}: {source}")]
+  ClientSpawn {
+    /// The identity requested by the transition.
+    id:        ClientId,
+    /// The connected endpoint and handler produced before spawning.
+    dialer:    ClientDialer,
+    /// The receive channel created before spawning the listener.
+    msgs_recv: Receiver<Result<Msg, FromUtf8Error>>,
+    /// The native operating-system thread creation failure.
+    source:    ResultFailure<IoError>,
+  },
+  /// Server shutdown was requested without a running server.
+  #[error(transparent)]
+  MissingServer(#[from] OptionFailure<TestServer>),
+  /// A client could not find a running server address.
+  #[error(transparent)]
+  MissingAddress(#[from] OptionFailure<SocketAddr>),
+  /// A requested client identity is absent; the enclosing failure owns the map.
+  #[error("client {id} is not running for message {message:?}")]
+  MissingClient {
+    /// The absent identity requested by the transition.
+    id:      ClientId,
+    /// The unattempted message, when this was a send operation.
+    message: Option<Msg>,
+  },
+  /// Insertion unexpectedly displaced an existing client.
+  #[error("client {id} replaced an existing entry: {source}")]
+  ReplacedClient {
+    /// The identity whose insertion displaced a running listener.
+    id:     ClientId,
+    /// The displaced client and the failed absence check.
+    source: Box<PredicateFailure<Option<TestClient>>>,
+  },
+  /// The server listener did not join cleanly.
+  #[error(transparent)]
+  ServerJoin(#[from] PredicateFailure<StoppedServer>),
+  /// A single client listener did not join cleanly.
+  #[error(transparent)]
+  ClientJoin(#[from] PredicateFailure<StoppedClient>),
+  /// Bulk shutdown stopped at this listener, retaining the unattempted clients.
+  #[error("client shutdown failed after {stopped:?}, with {remaining:?} remaining: {source}")]
+  ClientShutdown {
+    /// Completed joins preceding the failure.
+    stopped:   Vec<StoppedClient>,
+    /// The failing listener's resources and native join outcome.
+    source:    Box<PredicateFailure<StoppedClient>>,
+    /// Clients whose shutdown has not been attempted.
+    remaining: IntoIter<(ClientId, TestClient)>,
+  },
+  /// The server has already joined when a subsequent client shutdown fails.
+  #[error("client shutdown failed after stopping {server:?}: {source}")]
+  ServerClients {
+    /// The completed server join preceding client shutdown.
+    server: StoppedServer,
+    /// The original client shutdown failure and its progress.
+    source: Box<Self>,
+  },
+  /// Preserve the message and native send status before a receive is attempted.
+  #[error("client {id} could not send {message:?}: {source}")]
+  Send {
+    /// The sending client's model identity.
+    id:      ClientId,
+    /// The original message supplied to the network controller.
+    message: Msg,
+    /// The rejected native send status.
+    source:  PredicateFailure<SendStatus>,
+  },
+  /// The native channel failure follows a successful send.
+  #[error("client {id} sent {message:?} with {status:?}, but no response arrived: {source}")]
+  Receive {
+    /// The client awaiting its echo.
+    id:      ClientId,
+    /// The message already submitted to the network controller.
+    message: Msg,
+    /// The successful native send observation.
+    status:  SendStatus,
+    /// The original receive timeout or disconnection.
+    source:  ResultFailure<mpsc::RecvTimeoutError>,
+  },
+  /// The native UTF-8 failure retains every received byte.
+  #[error("client {id} sent {message:?} with {status:?}, but decoding failed: {source}")]
+  Decode {
+    /// The client whose echo was received.
+    id:      ClientId,
+    /// The original sent message.
+    message: Msg,
+    /// The native send observation before receiving bytes.
+    status:  SendStatus,
+    /// The invalid bytes and their UTF-8 decoding failure.
+    source:  ResultFailure<FromUtf8Error>,
+  },
+  /// Both different message values survive the comparison.
+  #[error("client {id} sent with {status:?}, but received a different echo: {source}")]
+  Echo {
+    /// The client whose decoded echo disagreed.
+    id:     ClientId,
+    /// The successful native send observation.
+    status: SendStatus,
+    /// Both complete compared messages and their comparison failure.
+    source: ComparisonFailure<Msg, Msg>,
+  },
+}
+
+/// The reached concrete state survives a failed consuming application hook.
+#[derive(Debug, thiserror::Error)]
+#[error("echo transition failed with state {state:?}: {source}")]
+struct EchoFailure {
+  /// Live resources still in the state machine's custody.
+  state:  EchoServerTest,
+  /// The original operation failure with completed and unattempted work.
+  source: EchoOperationFailure,
+}
+
+/// The send observation and both complete compared messages.
+type EchoExchange = (SendStatus, (Msg, Msg));
 
 impl ReferenceStateMachine for RefState {
   type State = Self;
@@ -291,134 +505,362 @@ fn arb_msg_from_client() -> impl Strategy<Value = Msg> {
 
 impl EchoServerTest {
   /// Start the concrete server for the reference transport.
-  fn start_server(&mut self, ref_state: &RefState) -> Result<(), TestFailure> {
+  fn start_server(&mut self, ref_state: &RefState) -> Result<SocketAddr, EchoOperationFailure> {
     let (dialer, listener) = ensure_ok(
       ref_state.transport.init_server("127.0.0.1:0"),
       "the server socket binds and listens",
     )?;
-    let listener_handle = thread::spawn(move || {
-      listener.run_server();
-    });
-
+    let address = dialer.address;
+    let listener_handle = match ensure_ok(
+      thread::Builder::new().spawn(move || listener.run_server()),
+      "the server listener thread starts",
+    ) {
+      Ok(handle) => handle,
+      Err(source) => {
+        return Err(EchoOperationFailure::ServerSpawn {
+          dialer,
+          source,
+        });
+      }
+    };
     self.server = Some(TestServer {
       dialer,
       listener_handle,
     });
-    Ok(())
+    Ok(address)
   }
 
-  /// Stop every concrete client currently tracked by the test state.
-  fn stop_all_clients(&mut self) -> Result<(), TestFailure> {
+  /// Stop every concrete client in the original identifier order.
+  fn stop_all_clients(&mut self) -> Result<Vec<StoppedClient>, EchoOperationFailure> {
     let mut clients = take(&mut self.clients).into_iter().collect::<Vec<_>>();
     clients.sort_by_key(|entry| entry.0);
-    for (_id, client) in clients {
+    let mut remaining = clients.into_iter();
+    let mut stopped = Vec::new();
+    while let Some((id, client)) = remaining.next() {
       client.dialer.handler.stop();
-      ensure(client.listener_handle.join().is_ok(), "a client listener thread stops cleanly")?;
+      let observed = StoppedClient {
+        id,
+        dialer: client.dialer,
+        msgs_recv: client.msgs_recv,
+        joined: client.listener_handle.join(),
+      };
+      match ensure_that(observed, "a client listener thread stops cleanly", |joined| joined.joined.is_ok()) {
+        Ok(completed) => stopped.push(completed),
+        Err(source) => {
+          return Err(EchoOperationFailure::ClientShutdown {
+            stopped,
+            source: Box::new(source),
+            remaining,
+          });
+        }
+      }
     }
-    Ok(())
+    Ok(stopped)
   }
 
-  /// Stop the concrete server and any clients it disconnects.
-  fn stop_server(&mut self) -> Result<(), TestFailure> {
+  /// Join the server before attempting to stop any disconnected clients.
+  fn stop_server(&mut self) -> Result<(StoppedServer, Vec<StoppedClient>), EchoOperationFailure> {
     let server = ensure_some(self.server.take(), "stopping the server requires a running server")?;
     server.dialer.handler.stop();
-    ensure(server.listener_handle.join().is_ok(), "the server listener thread stops cleanly")?;
-
-    if !self.clients.is_empty() {
-      self.stop_all_clients()?;
+    let stopped_server = ensure_that(
+      StoppedServer {
+        dialer: server.dialer,
+        joined: server.listener_handle.join(),
+      },
+      "the server listener thread stops cleanly",
+      |observed| observed.joined.is_ok(),
+    )?;
+    let clients = if self.clients.is_empty() {
+      Ok(Vec::new())
+    } else {
+      self.stop_all_clients()
+    };
+    match clients {
+      Ok(stopped_clients) => Ok((stopped_server, stopped_clients)),
+      Err(source) => Err(EchoOperationFailure::ServerClients {
+        server: stopped_server,
+        source: Box::new(source),
+      }),
     }
-    Ok(())
   }
 
   /// Start a concrete client connected to the current concrete server.
-  fn start_client(&mut self, ref_state: &RefState, id: ClientId) -> Result<(), TestFailure> {
-    let server_addr = ensure_some(self.server.as_ref(), "starting a client requires a running server")?
-      .dialer
-      .address;
+  fn start_client(&mut self, ref_state: &RefState, id: ClientId) -> Result<(SocketAddr, Option<TestClient>), EchoOperationFailure> {
+    let server_addr = ensure_some(
+      self.server.as_ref().map(|server| server.dialer.address),
+      "starting a client requires a running server",
+    )?;
     let (listener, dialer) = ensure_ok(
       ref_state.transport.init_client(server_addr),
       "the client connects to the server address",
     )?;
     let (msgs_send, msgs_recv) = mpsc::channel();
-    let listener_handle = thread::spawn(move || {
-      listener.run_client(|msg| {
-        drop(msgs_send.send(msg));
-      });
-    });
-
-    ensure(
-      self
-        .clients
-        .insert(id, TestClient {
+    let listener_handle = match ensure_ok(
+      thread::Builder::new().spawn(move || {
+        listener.run_client(|msg| {
+          drop(msgs_send.send(msg));
+        });
+      }),
+      "the client listener thread starts",
+    ) {
+      Ok(handle) => handle,
+      Err(source) => {
+        return Err(EchoOperationFailure::ClientSpawn {
+          id,
           dialer,
-          listener_handle,
           msgs_recv,
-        })
-        .is_none(),
+          source,
+        });
+      }
+    };
+    let previous = ensure_that(
+      self.clients.insert(id, TestClient {
+        dialer,
+        listener_handle,
+        msgs_recv,
+      }),
       "starting a client creates a new concrete client",
+      Option::is_none,
     )
+    .map_err(|source| EchoOperationFailure::ReplacedClient {
+      id,
+      source: Box::new(source),
+    })?;
+    Ok((server_addr, previous))
   }
 
   /// Stop one concrete client by model identifier.
-  fn stop_client(&mut self, id: ClientId) -> Result<(), TestFailure> {
-    let client = ensure_some(self.clients.remove(&id), "stopping a client requires it to be running")?;
+  fn stop_client(&mut self, id: ClientId) -> Result<StoppedClient, EchoOperationFailure> {
+    let client = self.clients.remove(&id).ok_or(EchoOperationFailure::MissingClient {
+      id,
+      message: None,
+    })?;
     client.dialer.handler.stop();
-    ensure(
-      client.listener_handle.join().is_ok(),
+    ensure_that(
+      StoppedClient {
+        id,
+        dialer: client.dialer,
+        msgs_recv: client.msgs_recv,
+        joined: client.listener_handle.join(),
+      },
       "the stopped client listener thread stops cleanly",
+      |observed| observed.joined.is_ok(),
     )
+    .map_err(EchoOperationFailure::ClientJoin)
   }
 
-  /// Send a message from a concrete client and verify the server echo.
-  fn send_client_message(&mut self, id: ClientId, msg: &str) -> Result<(), TestFailure> {
-    let client = ensure_some(self.clients.get_mut(&id), "messaging the server requires the client to be running")?;
-    let send_status = client.dialer.msg_server(msg, SendImplementation::BUGGY_DEFAULT);
-    ensure(send_status == SendStatus::Sent, "client send reaches the network controller")?;
+  /// Send a message and preserve each native observation through the echo check.
+  fn send_client_message(&mut self, id: ClientId, msg: Msg) -> Result<EchoExchange, EchoOperationFailure> {
+    let Some(client) = self.clients.get_mut(&id) else {
+      return Err(EchoOperationFailure::MissingClient {
+        id,
+        message: Some(msg),
+      });
+    };
+    let implementation = if env::args_os().any(|argument| argument == "--correct") {
+      SendImplementation::CORRECT
+    } else {
+      SendImplementation::BUGGY_DEFAULT
+    };
+    let status = match ensure_that(
+      client.dialer.msg_server(&msg, implementation),
+      "client send reaches the network controller",
+      |status| *status == SendStatus::Sent,
+    ) {
+      Ok(status) => status,
+      Err(source) => {
+        return Err(EchoOperationFailure::Send {
+          id,
+          message: msg,
+          source,
+        });
+      }
+    };
 
-    // NOTE: To fix the issue found by the state machine, swap the send
-    // implementation from `BUGGY_DEFAULT` to `CORRECT`; the wrong path
-    // now reports either a non-`Sent` status or a one-second timeout.
-    let received = ensure_ok(
+    // Pass `--correct` to wait until connection readiness.
+    // The intentionally wrong path reports a non-Sent status or a timeout.
+    let decoded = match ensure_ok(
       client.msgs_recv.recv_timeout(Duration::from_secs(1)),
-      "the server sends a response back to the client",
-    )?;
-    let recv_msg = ensure_ok(received, "the server response is valid UTF-8")?;
-    ensure(recv_msg == msg, "the server echoes the client's message unchanged")
+      "the server responds to the client",
+    ) {
+      Ok(received) => received,
+      Err(source) => {
+        return Err(EchoOperationFailure::Receive {
+          id,
+          message: msg,
+          status,
+          source,
+        });
+      }
+    };
+    let received = match ensure_ok(decoded, "the server response is valid UTF-8") {
+      Ok(message) => message,
+      Err(source) => {
+        return Err(EchoOperationFailure::Decode {
+          id,
+          message: msg,
+          status,
+          source,
+        });
+      }
+    };
+    match ensure_eq(received, msg, "the server echoes the client's message unchanged") {
+      Ok(messages) => Ok((status, messages)),
+      Err(source) => Err(EchoOperationFailure::Echo {
+        id,
+        status,
+        source,
+      }),
+    }
   }
 }
 
 impl StateMachineTest for EchoServerTest {
   type SystemUnderTest = Self;
-
   type Reference = RefState;
+  type Failure = Box<EchoFailure>;
+  type TransitionEvidence = EchoObservation;
+  type InvariantEvidence = ();
 
-  fn init_test(_ref_state: &<Self::Reference as ReferenceStateMachine>::State) -> Self::SystemUnderTest {
+  fn init_test(_ref_state: &RefState) -> Self::SystemUnderTest {
     Self::default()
   }
 
-  fn apply(
-    mut state: Self::SystemUnderTest,
-    ref_state: &<Self::Reference as ReferenceStateMachine>::State,
-    transition: <Self::Reference as ReferenceStateMachine>::Transition,
-  ) -> Result<Self::SystemUnderTest, TestFailure> {
-    match transition {
-      Transition::StartServer => {
-        state.start_server(ref_state)?;
-      }
-      Transition::StopServer => {
-        state.stop_server()?;
-      }
-      Transition::StartClient(id) => {
-        state.start_client(ref_state, id)?;
-      }
-      Transition::StopClient(id) => {
-        state.stop_client(id)?;
-      }
-      Transition::ClientMsg(id, msg) => {
-        state.send_client_message(id, &msg)?;
-      }
+  fn apply(mut state: Self, ref_state: &RefState, transition: Transition) -> Result<(Self, EchoObservation), Self::Failure> {
+    let result = match transition {
+      Transition::StartServer => state.start_server(ref_state).map(EchoObservation::ServerStarted),
+      Transition::StopServer => state
+        .stop_server()
+        .map(|(server, clients)| EchoObservation::ServerStopped(server, clients)),
+      Transition::StartClient(id) => state
+        .start_client(ref_state, id)
+        .map(|(address, previous)| EchoObservation::ClientStarted(id, address, previous)),
+      Transition::StopClient(id) => state.stop_client(id).map(EchoObservation::ClientStopped),
+      Transition::ClientMsg(id, msg) => state
+        .send_client_message(id, msg)
+        .map(|(status, messages)| EchoObservation::Message(id, status, messages)),
+    };
+    match result {
+      Ok(observed) => Ok((state, observed)),
+      Err(source) => Err(Box::new(EchoFailure {
+        state,
+        source,
+      })),
     }
-    Ok(state)
+  }
+
+  fn check_invariants(_state: &Self, _ref_state: &RefState) -> Result<(), Self::Failure> {
+    // This example checks each transition's post-condition in apply.
+    Ok(())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// Complete native result of sending through the corrected readiness path.
+  type ReadyExchange = Option<(SendStatus, Result<Result<Msg, FromUtf8Error>, mpsc::RecvTimeoutError>)>;
+  /// Live state, corrected send, and every completed lifecycle operation.
+  type Lifecycle = (EchoServerTest, ReadyExchange, Vec<Result<EchoObservation, EchoOperationFailure>>);
+  /// Failed consuming application retains its entire concrete state.
+  type FailedApplication = Result<(EchoServerTest, EchoObservation), Box<EchoFailure>>;
+
+  #[test]
+  fn real_socket_lifecycle_preserves_messages_and_joined_resources() -> Result<(), Box<PredicateFailure<Lifecycle>>> {
+    let reference = RefState {
+      is_server_up: true,
+      clients:      HashSet::from([2, 9]),
+      transport:    Transport::FramedTcp,
+    };
+    let mut state = EchoServerTest::default();
+    let mut operations = vec![state.start_server(&reference).map(EchoObservation::ServerStarted)];
+    for id in [9, 2] {
+      operations.push(
+        state
+          .start_client(&reference, id)
+          .map(|(address, previous)| EchoObservation::ClientStarted(id, address, previous)),
+      );
+    }
+    let ready = state.clients.get_mut(&9).map(|client| {
+      let sent = client.dialer.msg_server("ready", SendImplementation::CORRECT);
+      let received = client.msgs_recv.recv_timeout(Duration::from_secs(1));
+      (sent, received)
+    });
+    operations.push(
+      state
+        .send_client_message(9, "echo".to_owned())
+        .map(|(status, messages)| EchoObservation::Message(9, status, messages)),
+    );
+    operations.push(state.stop_client(9).map(EchoObservation::ClientStopped));
+    operations.push(
+      state
+        .stop_server()
+        .map(|(server, clients)| EchoObservation::ServerStopped(server, clients)),
+    );
+    ensure_that(
+      (state, ready, operations),
+      "real listeners echo both sends, join in lifecycle order, and retain native shutdown resources",
+      |observed| {
+        let &[
+          Ok(EchoObservation::ServerStarted(address)),
+          Ok(EchoObservation::ClientStarted(9, first, None)),
+          Ok(EchoObservation::ClientStarted(2, second, None)),
+          Ok(EchoObservation::Message(9, SendStatus::Sent, ref messages)),
+          Ok(EchoObservation::ClientStopped(ref stopped)),
+          Ok(EchoObservation::ServerStopped(ref server, ref clients)),
+        ] = observed.2.as_slice()
+        else {
+          return false;
+        };
+        observed.0.server.is_none()
+          && observed.0.clients.is_empty()
+          && matches!(observed.1, Some((SendStatus::Sent, Ok(Ok(ref message)))) if message == "ready")
+          && address == first
+          && address == second
+          && address == server.dialer.address
+          && messages == &("echo".to_owned(), "echo".to_owned())
+          && stopped.id == 9
+          && stopped.joined.is_ok()
+          && server.joined.is_ok()
+          && clients.len() == 1
+          && clients.first().is_some_and(|client| client.id == 2 && client.joined.is_ok())
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn unavailable_resources_return_typed_failures_with_state_and_message() -> Result<(), Box<PredicateFailure<[FailedApplication; 3]>>> {
+    let reference = RefState {
+      is_server_up: false,
+      clients:      HashSet::new(),
+      transport:    Transport::Tcp,
+    };
+    let failed_applications = [
+      EchoServerTest::apply(EchoServerTest::default(), &reference, Transition::StartClient(7)),
+      EchoServerTest::apply(EchoServerTest::default(), &reference, Transition::StopServer),
+      EchoServerTest::apply(EchoServerTest::default(), &reference, Transition::ClientMsg(7, "unsent".to_owned())),
+    ];
+    ensure_that(
+      failed_applications,
+      "missing resources fail before effects and preserve the unattempted message",
+      |observed| {
+        let &[Err(ref address), Err(ref server), Err(ref client)] = observed else {
+          return false;
+        };
+        observed.iter().all(|result| {
+          result
+            .as_ref()
+            .is_err_and(|failure| failure.state.server.is_none() && failure.state.clients.is_empty())
+        }) && matches!(address.source, EchoOperationFailure::MissingAddress(_))
+          && matches!(server.source, EchoOperationFailure::MissingServer(_))
+          && matches!(client.source, EchoOperationFailure::MissingClient { id: 7, message: Some(ref message) } if message == "unsent")
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 }
 

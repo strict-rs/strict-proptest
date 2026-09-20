@@ -15,7 +15,7 @@ It is recommended to check these files in to your source control so that
 other test runners (e.g., collaborators or a CI system) also replay these
 cases.
 
-Persistence applies to the `proptest!` macro surface and to explicitly configured runners. Strict property tests (`proptest::strict::ensure_property` and the tests `#[property_test]` / `prop_state_machine!` generate) deliberately disable it: they are seeded deterministically instead, the shrunk minimal counterexample travels in the returned `TestFailure`, and the intended workflow is to pin that counterexample as a named unit test — see the Strict property tests chapter.
+Persistence applies to the legacy runner and to explicitly configured typed runners. `proptest::strict::ensure_property`, unconfigured `#[property_test]` wrappers, and `prop_state_machine!` use strict defaults: deterministic seeds and disabled persistence. Their minimized native counterexample travels in `PropertyCause::Falsified`, so it can be retained as a named regression test. `ensure_property_with_config` and `ensure_property_with_transport` preserve the supplied persistence backend; the attribute macro also preserves it in an explicit `config`. Seed persistence is independent of the codec used to transport typed outcomes between processes. See [Strict property tests](strict.md).
 
 Note that, by default, all tests in the same crate will share that one
 persistence file. If you have a very large number of tests, it may be

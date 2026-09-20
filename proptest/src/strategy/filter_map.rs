@@ -197,44 +197,44 @@ where
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_some;
+  use strict_test_support::ensure_that;
 
   use super::*;
+  use crate::std_facade::Vec;
+  use crate::strategy::traits::trace_simplifications;
   use crate::test_runner::test_runner_without_persistence;
 
   #[test]
-  fn test_filter_map() -> Result<(), TestFailure> {
-    let input = (0..256_i32).prop_filter_map("%3 + 1", |candidate| (candidate.rem_euclid(3) == 0).then_some(candidate + 1));
-
-    for _ in 0..256 {
-      let mut runner = test_runner_without_persistence();
-      let mut case = ensure_some(input.new_tree(&mut runner).ok(), "filter_map strategy generates a value tree")?;
-
-      ensure_eq(&0, &(case.current() - 1).rem_euclid(3), "the generated value is a mapped survivor")?;
-
-      while case.simplify() {
-        ensure_eq(
-          &0,
-          &(case.current() - 1).rem_euclid(3),
-          "every simplified value is a mapped survivor",
-        )?;
-      }
-      ensure_eq(
-        &0,
-        &(case.current() - 1).rem_euclid(3),
-        "the fully simplified value is a mapped survivor",
-      )?;
-    }
-    Ok(())
+  fn test_filter_map() -> Result<(), impl fmt::Debug> {
+    let input = (0..256_i32).prop_filter_map("%3 + 1", |candidate| {
+      (candidate.rem_euclid(3) == 0).then_some(candidate.saturating_add(1))
+    });
+    let walks: Vec<_> = (0..256)
+      .map(|_| {
+        input
+          .new_tree(&mut test_runner_without_persistence())
+          .map(trace_simplifications)
+      })
+      .collect();
+    ensure_that(
+      walks,
+      "generation and every shrink state preserve the filter contract",
+      |observed| {
+        observed.iter().all(|walk| {
+          walk
+            .as_ref()
+            .is_ok_and(|reached| reached.1.iter().all(|value| value.saturating_sub(1).rem_euclid(3) == 0))
+        })
+      },
+    )
+    .map(drop)
   }
 
   #[test]
   fn test_filter_map_sanity() -> Result<(), Reason> {
     check_strategy_sanity(
       (0..256_i32).prop_filter_map("!%5 * 2", |candidate| {
-        candidate.rem_euclid(5).is_positive().then_some(candidate * 2)
+        candidate.rem_euclid(5).is_positive().then_some(candidate.saturating_mul(2))
       }),
       Some(CheckStrategySanityOptions {
         // Due to internal rejection sampling, `simplify()` can

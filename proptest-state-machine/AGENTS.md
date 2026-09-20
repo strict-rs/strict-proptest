@@ -2,7 +2,7 @@
 
 This file provides guidance to coding agents when working with code in this repository.
 
-Scope: `proptest-state-machine/` (v0.8.0) — the crate root for state-machine / model-based testing built on top of `proptest`. For shared workspace conventions (toolchain, formatting, the no_std feature matrix, MSRV, commit style) see the workspace-root `AGENTS.md`.
+Scope: `proptest-state-machine/` — the crate root for state-machine / model-based testing built on top of `proptest`. For shared workspace conventions (toolchain, formatting, the no_std feature matrix, MSRV, commit style) see the workspace-root `AGENTS.md`.
 
 ## What this is
 
@@ -11,7 +11,7 @@ A `Strategy` plus a convenience runner macro for *sequential* state-machine test
 - `ReferenceStateMachine` — the abstract model: what *should* happen (and which transitions are valid from a given state).
 - `StateMachineTest` — the real system under test: what *does* happen, checked against the model after each transition.
 
-The `prop_state_machine!` macro expands to ordinary `#[test]` functions returning `proptest::strict::TestResult` that run the model's sequence strategy through `proptest::strict::ensure_property`; a falsified run comes back as `TestFailure::PropertyFalsified` carrying the shrunk minimal transition sequence, and the `StateMachineTest` methods (`apply`, `check_invariants`, `teardown`, `test_sequential`) return/propagate `TestFailure` instead of panicking. The user guide is the Proptest Book's "State Machine testing" chapter (<https://proptest-rs.github.io/proptest/proptest/state-machine.html>).
+The `prop_state_machine!` macro generates functions returning `StateMachinePropertyResult<TestType>` and runs the sequence strategy through `proptest::strict::ensure_property`. A falsified run retains its native minimal case and `SequentialFailure` in `PropertyCause::Falsified`. `StateMachineTest` supplies concrete `Failure`, `TransitionEvidence`, and `InvariantEvidence` associated types; the driver preserves completed observations and unattempted transitions when a hook fails. The user guide is the Proptest Book's "State Machine testing" chapter (<https://proptest-rs.github.io/proptest/proptest/state-machine.html>).
 
 ## Deeper guides (don't duplicate these here)
 
@@ -32,4 +32,4 @@ cargo test -p proptest-state-machine                       # crate test suite
 cargo run  -p proptest-state-machine --example state_machine_heap
 ```
 
-Examples are example *binaries*, not tests, so `cargo test` does not run them — use `cargo run --example …`. For the full feature / no_std build matrix and the toolchain & formatting commands, defer to the workspace-root `AGENTS.md`.
+The intentionally falsifying example entry points run through `cargo run --example …`; their adjacent unit tests execute under `--all-targets` without running those entry points. For the full feature / no_std build matrix and the toolchain & formatting commands, defer to the workspace-root `AGENTS.md`.

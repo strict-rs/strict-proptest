@@ -745,238 +745,243 @@ impl<
 #[cfg(test)]
 mod test {
   use std::collections::HashSet;
-  // `use super::*` drags in the library's `fmt::Result` alias, which would
-  // otherwise shadow the prelude `Result` in the test signatures below.
   use std::result::Result;
 
   use heap_state_machine::*;
   use proptest::collection::hash_set;
   use proptest::strict;
-  use proptest::strict::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_contains;
-  use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_some;
+  use proptest::test_runner::PropertyResult;
+  use proptest::test_runner::Reason;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
 
-  #[test]
-  fn sequential_value_tree_debug_reports_shrink_state() -> Result<(), TestFailure> {
-    let value_tree = deterministic_sequential_value_tree()?;
-    let rendered = format!("{value_tree:?}");
-    ensure_contains(&rendered, "SequentialValueTree", "the debug rendering names the value-tree type")?;
-    ensure_contains(&rendered, "shrink", "the debug rendering exposes the current shrink cursor")?;
-    ensure_contains(
-      &rendered,
-      "included_transitions",
-      "the debug rendering exposes the included-transition count",
-    )
-  }
-
-  /// A number of simplifications that can be applied in the `ValueTree`
-  /// produced by [`deterministic_sequential_value_tree`]. It depends on the
-  /// [`TRANSITIONS`] given to its `sequential_strategy`.
-  ///
-  /// This constant can be determined from the test
-  /// `number_of_sequential_value_tree_simplifications`.
+  /// Number of simplifications in the deterministic sequence.
   const SIMPLIFICATIONS: usize = 32;
-  /// Number of transitions in the [`deterministic_sequential_value_tree`].
+  /// Number of transitions in the deterministic sequence.
   const TRANSITIONS: usize = 32;
+  /// Native generated state-machine case, including its shared progress counter.
+  type HeapCase = (TestState, Vec<TestTransition>, Option<Arc<AtomicUsize>>);
+  /// Tree and every candidate reached during a shrink walk.
+  type TreeWalk = (TestValueTree, Vec<HeapCase>);
+  /// Initial, first-simplified, and final tree state for unseen-tail pruning.
+  type FirstShrink = (TestValueTree, HeapCase, bool, HeapCase);
+  /// Complete native assertion results, allocated when the subject is large.
+  type Check<S> = Result<(), Box<PredicateFailure<S>>>;
+  /// Generated tree and its diagnostic rendering.
+  type RenderedTree = Result<(TestValueTree, String), Reason>;
+  /// Full simplification history and its initial shared seen counter.
+  type CountedWalk = Result<(TreeWalk, Option<Arc<AtomicUsize>>), Reason>;
+  /// The same native tree observed before and after changing its seen counter.
+  type CurrentViews = Result<(TestValueTree, HeapCase, HeapCase), Reason>;
+  /// A precondition-checking property retains its full shrink walk.
+  type WalkProperty = PropertyResult<HashSet<usize>, Result<TreeWalk, Reason>, Box<PredicateFailure<Result<TreeWalk, Reason>>>>;
+  /// A first-shrink property retains both sides of unseen-tail pruning.
+  type FirstShrinkProperty = PropertyResult<usize, Result<FirstShrink, Reason>, Box<PredicateFailure<Result<FirstShrink, Reason>>>>;
 
   #[test]
-  fn number_of_sequential_value_tree_simplifications() -> Result<(), TestFailure> {
-    let mut value_tree = deterministic_sequential_value_tree()?;
-    ensure_some(
-      value_tree.seen_transitions_counter.as_mut(),
-      "the fresh value tree carries a seen-transitions counter",
-    )?
-    .store(TRANSITIONS, atomic::Ordering::SeqCst);
+  fn sequential_value_tree_debug_reports_shrink_state() -> Check<RenderedTree> {
+    let observation = deterministic_sequential_value_tree().map(|tree| {
+      let rendered = format!("{tree:?}");
+      (tree, rendered)
+    });
+    ensure_that(
+      observation,
+      "Debug exposes the value-tree type, shrink cursor, and included transitions",
+      |result| {
+        result.as_ref().is_ok_and(|observed| {
+          observed.1.contains("SequentialValueTree") && observed.1.contains("shrink") && observed.1.contains("included_transitions")
+        })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
 
-    let mut i = 0;
-    loop {
-      let simplified = value_tree.simplify();
-      if simplified {
-        i += 1;
-      } else {
-        break;
+  #[test]
+  fn number_of_sequential_value_tree_simplifications() -> Check<CountedWalk> {
+    let observation = deterministic_sequential_value_tree().map(|mut tree| {
+      let counter = tree.seen_transitions_counter.clone();
+      if let Some(shared) = counter.as_ref() {
+        shared.store(TRANSITIONS, atomic::Ordering::SeqCst);
       }
-    }
-    ensure_eq(
-      &i,
-      &SIMPLIFICATIONS,
+      let mut values = Vec::new();
+      while tree.simplify() {
+        values.push(tree.current());
+      }
+      ((tree, values), counter)
+    });
+    ensure_that(
+      observation,
       "the deterministic value tree yields the pinned simplification count",
+      |result| {
+        result
+          .as_ref()
+          .is_ok_and(|walk| walk.1.is_some() && walk.0.1.len() == SIMPLIFICATIONS)
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
-  /// Test the simplifications and complication of the
-  /// `SequentialValueTree` produced by
-  /// `deterministic_sequential_value_tree`.
-  ///
-  /// The indices of simplification on which we'll attempt to complicate
-  /// after simplification are selected from the randomly generated
-  /// `complicate_ixs`.
-  ///
-  /// Every simplification and complication must satisfy pre-conditions of
-  /// the state-machine.
-  #[test]
-  fn test_state_machine_sequential_value_tree() -> Result<(), TestFailure> {
-    strict::ensure_property(
-      &hash_set(0..SIMPLIFICATIONS, 0..SIMPLIFICATIONS),
-      "every simplification and complication satisfies the preconditions",
-      |complicate_ixs| test_state_machine_sequential_value_tree_aux(&complicate_ixs),
-    )
-  }
-
+  /// Replay each native transition through its model precondition.
   #[allow(
     clippy::single_call_fn,
-    reason = "test body driving repeated simplify and complicate cycles while preconditions hold"
+    reason = "the precondition oracle replays each complete candidate independently of shrink traversal"
   )]
-  fn test_state_machine_sequential_value_tree_aux(complicate_ixs: &HashSet<usize>) -> Result<(), TestFailure> {
-    let mut value_tree = deterministic_sequential_value_tree()?;
+  fn valid_heap_case(subject: &HeapCase) -> bool {
+    let mut state = subject.0.clone();
+    for transition in &subject.1 {
+      if !HeapStateMachine::preconditions(&state, transition) {
+        return false;
+      }
+      state = HeapStateMachine::apply(state, transition);
+    }
+    true
+  }
 
-    let mut ix = 0_usize;
+  /// Retain all candidates visited by the real simplify/complicate algorithm.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "the shrink traversal collects native candidates separately from the property oracle"
+  )]
+  fn walk_heap(complicate_indices: &HashSet<usize>) -> Result<TreeWalk, Reason> {
+    let mut tree = deterministic_sequential_value_tree()?;
+    if let Some(counter) = tree.seen_transitions_counter.as_ref() {
+      counter.store(TRANSITIONS, atomic::Ordering::SeqCst);
+    }
+    let mut candidates = vec![tree.current()];
+    let mut index = 0_usize;
     loop {
-      let simplified = value_tree.simplify();
-
-      check_heap_preconditions(&value_tree)?;
-
+      let simplified = tree.simplify();
+      candidates.push(tree.current());
       if !simplified {
         break;
       }
-      ix = ix.saturating_add(1);
-
-      if complicate_ixs.contains(&ix) {
-        complicate_while_heap_preconditions_hold(&mut value_tree)?;
+      index = index.saturating_add(1);
+      if complicate_indices.contains(&index) {
+        record_complications(&mut tree, &mut candidates);
       }
     }
-    Ok(())
+    Ok((tree, candidates))
   }
 
-  fn check_heap_preconditions(candidate_tree: &TestValueTree) -> Result<(), TestFailure> {
-    let (mut state, transitions, _seen_counter) = candidate_tree.current();
-    for transition in transitions {
-      // Every transition must satisfy the pre-conditions
-      ensure(
-        <HeapStateMachine as ReferenceStateMachine>::preconditions(&state, &transition),
-        "every kept transition satisfies the preconditions",
-      )?;
-
-      // Apply the transition to update the state for the next transition
-      state = <HeapStateMachine as ReferenceStateMachine>::apply(state, &transition);
-    }
-    Ok(())
-  }
-
+  /// Record every backtracking observation, including the terminal read.
   #[allow(
     clippy::single_call_fn,
-    reason = "the value-tree test names the complication replay that must preserve heap preconditions"
+    reason = "complication traversal has its own stopping condition inside the simplify walk"
   )]
-  fn complicate_while_heap_preconditions_hold(value_tree: &mut TestValueTree) -> Result<(), TestFailure> {
+  fn record_complications(tree: &mut TestValueTree, candidates: &mut Vec<HeapCase>) {
     loop {
-      let complicated = value_tree.complicate();
-      check_heap_preconditions(value_tree)?;
-
+      let complicated = tree.complicate();
+      candidates.push(tree.current());
       if !complicated {
         break;
       }
     }
-    Ok(())
   }
 
-  /// Test the initial simplifications of the `SequentialValueTree` produced
-  /// by `deterministic_sequential_value_tree`.
-  ///
-  /// We want to make sure that we initially remove the transitions that
-  /// where not seen.
   #[test]
-  fn test_value_tree_initial_simplification() -> Result<(), TestFailure> {
+  fn test_state_machine_sequential_value_tree() -> WalkProperty {
     strict::ensure_property(
-      &(10_usize..100),
-      "the first simplification removes the unseen transitions",
-      test_value_tree_initial_simplification_aux,
+      &hash_set(0..SIMPLIFICATIONS, 0..SIMPLIFICATIONS),
+      "every simplification and complication satisfies the preconditions",
+      |indices| {
+        ensure_that(
+          walk_heap(&indices),
+          "every visited sequence obeys the model preconditions",
+          |result| result.as_ref().is_ok_and(|walk| walk.1.iter().all(valid_heap_case)),
+        )
+        .map_err(Box::new)
+      },
     )
   }
 
+  /// Observe unseen-tail deletion while keeping both native transition sequences.
   #[allow(
     clippy::single_call_fn,
-    reason = "test body verifying the first simplification prunes the unseen transitions"
+    reason = "the first-shrink fixture retains before and after state separately from its pruning oracle"
   )]
-  fn test_value_tree_initial_simplification_aux(len: usize) -> Result<(), TestFailure> {
-    let sequential = <HeapStateMachine as ReferenceStateMachine>::sequential_strategy(..len);
-
+  fn first_shrink(len: usize) -> Result<FirstShrink, Reason> {
     let mut runner = TestRunner::deterministic();
-    let mut value_tree = ensure_some(
-      sequential.new_tree(&mut runner).ok(),
-      "the deterministic runner builds the sized value tree",
-    )?;
-
-    let (_, transitions, mut seen_counter) = value_tree.current();
-
-    let num_seen = transitions.len().div_euclid(2);
-    ensure_some(seen_counter.as_mut(), "the fresh value tree carries a seen-transitions counter")?
-      .store(num_seen, atomic::Ordering::SeqCst);
-
-    let mut seen_before_complication = transitions.into_iter().take(num_seen).collect::<Vec<_>>();
-
-    ensure(value_tree.simplify(), "the first simplification applies")?;
-
-    let (_, remaining_transitions, _seen_counter) = value_tree.current();
-
-    let seen_after_first_complication = remaining_transitions.into_iter().collect::<Vec<_>>();
-
-    // After the unseen transitions are removed, the shrink behavior depends
-    // on how many transitions were seen:
-    // - If > 1 seen: delete the transition before the last seen one
-    // - If = 1 seen: can't delete any more, may start individual transition shrinking
-    if seen_before_complication.len() > 1 {
-      let last = ensure_some(
-        seen_before_complication.pop(),
-        "more than one seen transition leaves a last element",
-      )?;
-      let _removed_before_last = ensure_some(
-        seen_before_complication.pop(),
-        "more than one seen transition leaves a predecessor to remove",
-      )?;
-      seen_before_complication.push(last);
-      ensure(
-        seen_before_complication == seen_after_first_complication,
-        "only seen transitions should be present after first simplification",
-      )?;
-    } else {
-      // When there's only 1 seen transition, we expect it to be preserved.
-      ensure(
-        !seen_after_first_complication.is_empty(),
-        "When only 1 transition was seen, at least 1 should remain after simplification",
-      )?;
-      ensure(
-        matches!(value_tree.shrink, Transition(0)),
-        "When only 1 transition was seen, shrink should be set to Transition(0)",
-      )?;
-    }
-    Ok(())
+    HeapStateMachine::sequential_strategy(..len)
+      .new_tree(&mut runner)
+      .map(|mut tree| {
+        let before = tree.current();
+        if let Some(counter) = before.2.as_ref() {
+          counter.store(before.1.len().div_euclid(2), atomic::Ordering::SeqCst);
+        }
+        let simplified = tree.simplify();
+        let after = tree.current();
+        (tree, before, simplified, after)
+      })
   }
 
-  /// Pins the non-panicking `current()` contract for an already-observed
-  /// sequential value tree.
   #[test]
-  fn current_with_non_zero_seen_counter_preserves_state() -> Result<(), TestFailure> {
-    let value_tree = deterministic_sequential_value_tree()?;
+  fn test_value_tree_initial_simplification() -> FirstShrinkProperty {
+    strict::ensure_property(&(10_usize..100), "the first simplification removes the unseen transitions", |len| {
+      ensure_that(
+        first_shrink(len),
+        "the first shrink preserves the seen prefix and deletes its penultimate transition",
+        |result| result.as_ref().is_ok_and(first_shrink_prunes_unseen),
+      )
+      .map_err(Box::new)
+    })
+  }
 
-    let (_, transitions_before, mut seen_counter) = value_tree.current();
-    ensure_some(seen_counter.as_mut(), "the fresh value tree carries a seen-transitions counter")?.store(1, atomic::Ordering::SeqCst);
-    drop(seen_counter);
+  /// The first shrink removes unseen transitions before shrinking a seen candidate.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "unseen-tail pruning is checked against retained pre-shrink state independently of generation"
+  )]
+  fn first_shrink_prunes_unseen(observed: &FirstShrink) -> bool {
+    let seen = observed.1.1.len().div_euclid(2);
+    observed.1.2.is_some()
+      && observed.2
+      && if seen > 1 {
+        observed
+          .1
+          .1
+          .iter()
+          .take(seen)
+          .enumerate()
+          .filter(|entry| entry.0 != seen.saturating_sub(2))
+          .map(|entry| entry.1)
+          .eq(observed.3.1.iter())
+      } else {
+        !observed.3.1.is_empty() && matches!(observed.0.shrink, Transition(0))
+      }
+  }
 
-    let (_, transitions_after, current_seen_counter) = value_tree.current();
-    ensure(
-      transitions_before == transitions_after,
-      "current() does not mutate the transition view",
-    )?;
-    let preserved_seen_counter = ensure_some(current_seen_counter.as_ref(), "current() preserves the seen-transitions counter")?;
-    ensure_eq(
-      &1,
-      &preserved_seen_counter.load(atomic::Ordering::SeqCst),
-      "current() preserves the observed transition count",
+  #[test]
+  fn current_with_non_zero_seen_counter_preserves_state() -> Check<CurrentViews> {
+    let observation = deterministic_sequential_value_tree().map(|tree| {
+      let before = tree.current();
+      if let Some(counter) = before.2.as_ref() {
+        counter.store(1, atomic::Ordering::SeqCst);
+      }
+      let after = tree.current();
+      (tree, before, after)
+    });
+    ensure_that(
+      observation,
+      "current preserves the transition view and the same observed progress counter",
+      |result| {
+        result.as_ref().is_ok_and(|observed| {
+          observed.1.0 == observed.2.0
+            && observed.1.1 == observed.2.1
+            && observed
+              .1
+              .2
+              .as_ref()
+              .zip(observed.2.2.as_ref())
+              .is_some_and(|(left, right)| Arc::ptr_eq(left, right) && right.load(atomic::Ordering::SeqCst) == 1)
+        })
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   /// The following is a definition of an reference state machine used for the
@@ -985,6 +990,7 @@ mod test {
     use std::vec::Vec;
 
     use proptest::prelude::*;
+    use proptest::test_runner::Reason;
     use proptest::test_runner::TestRunner;
 
     use super::TRANSITIONS;
@@ -1037,13 +1043,10 @@ mod test {
       let _popped = state.pop();
     }
 
-    pub(super) fn deterministic_sequential_value_tree() -> Result<TestValueTree, strict_test_support::TestFailure> {
+    pub(super) fn deterministic_sequential_value_tree() -> Result<TestValueTree, Reason> {
       let sequential = <HeapStateMachine as ReferenceStateMachine>::sequential_strategy(TRANSITIONS);
       let mut runner = TestRunner::deterministic();
-      strict_test_support::ensure_some(
-        sequential.new_tree(&mut runner).ok(),
-        "the deterministic runner builds the sequential value tree",
-      )
+      sequential.new_tree(&mut runner)
     }
 
     impl ReferenceStateMachine for HeapStateMachine {
@@ -1094,115 +1097,116 @@ mod test {
   mod find_simplest_failure {
     use proptest::collection;
     use proptest::prelude::*;
-    use proptest::strategy::BoxedStrategy;
     use proptest::strict;
-    use proptest::strict::TestFailure;
+    use proptest::test_runner::PropertyCause;
+    use proptest::test_runner::PropertyResult;
     use proptest::test_runner::RngAlgorithm;
-    use proptest::test_runner::TestCaseError;
-    use proptest::test_runner::TestError;
     use proptest::test_runner::TestRng;
     use proptest::test_runner::TestRunner;
-    use strict_test_support::ensure;
-    use strict_test_support::ensure_eq;
-    use strict_test_support::ensure_some;
+    use strict_test_support::PredicateFailure;
+    use strict_test_support::ensure_that;
 
     use crate::ReferenceStateMachine;
+    use crate::StateMachinePropertyResult;
     use crate::StateMachineTest;
     use crate::strict_state_machine_config;
 
+    /// Generated transitions span this lower bound through `MAX_TRANSITION`.
     const MIN_TRANSITION: u32 = 10;
+    /// Exclusive upper transition bound.
     const MAX_TRANSITION: u32 = 20;
-
+    /// Inclusive lower model limit.
     const MIN_LIMIT: u32 = 2;
+    /// Exclusive upper model limit.
     const MAX_LIMIT: u32 = 50;
 
+    /// A reference limit that can shrink independently of the transition.
     #[derive(Debug, Default, Clone)]
     struct FailIfLessThan(u32);
     impl ReferenceStateMachine for FailIfLessThan {
       type State = Self;
       type Transition = u32;
-
       fn init_state() -> BoxedStrategy<Self> {
         (MIN_LIMIT..MAX_LIMIT).prop_map(FailIfLessThan).boxed()
       }
-
       fn transitions(_: &Self::State) -> BoxedStrategy<u32> {
         (MIN_TRANSITION..MAX_TRANSITION).boxed()
       }
-
       fn apply(state: Self::State, _: &Self::Transition) -> Self::State {
         state
       }
     }
 
-    /// Defines a test that is intended to fail, so that we can inspect the
-    /// failing input.
+    /// Falsifies when a native transition falls below the current model limit.
     struct FailIfLessThanTest;
     impl StateMachineTest for FailIfLessThanTest {
       type SystemUnderTest = ();
       type Reference = FailIfLessThan;
-
-      fn init_test(_ref_state: &FailIfLessThan) {}
-
-      fn apply((): Self::SystemUnderTest, ref_state: &FailIfLessThan, transition: u32) -> Result<Self::SystemUnderTest, TestFailure> {
-        // Fail on any transition that is less than the ref state's limit.
-        let &FailIfLessThan(limit) = ref_state;
-        ensure(transition >= limit, "transition is at least the reference limit")
+      type Failure = PredicateFailure<(u32, u32)>;
+      type TransitionEvidence = (u32, u32);
+      type InvariantEvidence = ();
+      fn init_test(_: &FailIfLessThan) {}
+      fn apply((): (), reference: &FailIfLessThan, transition: u32) -> Result<((), Self::TransitionEvidence), Self::Failure> {
+        ensure_that(
+          (transition, reference.0),
+          "transition is at least the reference limit",
+          |observed| observed.0 >= observed.1,
+        )
+        .map(|evidence| ((), evidence))
+      }
+      fn check_invariants(&(): &(), _: &FailIfLessThan) -> Result<(), Self::Failure> {
+        Ok(())
       }
     }
 
-    /// Run the intentionally-failing state machine seeded with `seed` and
-    /// return the minimal falsified input `(limit, transitions)`, or
-    /// `None` when the run passes or aborts (a limit at or below the
-    /// smallest possible transition can never fail). Deterministic in
-    /// `seed`, so the precondition filter and the property body observe
-    /// the same outcome.
-    fn minimal_failure(seed: &[u8]) -> Option<(u32, Vec<u32>)> {
-      // We need to explicitly create a runner so that we can inspect
-      // the output, and determine if it does return an input that
-      // should fail, and is minimal.
+    /// Run the seeded state machine and preserve its complete native report.
+    fn minimal_failure(seed: &[u8]) -> StateMachinePropertyResult<FailIfLessThanTest> {
       let mut runner = TestRunner::new_with_rng(strict_state_machine_config(), TestRng::from_seed(RngAlgorithm::default(), seed));
-      let result = runner.run(
-        &FailIfLessThan::sequential_strategy(10..50_usize),
-        |(ref_state, transitions, seen_counter)| {
-          // The strict TestFailure is this manual runner's
-          // failure signal: convert it exactly the way the
-          // strict runner does, so shrinking still drives.
-          FailIfLessThanTest::test_sequential(strict_state_machine_config(), ref_state, transitions, seen_counter)
-            .map_err(|failure| TestCaseError::fail(failure.to_string()))
-        },
-      );
-      match result {
-        Err(TestError::Fail(_, (FailIfLessThan(limit), transitions, _seen_counter))) => Some((limit, transitions)),
-        _ => None,
-      }
+      runner.run_typed(&FailIfLessThan::sequential_strategy(10..50_usize), |(state, transitions, seen)| {
+        FailIfLessThanTest::test_sequential(strict_state_machine_config(), state, transitions, seen)
+      })
+    }
+
+    /// Both the outer seed exploration and complete inner failure are retained.
+    type SeededFailure = PropertyResult<
+      Vec<u8>,
+      StateMachinePropertyResult<FailIfLessThanTest>,
+      PredicateFailure<StateMachinePropertyResult<FailIfLessThanTest>>,
+    >;
+
+    /// The retained assertion identifies the same minimal bound and transition.
+    #[allow(
+      clippy::single_call_fn,
+      reason = "minimality is checked independently of seed generation and nested property execution"
+    )]
+    fn is_minimal_failure(result: &StateMachinePropertyResult<FailIfLessThanTest>) -> bool {
+      result.as_ref().is_err_and(|report| {
+        matches!(report.cause,
+          PropertyCause::Falsified { counterexample: (FailIfLessThan(limit), ref transitions, _), ref failure, .. }
+          if limit == MIN_TRANSITION.saturating_add(1) && transitions.len() == 1
+            && transitions.first().is_some_and(|transition| *transition < limit && failure.failure.subject == (*transition, limit)))
+      })
     }
 
     #[test]
-    fn test_returns_simplest_failure() -> Result<(), TestFailure> {
-      // A seed is only meaningful when the seeded inner state machine
-      // actually fails, so that precondition lives in the strategy as
-      // a filter rather than an in-body rejection; `minimal_failure`
-      // is deterministic per seed, so the property body re-runs the
-      // same failure the filter observed.
-      let failing_seeds = collection::vec(any::<u8>(), 32)
-        .no_shrink()
-        .prop_filter("the seeded state machine must fail as intended", |seed| {
-          minimal_failure(seed).is_some()
-        });
+    fn test_returns_simplest_failure() -> SeededFailure {
+      let failing_seeds =
+        collection::vec(any::<u8>(), 32)
+          .no_shrink()
+          .prop_filter("the seeded state machine must fail as intended", |seed| {
+            minimal_failure(seed)
+              .as_ref()
+              .is_err_and(|failure| matches!(&failure.cause, PropertyCause::Falsified { .. }))
+          });
       strict::ensure_property(
         &failing_seeds,
         "the runner reports the simplest failing transition sequence",
         |seed| {
-          let (limit, transitions) = ensure_some(minimal_failure(&seed), "a filtered seed reproduces the inner failure")?;
-          ensure_eq(&transitions.len(), &1, "the minimal failing case is a single transition")?;
-          ensure_eq(
-            &limit,
-            &(MIN_TRANSITION + 1),
-            "shrinking drives the limit to the smallest failing bound",
-          )?;
-          let transition = ensure_some(transitions.into_iter().next(), "the minimal failing case carries its transition")?;
-          ensure(transition < limit, "the reported transition violates the limit")
+          ensure_that(
+            minimal_failure(&seed),
+            "the retained assertion and minimal counterexample identify the same failing bound",
+            is_minimal_failure,
+          )
         },
       )
     }
@@ -1213,196 +1217,201 @@ mod test {
   /// transition sequence, and the positive case proves precondition-gated
   /// generation keeps a mirrored SUT aligned.
   mod strict_runner_behavior {
+    mod transport;
     use proptest::strategy::BoxedStrategy;
+    use proptest::strategy::Just;
+    use proptest::strategy::Strategy as _;
     use proptest::strict;
-    use proptest::strict::TestFailure;
-    use proptest::strict::TestResult;
-    use strict_test_support::ensure;
-    use strict_test_support::ensure_contains;
+    use proptest::test_runner::PropertyCause;
+    use strict_test_support::ComparisonFailure;
+    use strict_test_support::PredicateFailure;
     use strict_test_support::ensure_eq;
-    use strict_test_support::ensure_some;
+    use strict_test_support::ensure_that;
+    use thiserror::Error;
 
     use super::heap_state_machine::HeapStateMachine;
     use super::heap_state_machine::TestTransition;
     use crate::ReferenceStateMachine;
+    use crate::StateMachinePropertyResult;
     use crate::StateMachineTest;
     use crate::strict_state_machine_config;
 
-    /// Model transition: a counter that only increments. The
-    /// single-variant enum keeps the reported minimal sequence's
-    /// `Debug` rendering stable for the assertions below.
-    #[derive(Clone, Debug)]
+    /// The model's only operation adds one to the counter.
+    #[derive(Clone, Debug, PartialEq, Eq)]
     enum Tick {
       Increment,
     }
-
+    /// Counting reference model, with one native unit of evidence per transition.
     struct CountingModel;
-
     impl ReferenceStateMachine for CountingModel {
       type State = u32;
       type Transition = Tick;
-
       fn init_state() -> BoxedStrategy<u32> {
-        use proptest::strategy::Just;
-        use proptest::strategy::Strategy as _;
         Just(0).boxed()
       }
-
       fn transitions(_: &u32) -> BoxedStrategy<Tick> {
-        use proptest::strategy::Just;
-        use proptest::strategy::Strategy as _;
         Just(Tick::Increment).boxed()
       }
-
       fn apply(state: u32, _: &Tick) -> u32 {
         state.saturating_add(1)
       }
     }
 
-    /// SUT that violates its invariant once the counter reaches three,
-    /// so the shortest failing sequence is exactly three increments.
+    /// The invariant's context is part of the declared transport's domain.
+    const COUNTER_CONTEXT: &str = "the counter stays below three";
+    /// A concrete failure occurs at the third transition.
     struct FailsAtThree;
-
     impl StateMachineTest for FailsAtThree {
       type SystemUnderTest = u32;
       type Reference = CountingModel;
-
-      fn init_test(ref_state: &u32) -> u32 {
-        *ref_state
+      type Failure = PredicateFailure<u32>;
+      type TransitionEvidence = (u32, u32);
+      type InvariantEvidence = u32;
+      fn init_test(reference: &u32) -> u32 {
+        *reference
       }
-
-      fn apply(state: u32, _: &u32, _: Tick) -> Result<u32, TestFailure> {
-        Ok(state.saturating_add(1))
+      fn apply(state: u32, reference: &u32, _: Tick) -> Result<(u32, (u32, u32)), Self::Failure> {
+        Ok((state.saturating_add(1), (state, *reference)))
       }
-
-      fn check_invariants(state: &u32, _: &u32) -> TestResult {
-        ensure(*state < 3, "the counter stays below three")
+      fn check_invariants(state: &u32, _: &u32) -> Result<u32, Self::Failure> {
+        ensure_that(*state, COUNTER_CONTEXT, |observed| *observed < 3)
       }
     }
 
+    /// Application observation includes the consumed transition and popped value.
+    type HeapApplication = (Vec<i32>, Vec<i32>, TestTransition, Option<i32>, usize);
+
+    /// Execute the heap operation while retaining its native pop observation.
+    #[allow(
+      clippy::single_call_fn,
+      reason = "the heap operation is distinct from checking its model and precondition"
+    )]
+    fn apply_heap_transition(state: &mut Vec<i32>, transition: &TestTransition) -> Option<i32> {
+      match *transition {
+        TestTransition::PopEmpty | TestTransition::PopNonEmpty => state.pop(),
+        TestTransition::Push(value) => {
+          state.push(value);
+          None
+        }
+      }
+    }
+
+    /// Inspect the complete application subject without borrowing away its evidence.
+    #[allow(
+      clippy::single_call_fn,
+      reason = "the transition postcondition is independent of performing the operation"
+    )]
+    fn heap_application_matches(observed: &HeapApplication) -> bool {
+      observed.0 == observed.1
+        && match observed.2 {
+          TestTransition::PopEmpty => observed.4 == 0 && observed.3.is_none(),
+          TestTransition::PopNonEmpty => observed.4 != 0 && observed.3.is_some(),
+          TestTransition::Push(_) => observed.0.len() == observed.4.saturating_add(1) && observed.3.is_none(),
+        }
+    }
+    /// Native errors of both heap checks remain distinct.
+    #[derive(Debug, Error)]
+    enum HeapFailure {
+      /// A transition contradicted its precondition or model state.
+      #[error(transparent)]
+      Application(#[from] PredicateFailure<HeapApplication>),
+      /// The complete concrete and reference stacks disagree.
+      #[error(transparent)]
+      Invariant(#[from] ComparisonFailure<Vec<i32>, Vec<i32>>),
+    }
+    /// A SUT implementing both accepted pop cases and pushes.
     struct MirroredHeap;
-
-    #[allow(
-      clippy::single_call_fn,
-      reason = "the mirrored heap SUT names the PopEmpty post-condition separately from transition dispatch"
-    )]
-    fn apply_mirrored_pop_empty(state: &mut Vec<i32>) -> Result<(), TestFailure> {
-      ensure(state.is_empty(), "PopEmpty is only generated on an empty heap")?;
-      ensure(state.pop().is_none(), "PopEmpty leaves an empty heap unchanged")
-    }
-
-    #[allow(
-      clippy::single_call_fn,
-      reason = "the mirrored heap SUT names the PopNonEmpty post-condition separately from transition dispatch"
-    )]
-    fn apply_mirrored_pop_non_empty(state: &mut Vec<i32>) -> Result<(), TestFailure> {
-      ensure(!state.is_empty(), "PopNonEmpty is only generated on a non-empty heap")?;
-      let _popped = ensure_some(state.pop(), "PopNonEmpty removes an element from a non-empty heap")?;
-      Ok(())
-    }
-
     impl StateMachineTest for MirroredHeap {
       type SystemUnderTest = Vec<i32>;
       type Reference = HeapStateMachine;
-
-      fn init_test(ref_state: &Vec<i32>) -> Vec<i32> {
-        ref_state.clone()
+      type Failure = HeapFailure;
+      type TransitionEvidence = (Vec<i32>, TestTransition, Option<i32>, usize);
+      type InvariantEvidence = (Vec<i32>, Vec<i32>);
+      fn init_test(reference: &Vec<i32>) -> Vec<i32> {
+        reference.clone()
       }
-
-      fn apply(mut state: Vec<i32>, ref_state: &Vec<i32>, transition: TestTransition) -> Result<Vec<i32>, TestFailure> {
-        use TestTransition::PopEmpty;
-        use TestTransition::PopNonEmpty;
-        use TestTransition::Push;
-
-        match transition {
-          PopEmpty => apply_mirrored_pop_empty(&mut state)?,
-          PopNonEmpty => apply_mirrored_pop_non_empty(&mut state)?,
-          Push(value) => state.push(value),
-        }
-        ensure(state == *ref_state, "the SUT mirrors the model after every transition")?;
-        Ok(state)
+      fn apply(
+        mut state: Vec<i32>,
+        reference: &Vec<i32>,
+        transition: TestTransition,
+      ) -> Result<(Vec<i32>, Self::TransitionEvidence), HeapFailure> {
+        let before = state.len();
+        let popped = apply_heap_transition(&mut state, &transition);
+        ensure_that(
+          (state, reference.clone(), transition, popped, before),
+          "every heap transition obeys its precondition and model",
+          heap_application_matches,
+        )
+        .map(|(checked, model, applied, removed, length)| (checked, (model, applied, removed, length)))
+        .map_err(HeapFailure::from)
+      }
+      fn check_invariants(state: &Vec<i32>, reference: &Vec<i32>) -> Result<Self::InvariantEvidence, HeapFailure> {
+        ensure_eq(state.clone(), reference.clone(), "the concrete and reference stacks agree").map_err(HeapFailure::from)
       }
     }
 
+    /// Check both native input and the assertion evidence at the same final candidate.
+    fn is_minimal_counter_failure<T>(result: &StateMachinePropertyResult<FailsAtThree, T>) -> bool {
+      result.as_ref().is_err_and(|report| {
+        matches!(report.cause,
+        PropertyCause::Falsified { counterexample: (0, ref transitions, _), ref failure, .. }
+          if transitions.len() == 3 && failure.failure.subject == 3
+            && failure.evidence.initial_invariant == Some(0) && failure.evidence.transitions.len() == 3
+            && failure.evidence.transitions.last().is_some_and(|step| step.application == Some((2, 3)) && step.invariant.is_none()))
+      })
+    }
+
     #[test]
-    fn falsified_model_reports_the_minimal_transition_sequence() -> Result<(), TestFailure> {
-      let strategy = <CountingModel as ReferenceStateMachine>::sequential_strategy(1..8);
+    fn falsified_model_reports_the_minimal_transition_sequence() -> Result<(), PredicateFailure<StateMachinePropertyResult<FailsAtThree>>> {
       let outcome = strict::ensure_property(
-        &strategy,
-        "the counter stays below three",
-        |(initial_state, transitions, seen_counter)| {
-          <FailsAtThree as StateMachineTest>::test_sequential(strict_state_machine_config(), initial_state, transitions, seen_counter)
-        },
+        &CountingModel::sequential_strategy(1..8),
+        COUNTER_CONTEXT,
+        |(state, transitions, seen)| FailsAtThree::test_sequential(strict_state_machine_config(), state, transitions, seen),
       );
-      let failure = ensure_some(outcome.err(), "a threshold-crossing model must falsify the property")?;
-      let rendered = failure.to_string();
-      ensure(
-        matches!(failure, TestFailure::PropertyFalsified { .. }),
-        "the strict runner reports the falsified-property variant",
-      )?;
-      ensure_contains(
-        &rendered,
-        "minimal failing input:",
-        "the report carries the engine's minimal-input banner",
-      )?;
-      // The report renders the minimal triple with alternate Debug
-      // (`{:#?}`), one transition per line, so pin the sequence by
-      // counting transitions: exactly three increments reach the
-      // threshold, and no never-executed tail transition survives the
-      // seen-transition shrink phase.
-      ensure_eq(
-        &rendered.matches("Increment").count(),
-        &3,
-        "shrinking lands on the three increments reaching the threshold",
+      ensure_that(
+        outcome,
+        "shrinking retains the three increments and their matching invariant failure",
+        is_minimal_counter_failure,
       )
+      .map(drop)
     }
 
     #[test]
-    fn precondition_gated_generation_keeps_a_mirrored_sut_aligned() -> Result<(), TestFailure> {
-      let strategy = <HeapStateMachine as ReferenceStateMachine>::sequential_strategy(1..12);
+    fn precondition_gated_generation_keeps_a_mirrored_sut_aligned() -> StateMachinePropertyResult<MirroredHeap> {
       strict::ensure_property(
-        &strategy,
+        &HeapStateMachine::sequential_strategy(1..12),
         "precondition-gated transitions keep the mirrored SUT aligned",
-        |(initial_state, transitions, seen_counter)| {
-          <MirroredHeap as StateMachineTest>::test_sequential(strict_state_machine_config(), initial_state, transitions, seen_counter)
-        },
+        |(state, transitions, seen)| MirroredHeap::test_sequential(strict_state_machine_config(), state, transitions, seen),
       )
     }
   }
 
   #[test]
-  fn test_zero_seen_transitions_optimization() -> Result<(), TestFailure> {
-    // Test that when 0 transitions are seen, we go directly to InitialState shrinking
-    let mut value_tree = deterministic_sequential_value_tree()?;
-
-    // Simulate that no transitions were seen (kept_count = 0)
-    ensure_some(
-      value_tree.seen_transitions_counter.as_mut(),
-      "the fresh value tree carries a seen-transitions counter",
-    )?
-    .store(0, atomic::Ordering::SeqCst);
-
-    // Call simplify - this should trigger the optimization
-    let simplified = value_tree.simplify();
-
-    ensure_eq(
-      &value_tree.included_transitions.count(),
-      &0,
-      "All transitions should be removed when none were seen",
-    )?;
-    ensure(
-      matches!(value_tree.shrink, InitialState),
-      "Shrink should be set to InitialState when kept_count == 0",
-    )?;
-
-    // The HeapStateMachine uses Just(vec![]) for initial state, which is not shrinkable
-    // So simplify() should return false, but the optimization still works correctly
-    ensure(
-      !simplified,
-      "Simplification should return false since initial state (Just(vec![])) is not shrinkable",
-    )?;
-
-    let (_, transitions, _) = value_tree.current();
-    ensure(transitions.is_empty(), "No transitions should remain when none were seen")
+  fn test_zero_seen_transitions_optimization() -> Check<Result<FirstShrink, Reason>> {
+    let observation = deterministic_sequential_value_tree().map(|mut tree| {
+      let before = tree.current();
+      if let Some(counter) = before.2.as_ref() {
+        counter.store(0, atomic::Ordering::SeqCst);
+      }
+      let simplified = tree.simplify();
+      let after = tree.current();
+      (tree, before, simplified, after)
+    });
+    ensure_that(
+      observation,
+      "an unobserved sequence drops all transitions and reaches the unshrinkable initial state",
+      |result| {
+        result.as_ref().is_ok_and(|observed| {
+          observed.1.2.is_some()
+            && observed.0.included_transitions.count() == 0
+            && matches!(observed.0.shrink, InitialState)
+            && !observed.2
+            && observed.3.1.is_empty()
+            && observed.3.2.is_none()
+        })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

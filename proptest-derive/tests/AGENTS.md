@@ -2,7 +2,7 @@
 
 This file provides guidance to coding agents when working with code in this repository.
 
-Scope: `proptest-derive/tests/` — the leaf test suite for `#[derive(Arbitrary)]`: per-feature compile-and-run integration tests (the sibling `*.rs` files) plus a `compile-fail/` UI suite driven by a bespoke `compiletest_rs` harness. Stable tests use `core::convert::Infallible` for uninhabited-type coverage; exact literal-`!` fixtures use `#![feature(never_type)]` and live in nightly-only compiletest directories. Run full literal-`!` coverage with `cargo +nightly test -p proptest-derive` and again with `--features boxed_union`. See `../AGENTS.md` for the crate and the workspace-root `AGENTS.md` for shared build/lint conventions.
+Scope: `proptest-derive/tests/` — the leaf test suite for `#[derive(Arbitrary)]`: per-feature compile-and-run integration tests (the sibling `*.rs` files) plus a `compile-fail/` UI suite driven by a bespoke `compiletest_rs` harness. Stable tests use `core::convert::Infallible` for uninhabited-type coverage; exact literal-`!` fixtures live in nightly-only compiletest directories and use the current compiler's feature-free syntax. Run full literal-`!` coverage with `cargo +nightly test -p proptest-derive` and again with `--features boxed_union`. See `../AGENTS.md` for the crate and the workspace-root `AGENTS.md` for shared build/lint conventions.
 
 ## Two kinds of test here
 
@@ -14,22 +14,23 @@ There are two completely different mechanisms in this directory, and conflating 
 
 ## The custom compiletest harness (`compiletest.rs`)
 
-This is **not** the stock `compiletest_rs` setup. `compiletest_rs` needs `--extern proptest=<path>` and `--extern proptest_derive=<path>` pointing at the just-built artifacts, but those live in `target/<profile>/deps/` under hashed filenames (`libproptest-<hash>.rlib`, `<dllprefix>proptest_derive-<hash>.<dllext>` — note the core lib is an **rlib** and the derive macro is a **dylib**). Multiple stale copies with different hashes routinely coexist there, so the harness selects the right one by matching Cargo **fingerprints**:
+`compiletest_rs` needs `--extern proptest=<path>` and `--extern proptest_derive=<path>` pointing at the current artifacts (`libproptest-<hash>.rlib` and `<dllprefix>proptest_derive-<hash>.<dllext>`). Cargo can place these in a shared `<profile>/deps/` directory or in isolated `<profile>/build/<package>/<hash>/out/` directories. Multiple builds can coexist in either layout, so the harness selects libraries by matching Cargo fingerprints:
 
-- `CargoArtifacts::current()` finds its own test binary, walks up to `deps/` and the sibling `.fingerprint/` dir, and reads the compiletest target's own fingerprint (`test-integration-test-compiletest.json`) to learn the current build's `rustc` hash and `config` hash.
-- `resolve_artifact()` scans `deps/`, and for each candidate reads `.fingerprint/<package>-<hash>/lib-<lib_name>.json`. A candidate matches only if its `rustc` and `config` hashes equal the current build's **and** its feature set is a superset of the required features. Ties are broken by most-recent mtime.
-- Required features are hard-coded per crate in `rustc_flags()`: `proptest` must carry `["bit-set", "default", "fork", "std", "timeout"]` (the workspace default set); `proptest_derive` requires none (`&[]`), so a derive lib built with or without `boxed_union` matches either way.
-- The resolved paths are emitted as `--extern …` alongside `-L deps/` and `--edition=2024`.
+- `CargoArtifacts::current()` derives `CargoLayout` from its executable path and reads `test-integration-test-compiletest.json` to learn the current build's `rustc` and `config` hashes. Shared fingerprints live in `<profile>/.fingerprint/<package>-<hash>/`; isolated fingerprints live in `<profile>/build/<package>/<hash>/fingerprint/`. Discovery preserves custom profile and build-root locations.
+- `resolve_artifact()` scans the layout's output directories and reads each candidate's `lib-<lib_name>.json` and adjacent fingerprint hash. A candidate must match the exact dependency fingerprint in the running test binary's `deps` list, the current `rustc` and `config` hashes, and every required feature as an exact token. Cargo renders its `u64` fingerprint as little-endian hexadecimal bytes. Modification time breaks ties only among matching candidates; unreadable or malformed candidates are skipped.
+- Required features in `rustc_flags()` reflect the workspace dependency: `proptest` carries `std` and `strict-test`; default features are disabled in the dependency declaration. Exact dependency fingerprints select the active `proptest_derive` build, including its `boxed_union` choice, without relying on stale artifacts from broader builds.
+- The resolved paths are emitted as `--extern …` alongside `--edition=2024` and `-L` for every dependency output directory. The selected core library supplies both its `.rlib` and sibling `.rmeta`, because Cargo can omit full metadata from `.rlib` files. Isolated layouts require transitive libraries' output directories too.
 
-This fingerprint matching is exactly why stale artifacts produce nonsensical compile-fail results: a mismatched older rlib gets picked or none matches at all. When that happens, `cargo clean` and retry.
+When discovery fails, inspect the native path and fingerprint failure before changing build state. Library selection must retain compiler, configuration, and feature matching; selecting an arbitrary recent artifact can produce unrelated compiler diagnostics.
 
 Other harness details worth knowing:
 
-- The fingerprint `features` field is itself a JSON-string-encoded array (double-encoded); `parse_feature_set` decodes it with `serde_json`.
-- `path_to_str` asserts artifact paths contain no whitespace — `compiletest` splits the rustc flag string on spaces and cannot represent a path with spaces.
-- `compile_test()` always runs `run_mode("compile-fail", "compile-fail")`; when `${RUSTC:-rustc} --version` contains `nightly`, it also runs `compile-fail-nightly` in `compile-fail` mode and `run-pass-nightly` in `run-pass` mode.
+- The fingerprint `features` field is itself a JSON-string-encoded array; `CargoFingerprint::parse` decodes it with `serde_json` and preserves invalid input and native parser failures.
+- `path_to_string` rejects non-UTF-8 paths and whitespace because `compiletest` splits its rustc flag string on spaces. Failure retains the original `PathBuf`.
+- `compile_test()` queries `${RUSTC:-rustc} --version` and uses that same compiler for the fixtures. It always runs `compile-fail` with `Mode::CompileFail`; on nightly it also runs `compile-fail-nightly` with `Mode::CompileFail` and `run-pass-nightly` with `Mode::RunPass`. Setup failures retain completed suite configurations, compiler-version process output, and the temporary fixture owner.
+- The harness materializes fixture trees into an owned temporary directory, preserving auxiliary files and program bytes. A `// revisions: stable nightly` header selects the active compiler's named `compiletest` revision; line endings and diagnostic line positions remain intact. An undeclared compiler revision is a typed setup failure. Fixtures without revision headers are copied unchanged. The temporary directory also owns compiler outputs and is cleaned when the completed outcome is dropped.
 - Set the `TESTNAME` env var to filter to a single compile-fail case (`config.filters`).
-- Two `#[test]` self-tests guard the fingerprint logic: `fingerprint_parsing_uses_typed_fields` (typed extraction of `rustc`/`config`/`features`) and `fingerprint_feature_matching_uses_exact_tokens` (feature matching is by exact token — `default-code-coverage` does **not** satisfy a required `default`).
+- Self-tests cover typed fingerprint parsing, malformed input, exact feature tokens, compiler/configuration mismatches, both Cargo layouts, misplaced executable paths, path-to-flag conversion, revision selection, unchanged source trees, auxiliary assets, and invalid source bytes. Running the harness on stable and nightly exercises raw compiler integration against each toolchain's actual artifact layout.
 
 ## `compile-fail/` — negative UI cases
 
@@ -41,6 +42,8 @@ struct T0<'a>(&'a ());
 ```
 
 Annotation forms used here: `//~ ERROR: <substr>` expects a diagnostic on that line; `//~| <substr>` adds another expected message to the same group; `//~^ <substr>` (and `//~^^`) bind the expectation to the line(s) above. Each `<substr>` is matched as a substring of the actual compiler output.
+
+Revisioned fixtures use `//[stable]~` and `//[nightly]~` with the same line modifiers. Each revision declares all required diagnostics, including shared errors; unexpected diagnostics remain failures. This keeps downstream trait-solver differences explicit without relaxing span checks or changing compiler behavior.
 
 Before adding or preserving a `compile-fail/*.rs` fixture, prove the failure requires the full compiler boundary: span placement, downstream trait solving, proc-macro diagnostics as rendered by `rustc`, hygiene across crate boundaries, or another behavior unavailable to `syn`/IR/unit/expansion tests. Keep unrelated syntax idiomatic inside the file; the fixture should have one intentional reason to fail, not a pile of tolerated weirdness.
 
@@ -54,9 +57,9 @@ Two distinct flavors of expectation appear:
 Every `tests/*.rs` follows the same two-part shape, and new cases should match it:
 
 - a `#[test] fn asserting_arbitrary()` containing a local `fn assert_arbitrary<T: Arbitrary>() {}` called once per derived type — a pure compile-time check that the impl and its bounds resolve;
-- one or more `proptest! { … }` blocks that actually generate values and `prop_assert!` the attribute semantics (e.g. that a `value`/`strategy`/`filter`/`regex`/`weight` produced what it should), usually via `any_with::<T>(params)` when params are involved.
+- property tests that execute through `proptest::strict::ensure_property` and preserve native assertion outcomes for the attribute semantics (for example, `value`, `strategy`, `filter`, `regex`, or `weight`), usually via `any_with::<T>(params)` when params are involved. Only terminal tests adapt successful evidence to `()`.
 
-The derive is pulled in as `use proptest_derive::Arbitrary;` in every top-level integration test (the raw-rustc `compile-fail/` fixtures still use the `#[macro_use] extern crate proptest_derive;` form). `skip.rs` and `uninhabited-pass.rs` use `core::convert::Infallible` for stable uninhabited coverage; the exact literal-`!` versions live in `run-pass-nightly/`.
+The derive is pulled in as `use proptest_derive::Arbitrary;` in every top-level integration test and revised raw-rustc fixtures. `skip.rs` and `uninhabited-pass.rs` use `core::convert::Infallible` for stable uninhabited coverage; the exact literal-`!` versions live in `run-pass-nightly/`.
 
 Each file targets one attribute / feature area:
 

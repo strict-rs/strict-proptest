@@ -16,14 +16,18 @@
 
 #[cfg(test)]
 mod tests {
+  use core::convert::Infallible;
+
   use proptest::prelude::Arbitrary;
   use proptest::prelude::any_with;
-  use proptest::strict::TestResult;
   use proptest::strict::ensure_property;
+  use proptest::test_runner::PropertyResult;
   use proptest_derive::Arbitrary;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_some;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
+
+  /// Each assertion retains the complete generated value.
+  type Checked<T> = PropertyResult<T, T, PredicateFailure<T>>;
 
   struct ComplexType {
     max: u64,
@@ -78,9 +82,9 @@ mod tests {
   #[derive(Debug, Arbitrary)]
   struct Parallel2 {
     #[proptest(params("&'static str"), strategy = "params")]
-    _string: String,
+    string: String,
     #[proptest(params("u8"), strategy = "0i64..i64::from(params)")]
-    _int:    i64,
+    int:    i64,
   }
 
   const MAX: ComplexType = ComplexType {
@@ -88,72 +92,79 @@ mod tests {
   };
 
   #[test]
-  fn top_has_params() -> TestResult {
-    ensure_property(
-      &any_with::<TopHasParams>(MAX),
-      "container params thread into the field strategy",
-      |sample| ensure(sample.int < 5, "int stays below the params max"),
-    )
-  }
-
-  #[test]
-  fn top_no_params() -> TestResult {
+  fn top_no_params() -> PropertyResult<TopNoParams, TopNoParams, Infallible> {
     ensure_property(
       &any_with::<TopNoParams>(()),
       "a no_params container generates under unit params",
-      |_| Ok(()),
+      Ok,
     )
   }
 
   #[test]
-  fn inner_params() -> TestResult {
+  fn top_has_params() -> Checked<TopHasParams> {
     ensure_property(
-      &any_with::<InnerNoParams>("\\s+".into()),
-      "an inner no_params field keeps its own defaults",
-      |inner| {
-        ensure(inner.has.int < 10, "the no_params field keeps its default bound")?;
-        ensure(inner.string.trim().is_empty(), "the outer string obeys the whitespace regex param")
+      &any_with::<TopHasParams>(MAX),
+      "container params thread into the field strategy",
+      |generated| {
+        ensure_that(generated, "container params thread into the field strategy", |sample| {
+          sample.int < 5
+        })
       },
     )
   }
 
   #[test]
-  fn top_param_inner_strat() -> TestResult {
-    ensure_property(&any_with::<Tpis>(6), "container params reach a range field strategy", |inner| {
-      ensure(inner.int <= 6, "int stays at or below the param")?;
-      ensure(inner.int >= 3, "int stays at or above the range start")?;
-      ensure_eq(
-        &0,
-        &inner.string.split('a').filter(|segment| !segment.is_empty()).count(),
-        "the string field is made of a's only",
-      )
-    })
+  fn inner_params() -> Checked<InnerNoParams> {
+    ensure_property(
+      &any_with::<InnerNoParams>("\\s+".into()),
+      "an inner no_params field keeps its defaults and the outer string uses its regex",
+      |generated| {
+        ensure_that(
+          generated,
+          "an inner no_params field keeps its defaults and the outer string uses its regex",
+          |sample| sample.has.int < 10 && sample.string.trim().is_empty(),
+        )
+      },
+    )
   }
 
   #[test]
-  fn parallel_params() -> TestResult {
+  fn top_param_inner_strat() -> Checked<Tpis> {
+    ensure_property(
+      &any_with::<Tpis>(6),
+      "container params reach the range field and the string keeps its own strategy",
+      |generated| {
+        ensure_that(
+          generated,
+          "container params reach the range field and the string keeps its own strategy",
+          |sample| (3..=6).contains(&sample.int) && sample.string.chars().all(|character| character == 'a'),
+        )
+      },
+    )
+  }
+
+  #[test]
+  fn parallel_params() -> Checked<Parallel> {
     ensure_property(
       &any_with::<Parallel>(("[0-9]", 3)),
       "parallel per-field params drive each field",
-      |inner| {
-        ensure(inner.int >= 0, "int stays at or above zero")?;
-        ensure(inner.int < 3, "int stays below the u8 param")?;
-        let first = ensure_some(inner.string.chars().next(), "the regex-driven string is non-empty")?;
-        ensure(first.is_ascii_digit(), "the regex-driven string starts with a digit")
+      |generated| {
+        ensure_that(generated, "parallel per-field params drive each field", |sample| {
+          (0..3).contains(&sample.int) && sample.string.chars().next().is_some_and(|character| character.is_ascii_digit())
+        })
       },
     )
   }
 
   #[test]
-  fn parallel_params2() -> TestResult {
+  fn parallel_params2() -> Checked<Parallel2> {
     ensure_property(
-      &any_with::<Parallel>(("[0-9]", 3)),
-      "parallel per-field params drive each field in the string spelling",
-      |inner| {
-        ensure(inner.int >= 0, "int stays at or above zero")?;
-        ensure(inner.int < 3, "int stays below the u8 param")?;
-        let first = ensure_some(inner.string.chars().next(), "the regex-driven string is non-empty")?;
-        ensure(first.is_ascii_digit(), "the regex-driven string starts with a digit")
+      &any_with::<Parallel2>(("[0-9]", 3)),
+      "string-spelled parallel params drive each field",
+      |generated| {
+        ensure_that(generated, "string-spelled parallel params drive each field", |sample| {
+          (0..3).contains(&sample.int) && sample.string.chars().next().is_some_and(|character| character.is_ascii_digit())
+        })
       },
     )
   }

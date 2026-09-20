@@ -9,6 +9,7 @@
 
 use core::fmt;
 use core::iter;
+use core::marker::PhantomData;
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering::SeqCst;
 #[cfg(feature = "fork")]
@@ -51,15 +52,25 @@ use crate::test_runner::errors::TestCaseOk;
 use crate::test_runner::errors::TestCaseResult;
 use crate::test_runner::errors::TestCaseResultV2;
 use crate::test_runner::errors::TestError;
+use crate::test_runner::execution::CaseOrigin;
+use crate::test_runner::execution::CaseVerdict;
+use crate::test_runner::execution::Execution;
+use crate::test_runner::execution::ExecutionResult;
+use crate::test_runner::execution::FailingCase;
+use crate::test_runner::execution::RunFailure;
 use crate::test_runner::failure_persistence::PersistedSeed;
 use crate::test_runner::reason::Reason;
 #[cfg(feature = "fork")]
 use crate::test_runner::replay;
+use crate::test_runner::result_cache::EvaluationId;
 use crate::test_runner::result_cache::ResultCache;
 use crate::test_runner::result_cache::ResultCacheKey;
 #[cfg(feature = "fork")]
 use crate::test_runner::rng::Seed;
 use crate::test_runner::rng::TestRng;
+
+/// A minimized native failure pair or the execution failure reached while shrinking.
+type ShrinkResult<V, X> = ExecutionResult<FailingCase<V, X>, V, X>;
 
 /// Env-var naming the shared forkfile; set on each child and read by
 /// `init_replay` to detect that it is running as a fork child.
@@ -109,19 +120,6 @@ macro_rules! verbose_message {
 
 /// Per-`Reason` tally of how many inputs were rejected at each site.
 type RejectionDetail = BTreeMap<Reason, u32>;
-/// Result shape for the shrink walk: fork builds can fail while appending
-/// replay output, while no-fork builds cannot.
-#[cfg(feature = "fork")]
-type ShrinkResult = Result<Option<Reason>, Reason>;
-/// Result shape for the shrink walk when no replay file exists.
-#[cfg(not(feature = "fork"))]
-type ShrinkResult = Option<Reason>;
-
-/// Return a shrink result directly when no replay file exists.
-#[cfg(not(feature = "fork"))]
-const fn shrink_result(reason: Option<Reason>) -> ShrinkResult {
-  reason
-}
 
 /// State used when running a proptest test.
 #[derive(Clone)]
@@ -269,28 +267,96 @@ impl ForkOutput {
   }
 }
 
-/// Backtrack a budget-exhausted shrink walk to the latest known failing case.
-#[cfg(feature = "fork")]
-#[allow(
-  clippy::single_call_fn,
-  reason = "the shrink budget path must restore the latest failing case before returning"
-)]
-fn restore_latest_failing_case<V: ValueTree>(case: &mut V, fork_output: &mut ForkOutput) -> Result<(), Reason> {
-  while case.complicate() {
-    fork_output.append(&Ok(()))?;
-  }
-  Ok(())
+/// Legacy evaluation payloads, addressed by the same cache identities as typed runs.
+struct LegacyCache {
+  /// The caller-selected cache policy.
+  cache:   Box<dyn ResultCache>,
+  /// Payloads owned by this execution; cache entries only reference them.
+  results: Vec<TestCaseResult>,
 }
 
-/// Backtrack a budget-exhausted shrink walk to the latest known failing case.
-#[cfg(not(feature = "fork"))]
-#[allow(
-  clippy::single_call_fn,
-  reason = "the shrink budget path must restore the latest failing case before returning"
-)]
-fn restore_latest_failing_case<V: ValueTree>(case: &mut V, fork_output: &mut ForkOutput) {
-  let _: &mut ForkOutput = fork_output;
-  while case.complicate() {}
+impl LegacyCache {
+  /// Compute a key using the configured policy.
+  fn key(&self, key: &ResultCacheKey<'_>) -> u64 {
+    self.cache.key(key)
+  }
+
+  /// Borrow an existing evaluation without copying it into the cache.
+  fn get(&self, key: u64) -> Option<&TestCaseResult> {
+    self.cache.get(key).and_then(|evaluation| self.results.get(evaluation.0))
+  }
+
+  /// Record a legacy result and insert its identity into the cache.
+  fn put(&mut self, key: u64, result: &TestCaseResult) {
+    let evaluation = EvaluationId(self.results.len());
+    self.results.push(result.clone());
+    self.cache.put(key, evaluation);
+  }
+}
+
+/// Adapts the legacy callback and marker replay to the shared native algorithm.
+struct LegacyExecution<F, R> {
+  /// The user callback.
+  test_fn: F,
+  /// Already-completed evaluations replayed from a child.
+  replay:  R,
+  /// Payload storage and the configured cache.
+  cache:   LegacyCache,
+  /// Child output, or the in-process no-op writer.
+  output:  ForkOutput,
+}
+
+impl<V, F, R> Execution<V> for LegacyExecution<F, R>
+where
+  V: fmt::Debug,
+  F: Fn(V) -> TestCaseResult,
+  R: Iterator<Item = TestCaseResult>,
+{
+  type Failure = Reason;
+  type Error = Reason;
+
+  fn evaluate(&mut self, runner: &TestRunner, _: &mut V, input: V, origin: CaseOrigin) -> Result<CaseVerdict<Reason>, Reason> {
+    Ok(
+      match call_test(
+        runner,
+        input,
+        &self.test_fn,
+        &mut self.replay,
+        &mut self.cache,
+        &mut self.output,
+        origin == CaseOrigin::Persisted,
+      ) {
+        Ok(passed) => CaseVerdict::Passed(passed),
+        Err(TestCaseError::Reject(reason)) => CaseVerdict::Rejected(reason),
+        Err(TestCaseError::Fail(reason)) => CaseVerdict::Failed(reason),
+      },
+    )
+  }
+
+  fn backtrack(&mut self) -> Result<(), Reason> {
+    #[cfg(feature = "fork")]
+    self.output.append(&Ok(()))?;
+    Ok(())
+  }
+
+  fn shrink_budget(&mut self, exhausted: bool) -> Result<bool, Reason> {
+    Ok(exhausted)
+  }
+
+  fn is_in_fork(&self) -> bool {
+    self.output.is_in_fork()
+  }
+}
+
+/// Preserve the legacy public error representation at its adapter boundary.
+fn legacy_failure<V>(failure: RunFailure<V, Reason, Reason>) -> TestError<V> {
+  match failure {
+    RunFailure::Aborted(reason)
+    | RunFailure::Engine {
+      error: reason, ..
+    } => TestError::Abort(reason),
+    RunFailure::Falsified(reason, counterexample) => TestError::Fail(reason, counterexample),
+  }
 }
 
 /// Parent-side replay status after re-reading the shared forkfile.
@@ -389,12 +455,16 @@ fn record_abrupt_child_failure(
 /// whether it counts toward `cases`. Skips the panic-catching, timeout,
 /// and fork-output handling of the `std` path.
 #[cfg(not(feature = "std"))]
+#[allow(
+  clippy::single_call_fn,
+  reason = "preserve the platform-specific legacy callback, cache and replay boundary behind its execution adapter"
+)]
 fn call_test<V, F, R>(
   _runner: &TestRunner,
   case: V,
   test_fn: &F,
   replay_from_fork: &mut R,
-  result_cache: &mut dyn ResultCache,
+  result_cache: &mut LegacyCache,
   _: &mut ForkOutput,
   is_from_persisted_seed: bool,
 ) -> TestCaseResultV2
@@ -432,12 +502,16 @@ where
 /// and, under `timeout`, failing a case that ran too long). Tags the
 /// success with the kind that decides whether it counts toward `cases`.
 #[cfg(feature = "std")]
+#[allow(
+  clippy::single_call_fn,
+  reason = "preserve the legacy callback, cache, panic and timeout boundary behind its execution adapter"
+)]
 fn call_test<V, F, R>(
   runner: &TestRunner,
   case: V,
   test_fn: &F,
   replay_from_fork: &mut R,
-  result_cache: &mut dyn ResultCache,
+  result_cache: &mut LegacyCache,
   fork_output: &mut ForkOutput,
   is_from_persisted_seed: bool,
 ) -> TestCaseResultV2
@@ -504,9 +578,6 @@ where
   result_cache.put(cache_key, &final_result);
   #[cfg(feature = "fork")]
   fork_output.append(&final_result).map_err(TestCaseError::fail)?;
-  #[cfg(not(feature = "fork"))]
-  let _: &TestCaseResult = &final_result;
-
   match final_result {
     Ok(()) => verbose_message!(runner, TRACE, "Test case passed"),
     Err(TestCaseError::Reject(ref reason)) => {
@@ -661,6 +732,91 @@ impl TestRunner {
     }
   }
 
+  /// Run a property while retaining its original successful subjects and failures.
+  ///
+  /// Generation, persistence, case counting, and shrinking use the same native
+  /// algorithm as `run`. Values have no cloning, thread-safety, lifetime, or
+  /// serialization bounds. Returned subjects live until the report is dropped.
+  ///
+  /// # Errors
+  /// Returns the minimized native counterexample and matching failure, an
+  /// engine abort, or a caught panic with all reached evidence. Fork or timeout
+  /// configuration requires `run_typed_with_transport` and fails before the
+  /// property is invoked on this entry point.
+  pub fn run_typed<S, A, E>(&mut self, strategy: &S, property: impl Fn(S::Value) -> Result<A, E>) -> super::PropertyResult<S::Value, A, E>
+  where
+    S: Strategy,
+  {
+    let mut execution = super::typed::TypedExecution {
+      property,
+      channel: super::transport::InProcess(PhantomData),
+      cache: self.new_cache(),
+      run: super::PropertyRun::default(),
+    };
+    let result = if self.config.fork() {
+      Err(RunFailure::engine(super::ExecutionError::TransportRequired))
+    } else {
+      self.run_with_execution(strategy, &mut execution)
+    };
+    execution.complete(result, self.statistics())
+  }
+
+  /// Snapshot the native counters without touching evaluation payloads.
+  pub(super) const fn statistics(&self) -> super::RunStatistics {
+    super::RunStatistics {
+      successes:      self.successes,
+      local_rejects:  self.local_rejects,
+      global_rejects: self.global_rejects,
+    }
+  }
+
+  /// Run with an explicit codec for forked execution and typed replay.
+  ///
+  /// The configuration is honored verbatim. Without fork or timeout this runs
+  /// locally and does not encode or decode the returned values.
+  ///
+  /// # Errors
+  /// Returns the complete reached evidence on falsification, engine abort,
+  /// interruption, transport failure, or temporary-file finalization failure.
+  pub fn run_typed_with_transport<S, A, E, C>(
+    &mut self,
+    strategy: &S,
+    property: impl Fn(S::Value) -> Result<A, E>,
+    transport: C,
+  ) -> super::PropertyResult<S::Value, A, E, C::Error>
+  where
+    S: Strategy,
+    C: super::PropertyTransport<S::Value, A, E>,
+  {
+    #[cfg(feature = "fork")]
+    if self.config.fork() {
+      return super::typed_fork::run(self, strategy, property, transport);
+    }
+    let _transport = transport;
+    self.run_with_channel(strategy, property, super::transport::InProcess::<C::Error>(PhantomData))
+  }
+
+  /// Use one typed payload owner with the shared native case walk.
+  pub(super) fn run_with_channel<S, A, E, C>(
+    &mut self,
+    strategy: &S,
+    property: impl Fn(S::Value) -> Result<A, E>,
+    channel: C,
+  ) -> super::PropertyResult<S::Value, A, E, C::Error>
+  where
+    S: Strategy,
+    C: super::transport::EvaluationChannel<S::Value, A, E>,
+  {
+    let mut execution = super::typed::TypedExecution {
+      property,
+      channel,
+      cache: self.new_cache(),
+      run: super::PropertyRun::default(),
+    };
+    let result = self.run_with_execution(strategy, &mut execution);
+    execution.complete(result, self.statistics())
+  }
+
   /// Unreachable stand-in: without the `fork` feature `Config::fork()`
   /// is always false, so `run` never routes here.
   #[cfg(not(feature = "fork"))]
@@ -760,261 +916,198 @@ impl TestRunner {
     self.run_in_process_with_replay(strategy, test_fn, replay_steps.into_iter(), fork_output)
   }
 
-  /// The core case loop: replay persisted failures first (RNG saved and
-  /// restored around them), then generate and run fresh cases until
-  /// `cases` successes, persisting the seed of any failing case unless
-  /// this is the fork child.
+  /// Adapt legacy replay and payload storage to the common generation loop.
   fn run_in_process_with_replay<S: Strategy>(
     &mut self,
     strategy: &S,
     test_fn: impl Fn(S::Value) -> TestCaseResult,
-    mut replay_from_fork: impl Iterator<Item = TestCaseResult>,
-    mut fork_output: ForkOutput,
+    replay_from_fork: impl Iterator<Item = TestCaseResult>,
+    fork_output: ForkOutput,
   ) -> TestRunResult<S> {
-    let old_rng = self.rng.clone();
+    let mut execution = LegacyExecution {
+      test_fn,
+      replay: replay_from_fork,
+      cache: LegacyCache {
+        cache:   self.new_cache(),
+        results: Vec::new(),
+      },
+      output: fork_output,
+    };
+    let result = self.run_with_execution(strategy, &mut execution).map_err(legacy_failure);
+    #[cfg(feature = "fork")]
+    execution.output.terminate().map_err(TestError::Abort)?;
+    result
+  }
 
+  /// Replay persisted seeds, then generate cases using one execution adapter.
+  ///
+  /// The adapter owns evaluation payloads. This loop owns generation, counting,
+  /// RNG restoration, and regression persistence for both public runner APIs.
+  fn run_with_execution<S, X>(&mut self, strategy: &S, execution: &mut X) -> ExecutionResult<(), S::Value, X>
+  where
+    S: Strategy,
+    X: Execution<S::Value>,
+  {
+    let old_rng = self.rng.clone();
     let persisted_failure_seeds: Vec<PersistedSeed> = self
       .config
       .failure_persistence
       .as_ref()
-      .map(|f| f.load_persisted_failures2(self.config.source_file))
+      .map(|persistence| persistence.load_persisted_failures2(self.config.source_file))
       .unwrap_or_default();
-
-    let mut result_cache = self.new_cache();
-
-    for PersistedSeed(persisted_seed) in persisted_failure_seeds.into_iter().rev() {
-      self.rng.set_seed(persisted_seed);
-      self.gen_and_run_case(
-        strategy, &test_fn, &mut replay_from_fork, &mut *result_cache, &mut fork_output, true,
-      )?;
+    for PersistedSeed(seed) in persisted_failure_seeds.into_iter().rev() {
+      self.rng.set_seed(seed);
+      let result = self.gen_and_run_case(strategy, execution, CaseOrigin::Persisted);
+      if let Err(failure) = result {
+        self.rng = old_rng;
+        return Err(failure);
+      }
     }
     self.rng = old_rng;
 
     while self.successes < self.config.cases {
-      // Generate a new seed and make an RNG from that so that we know
-      // what seed to persist if this case fails.
       let seed = self.rng.gen_get_seed();
-      let result = self.gen_and_run_case(
-        strategy, &test_fn, &mut replay_from_fork, &mut *result_cache, &mut fork_output, false,
-      );
-      let source_file = self.config.source_file;
-
-      // Don't update the persistence file if we're a child process. The
-      // parent relies on it remaining consistent and will take care of
-      // updating it itself.
-      if let Err(TestError::Fail(_, ref shrunken_value)) = result
-        && let Some(ref mut failure_persistence) = self.config.failure_persistence
-        && !fork_output.is_in_fork()
+      let result = self.gen_and_run_case(strategy, execution, CaseOrigin::Generated);
+      if let Err(RunFailure::Falsified(_, ref counterexample)) = result
+        && let Some(ref mut persistence) = self.config.failure_persistence
+        && !execution.is_in_fork()
       {
-        failure_persistence.save_persisted_failure2(source_file, PersistedSeed(seed), shrunken_value);
+        persistence.save_persisted_failure2(self.config.source_file, PersistedSeed(seed), counterexample);
       }
-
-      #[cfg(feature = "fork")]
-      if let Err(error) = result {
-        fork_output.terminate().map_err(TestError::Abort)?;
-        return Err(error);
-      }
-      #[cfg(not(feature = "fork"))]
       result?;
     }
-
-    #[cfg(feature = "fork")]
-    fork_output.terminate().map_err(TestError::Abort)?;
     Ok(())
   }
 
-  /// Build one input from `strategy` (an `Err` becomes `TestError::Abort`)
-  /// and run it, advancing `successes` only for genuinely new or
-  /// fork-replayed passes.
-  fn gen_and_run_case<S: Strategy>(
-    &mut self,
-    strategy: &S,
-    f: &impl Fn(S::Value) -> TestCaseResult,
-    replay_from_fork: &mut impl Iterator<Item = TestCaseResult>,
-    result_cache: &mut dyn ResultCache,
-    fork_output: &mut ForkOutput,
-    is_from_persisted_seed: bool,
-  ) -> TestRunResult<S> {
-    let case = unwrap_or!(strategy.new_tree(self), msg =>
-                return Err(TestError::Abort(msg)));
-
-    // We only count new cases to our set of successful runs against
-    // `PROPTEST_CASES` config.
-    let ok_type = self.run_one_with_replay(case, f, replay_from_fork, result_cache, fork_output, is_from_persisted_seed)?;
-    match ok_type {
+  /// Generate and evaluate a case, counting only fresh, successful evaluations.
+  fn gen_and_run_case<S, X>(&mut self, strategy: &S, execution: &mut X, origin: CaseOrigin) -> ExecutionResult<(), S::Value, X>
+  where
+    S: Strategy,
+    X: Execution<S::Value>,
+  {
+    let case = strategy.new_tree(self).map_err(RunFailure::Aborted)?;
+    let passed = self.run_case(case, execution, origin)?;
+    match passed {
       TestCaseOk::NewCaseSuccess | TestCaseOk::ReplayFromForkSuccess => {
         self.successes = self.successes.saturating_add(1);
       }
       TestCaseOk::PersistedCaseSuccess | TestCaseOk::CacheHitSuccess | TestCaseOk::Reject => (),
     }
-
     Ok(())
   }
 
-  /// Run one specific test case against this runner.
+  /// Run one specific case and shrink any failure, ignoring fork configuration.
   ///
-  /// If the test fails, finds the minimal failing test case. If the test
-  /// does not fail, returns whether it succeeded or was filtered out.
+  /// A callback that returns after the timeout still fails. This entry point
+  /// cannot terminate a callback that does not return.
   ///
-  /// This does not honour the `fork` config, and will not be able to
-  /// terminate the run if it runs for longer than `timeout`. However, if the
-  /// test function returns but took longer than `timeout`, the test case
-  /// will fail.
-  ///
-  /// ## Errors
-  ///
-  /// Returns `TestError::Fail` with the minimized input if the case
-  /// fails, or `TestError::Abort` if too many inputs are rejected.
+  /// # Errors
+  /// Returns the minimized failure or a rejection-budget abort.
   pub fn run_one<V: ValueTree>(&mut self, case: V, test_fn: impl Fn(V::Value) -> TestCaseResult) -> Result<bool, TestError<V::Value>> {
-    let mut result_cache = self.new_cache();
+    let mut execution = LegacyExecution {
+      test_fn,
+      replay: iter::empty(),
+      cache: LegacyCache {
+        cache:   self.new_cache(),
+        results: Vec::new(),
+      },
+      output: ForkOutput::empty(),
+    };
     self
-      .run_one_with_replay(
-        case,
-        test_fn,
-        &mut iter::empty::<TestCaseResult>().fuse(),
-        &mut *result_cache,
-        &mut ForkOutput::empty(),
-        false,
-      )
-      .map(|ok_type| !matches!(ok_type, TestCaseOk::Reject))
+      .run_case(case, &mut execution, CaseOrigin::Generated)
+      .map(|passed| !matches!(passed, TestCaseOk::Reject))
+      .map_err(legacy_failure)
   }
 
-  /// Run one pre-built `case` once, then shrink it on failure.
-  ///
-  /// On `Fail` enters the shrink loop and returns the minimized value;
-  /// on `Reject` charges the global reject budget and reports the
-  /// non-counting outcome.
-  fn run_one_with_replay<V: ValueTree>(
-    &mut self,
-    mut case: V,
-    test_fn: impl Fn(V::Value) -> TestCaseResult,
-    replay_from_fork: &mut impl Iterator<Item = TestCaseResult>,
-    result_cache: &mut dyn ResultCache,
-    fork_output: &mut ForkOutput,
-    is_from_persisted_seed: bool,
-  ) -> Result<TestCaseOk, TestError<V::Value>> {
-    let result = call_test(
-      self,
-      case.current(),
-      &test_fn,
-      replay_from_fork,
-      result_cache,
-      fork_output,
-      is_from_persisted_seed,
-    );
-
-    match result {
-      Ok(success_type) => Ok(success_type),
-      Err(TestCaseError::Fail(failure_reason)) => {
-        #[cfg(feature = "fork")]
-        let shrunk_reason = self
-          .shrink(
-            &mut case, test_fn, replay_from_fork, result_cache, fork_output, is_from_persisted_seed,
-          )
-          .map_err(TestError::Abort)?
-          .unwrap_or(failure_reason);
-        #[cfg(not(feature = "fork"))]
-        let shrunk_reason = self
-          .shrink(
-            &mut case, test_fn, replay_from_fork, result_cache, fork_output, is_from_persisted_seed,
-          )
-          .unwrap_or(failure_reason);
-        Err(TestError::Fail(shrunk_reason, case.current()))
-      }
-      Err(TestCaseError::Reject(whence)) => {
-        self.reject_global(whence)?;
+  /// Keep each established failure paired with the exact candidate evaluated.
+  fn run_case<V, X>(&mut self, mut case: V, execution: &mut X, origin: CaseOrigin) -> ExecutionResult<TestCaseOk, V::Value, X>
+  where
+    V: ValueTree,
+    X: Execution<V::Value>,
+  {
+    let mut observed = case.current();
+    let verdict = execution
+      .evaluate(self, &mut observed, case.current(), origin)
+      .map_err(RunFailure::engine)?;
+    match verdict {
+      CaseVerdict::Passed(passed) => Ok(passed),
+      CaseVerdict::Rejected(reason) => {
+        self.reject_global(reason).map_err(|error: TestError<V::Value>| match error {
+          TestError::Abort(abort_reason) | TestError::Fail(abort_reason, _) => RunFailure::Aborted(abort_reason),
+        })?;
         Ok(TestCaseOk::Reject)
       }
+      CaseVerdict::Failed(failure) => {
+        let (minimized_failure, counterexample) = self.shrink(&mut case, execution, (failure, observed))?;
+        Err(RunFailure::Falsified(minimized_failure, counterexample))
+      }
     }
   }
 
-  /// Minimize a failing `case` by walking `simplify`/`complicate`.
+  /// Walk the value tree while retaining the last failing pair independently.
   ///
-  /// Returns the most recent failing `Reason`, or `None` if shrinking
-  /// is disabled or the first simplification does not reproduce the
-  /// failure. Stops on an exhausted tree or a spent iteration/time
-  /// budget, backtracking to the last failing value before returning.
-  fn shrink<V: ValueTree>(
-    &self,
-    case: &mut V,
-    test_fn: impl Fn(V::Value) -> TestCaseResult,
-    replay_from_fork: &mut impl Iterator<Item = TestCaseResult>,
-    result_cache: &mut dyn ResultCache,
-    fork_output: &mut ForkOutput,
-    is_from_persisted_seed: bool,
-  ) -> ShrinkResult {
-    // exit early if shrink disabled
+  /// Passing/rejected candidates and budget backtracking never replace that
+  /// pair. No final property invocation is needed to recover the failure.
+  fn shrink<V, X>(&self, case: &mut V, execution: &mut X, mut last_failure: FailingCase<V::Value, X>) -> ShrinkResult<V::Value, X>
+  where
+    V: ValueTree,
+    X: Execution<V::Value>,
+  {
     if self.config.max_shrink_iters == 0 {
       verbose_message!(self, INFO_LOG, "Shrinking disabled by configuration");
-      #[cfg(feature = "fork")]
-      return Ok(None);
-      #[cfg(not(feature = "fork"))]
-      return shrink_result(None);
+      return Ok(last_failure);
     }
+    match self.walk_shrinks(case, execution, &mut last_failure) {
+      Ok(()) => Ok(last_failure),
+      Err(error) => Err(RunFailure::Engine {
+        error,
+        failing: Some(last_failure),
+      }),
+    }
+  }
 
+  /// Update the established pair only after a failing evaluation while walking the tree.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "separate fallible traversal from ownership of the pair returned on every stopping path"
+  )]
+  fn walk_shrinks<V, X>(&self, case: &mut V, execution: &mut X, last_failure: &mut FailingCase<V::Value, X>) -> Result<(), X::Error>
+  where
+    V: ValueTree,
+    X: Execution<V::Value>,
+  {
     #[cfg(all(feature = "std", not(target_arch = "wasm32")))]
     let start_time = Instant::now();
-    let mut last_failure = None;
-    let mut iterations = 0;
-
-    verbose_message!(self, TRACE, "Starting shrinking");
-
+    let mut iterations = 0_u32;
     if !case.simplify() {
-      #[cfg(feature = "fork")]
-      return Ok(last_failure);
-      #[cfg(not(feature = "fork"))]
-      return shrink_result(last_failure);
+      return Ok(());
     }
-
     loop {
       #[cfg(all(feature = "std", not(target_arch = "wasm32")))]
-      let timed_out: Option<u64> = self.shrink_time_exceeded(start_time);
+      let timed_out = self.shrink_time_exceeded(start_time);
       #[cfg(not(all(feature = "std", not(target_arch = "wasm32"))))]
-      let timed_out: Option<u64> = None;
-
-      if self.shrink_budget_exhausted(iterations, timed_out) {
-        #[cfg(feature = "fork")]
-        restore_latest_failing_case(case, fork_output)?;
-        #[cfg(not(feature = "fork"))]
-        restore_latest_failing_case(case, fork_output);
+      let timed_out = None;
+      if execution.shrink_budget(self.shrink_budget_exhausted(iterations, timed_out))? {
         break;
       }
-
       iterations = iterations.saturating_add(1);
-
-      let result = call_test(
-        self,
-        case.current(),
-        &test_fn,
-        replay_from_fork,
-        result_cache,
-        fork_output,
-        is_from_persisted_seed,
-      );
-
-      let walked = match result {
-        // Rejections are effectively a pass here,
-        // since they indicate that any behaviour of
-        // the function under test is acceptable.
-        Ok(_) | Err(TestCaseError::Reject(..)) => self.complicate_or_note(case),
-        Err(TestCaseError::Fail(why)) => {
-          last_failure = Some(why);
+      let mut observed = case.current();
+      let verdict = execution.evaluate(self, &mut observed, case.current(), CaseOrigin::Shrink)?;
+      let walked = match verdict {
+        CaseVerdict::Passed(_) | CaseVerdict::Rejected(_) => self.complicate_or_note(case),
+        CaseVerdict::Failed(failure) => {
+          *last_failure = (failure, observed);
           self.simplify_or_note(case)
         }
       };
       if !walked {
-        break;
+        return Ok(());
       }
     }
-
-    #[cfg(feature = "fork")]
-    {
-      Ok(last_failure)
+    while case.complicate() {
+      execution.backtrack()?;
     }
-    #[cfg(not(feature = "fork"))]
-    {
-      shrink_result(last_failure)
-    }
+    Ok(())
   }
 
   /// How many milliseconds the shrink phase has been running past the
@@ -1300,18 +1393,20 @@ fn await_child(
 mod test {
   use std::cell::Cell;
   use std::fs;
+  use std::io::ErrorKind;
   #[cfg(feature = "timeout")]
   use std::thread;
   #[cfg(feature = "timeout")]
   use std::time::Duration;
 
+  use strict_test_support::CapturedBinary;
+  use strict_test_support::ComparisonFailure;
+  use strict_test_support::PredicateFailure;
   use strict_test_support::TestFailure;
   use strict_test_support::capture_ignored_test;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_contains;
   use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_ok;
-  use strict_test_support::ensure_some;
+  use strict_test_support::ensure_ne;
+  use strict_test_support::ensure_that;
 
   use super::*;
   use crate::test_runner::FileFailurePersistence;
@@ -1323,28 +1418,35 @@ mod test {
   const PERSISTED_COUNTING_CHILD: &str = "test_runner::runner::test::persisted_cases_do_not_count_towards_total_cases_child";
   const PERSISTED_RELOAD_CHILD: &str = "test_runner::runner::test::failing_cases_persisted_and_reloaded_child";
 
+  /// Complete native assertion subjects stay concrete and allocated on failure.
+  type Check<S> = Result<(), Box<PredicateFailure<S>>>;
+  /// A real ignored-test subprocess with its preparation and execution evidence.
+  type Capture = Result<CapturedBinary, TestFailure>;
+  /// Randomness observed before and after creating an independent generator.
+  type RngBytes = [u8; 16];
+
+  /// Complete legacy runner outcome for a scalar input.
+  type ScalarRun = Result<(), TestError<u32>>;
+
   #[test]
-  fn gives_up_after_too_many_rejections() -> Result<(), TestFailure> {
-    let config = runner_test_config();
-    let mut runner = TestRunner::new(config.clone());
-    let runs = Cell::new(0);
+  fn gives_up_after_too_many_rejections() -> Check<(TestRunner, u32, ScalarRun)> {
+    let mut runner = TestRunner::new(runner_test_config());
+    let runs = Cell::new(0_u32);
     let result = runner.run(&(0_u32..), |_| {
-      runs.set(runs.get() + 1);
+      runs.set(runs.get().saturating_add(1));
       Err(TestCaseError::reject("reject"))
     });
-    ensure(
-      matches!(result, Err(TestError::Abort(_))),
-      "exhausting the global reject budget aborts the run",
-    )?;
-    ensure_eq(
-      &(config.max_global_rejects + 1),
-      &runs.get(),
-      "the runner stops after the budget plus the aborting case",
+    ensure_that(
+      (runner, runs.get(), result),
+      "global rejection stops after the budget plus the aborting case",
+      |observed| matches!(observed.2, Err(TestError::Abort(_))) && observed.1 == observed.0.config.max_global_rejects.saturating_add(1),
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn test_pass() -> Result<(), TestFailure> {
+  fn test_pass() -> Result<(), ComparisonFailure<ScalarRun, ScalarRun>> {
     let mut runner = TestRunner::new(runner_test_config());
     let result = runner.run(&(1_u32..), |candidate| {
       if candidate > 0 {
@@ -1353,42 +1455,43 @@ mod test {
         Err(TestCaseError::fail("generated value must be positive"))
       }
     });
-    ensure(result == Ok(()), "a passing property returns Ok")
+    ensure_eq(result, Ok(()), "a passing property returns Ok").map(drop)
   }
 
   #[test]
-  fn test_fail_via_result() -> Result<(), TestFailure> {
+  fn test_fail_via_result() -> Result<(), ComparisonFailure<ScalarRun, ScalarRun>> {
     let mut runner = TestRunner::new(runner_test_config());
-    let result = runner.run(&(0_u32..10_u32), |candidate| {
+    let result = runner.run(&(0_u32..10), |candidate| {
       if candidate < 5 {
         Ok(())
       } else {
         Err(TestCaseError::fail("not less than 5"))
       }
     });
-
-    ensure(
-      result == Err(TestError::Fail("not less than 5".into(), 5)),
+    ensure_eq(
+      result,
+      Err(TestError::Fail("not less than 5".into(), 5)),
       "a result failure shrinks to the boundary value",
     )
+    .map(drop)
   }
 
   #[test]
-  fn test_fail_via_panic() -> Result<(), TestFailure> {
+  fn test_fail_via_panic() -> Result<(), ComparisonFailure<ScalarRun, ScalarRun>> {
     let mut runner = TestRunner::new(runner_test_config());
-    let result = runner.run(&(0_u32..10_u32), |candidate| {
-      // Legacy-surface test: the panic inside the closure IS the
-      // subject — it proves the runner converts a panicking case into
-      // TestError::Fail.
+    let result = runner.run(&(0_u32..10), |candidate| {
+      // Unwinding is the behavior under test at the legacy callback boundary.
       if candidate >= 5 {
         panic::resume_unwind(Box::new("not less than 5"));
       }
       Ok(())
     });
-    ensure(
-      result == Err(TestError::Fail("not less than 5".into(), 5)),
-      "a panicking case is caught and shrinks to the boundary value",
+    ensure_eq(
+      result,
+      Err(TestError::Fail("not less than 5".into(), 5)),
+      "an unwinding case is caught and minimized",
     )
+    .map(drop)
   }
 
   /// Deletes its persistence file on drop, so a test leaves no residue on
@@ -1404,49 +1507,54 @@ mod test {
   }
 
   #[test]
-  fn persisted_cases_do_not_count_towards_total_cases() -> Result<(), TestFailure> {
-    let captured = capture_ignored_test(PERSISTED_COUNTING_CHILD)?;
-    ensure(captured.status.success(), "the captured persistence-counting child passes")?;
-    ensure_contains(
-      &captured.stderr,
-      "Saving this and future failures in persistence-test-counting.txt",
-      "the persistence-counting save diagnostic is captured",
+  fn persisted_cases_do_not_count_towards_total_cases() -> Check<Capture> {
+    ensure_that(
+      capture_ignored_test(PERSISTED_COUNTING_CHILD),
+      "the persistence child passes and emits its save diagnostic",
+      |capture| {
+        capture.as_ref().is_ok_and(|captured| {
+          captured.output.status.success()
+            && captured
+              .output
+              .stderr
+              .split(|&byte| byte == b'\n')
+              .any(|line| line.starts_with(b"proptest: Saving this and future failures in persistence-test-counting.txt"))
+        })
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
   #[ignore = "captured by persisted_cases_do_not_count_towards_total_cases"]
-  fn persisted_cases_do_not_count_towards_total_cases_child() -> Result<(), TestFailure> {
+  fn persisted_cases_do_not_count_towards_total_cases_child() -> Result<(), impl fmt::Debug> {
     const FILE: &str = "persistence-test-counting.txt";
     let _guard = PersistenceFileGuard(FILE);
-    drop(fs::remove_file(FILE));
-
+    let removed = fs::remove_file(FILE);
     let config = Config {
       failure_persistence: Some(Box::new(FileFailurePersistence::Direct(FILE))),
       cases: 1,
       ..runner_test_config()
     };
-
-    let max = 10_000_000_i32;
-    ensure(
-      TestRunner::new(config.clone())
-        .run(&(0_i32..max), |_v| Err(TestCaseError::Fail("persist a failure".into())))
-        .is_err(),
-      "the seeding run must fail so a seed is persisted",
-    )?;
-
-    let run_count = Cell::new(0);
-    ensure_ok(
-      TestRunner::new(config).run(&(0_i32..max), |_v| {
-        run_count.set(run_count.get() + 1);
-        Ok(())
-      }),
-      "the replay run succeeds",
-    )?;
-
-    // Persisted ran, and a new case ran, and only new case counts
-    // against `cases: 1`.
-    ensure_eq(&run_count.get(), &2, "the persisted replay does not count toward cases")
+    let seeded = TestRunner::new(config.clone()).run(&(0_i32..10_000_000), |_| Err(TestCaseError::Fail("persist a failure".into())));
+    let run_count = Cell::new(0_u32);
+    let replayed = TestRunner::new(config).run(&(0_i32..10_000_000), |_| {
+      run_count.set(run_count.get().saturating_add(1));
+      Ok(())
+    });
+    ensure_that(
+      (removed, seeded, replayed, run_count.get()),
+      "persisted cases run before, and do not consume, the fresh case budget",
+      |observed| {
+        (observed.0.is_ok() || observed.0.as_ref().is_err_and(|error| error.kind() == ErrorKind::NotFound))
+          && observed.1.is_err()
+          && observed.2.is_ok()
+          && observed.3 == 2
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[derive(Clone, Copy, PartialEq)]
@@ -1458,228 +1566,199 @@ mod test {
   }
 
   #[test]
-  fn failing_cases_persisted_and_reloaded() -> Result<(), TestFailure> {
-    let captured = capture_ignored_test(PERSISTED_RELOAD_CHILD)?;
-    ensure(captured.status.success(), "the captured persistence-reload child passes")?;
-    ensure_contains(
-      &captured.stderr,
-      "Saving this and future failures in persistence-test-reload.txt",
-      "the persistence-reload save diagnostic is captured",
+  fn failing_cases_persisted_and_reloaded() -> Check<Capture> {
+    ensure_that(
+      capture_ignored_test(PERSISTED_RELOAD_CHILD),
+      "the persistence child passes and emits its save diagnostic",
+      |capture| {
+        capture.as_ref().is_ok_and(|captured| {
+          captured.output.status.success()
+            && captured
+              .output
+              .stderr
+              .split(|&byte| byte == b'\n')
+              .any(|line| line.starts_with(b"proptest: Saving this and future failures in persistence-test-reload.txt"))
+        })
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
   #[ignore = "captured by failing_cases_persisted_and_reloaded"]
-  fn failing_cases_persisted_and_reloaded_child() -> Result<(), TestFailure> {
+  fn failing_cases_persisted_and_reloaded_child() -> Result<(), impl fmt::Debug> {
     const FILE: &str = "persistence-test-reload.txt";
     let _guard = PersistenceFileGuard(FILE);
-    drop(fs::remove_file(FILE));
-
+    let removed = fs::remove_file(FILE);
     let max = 10_000_000_i32;
     let input = (0_i32..max).prop_map(PoorlyBehavedDebug);
     let config = Config {
       failure_persistence: Some(Box::new(FileFailurePersistence::Direct(FILE))),
       ..runner_test_config()
     };
-
-    // First test with cases that fail above half max, and then below half
-    // max, to ensure we can correctly parse both lines of the persistence
-    // file.
     let midpoint = max.div_euclid(2);
-    let first_sub_failure = ensure_some(
-      TestRunner::new(config.clone())
-        .run(&input, |candidate| {
-          if candidate.0 < midpoint {
-            Ok(())
-          } else {
-            Err(TestCaseError::Fail("too big".into()))
-          }
-        })
-        .err(),
-      "the first sub-max run must fail",
-    )?;
-    let first_super_failure = ensure_some(
-      TestRunner::new(config.clone())
-        .run(&input, |candidate| {
-          if candidate.0 >= midpoint {
-            Ok(())
-          } else {
-            Err(TestCaseError::Fail("too small".into()))
-          }
-        })
-        .err(),
-      "the first super-max run must fail",
-    )?;
-    let second_sub_failure = ensure_some(
-      TestRunner::new(config.clone())
-        .run(&input, |candidate| {
-          if candidate.0 < midpoint {
-            Ok(())
-          } else {
-            Err(TestCaseError::Fail("too big".into()))
-          }
-        })
-        .err(),
-      "the second sub-max run must fail",
-    )?;
-    let second_super_failure = ensure_some(
-      TestRunner::new(config)
-        .run(&input, |candidate| {
-          if candidate.0 >= midpoint {
-            Ok(())
-          } else {
-            Err(TestCaseError::Fail("too small".into()))
-          }
-        })
-        .err(),
-      "the second super-max run must fail",
-    )?;
-
-    ensure(
-      first_sub_failure == second_sub_failure,
-      "the persisted sub-max failure replays identically",
-    )?;
-    ensure(
-      first_super_failure == second_super_failure,
-      "the persisted super-max failure replays identically",
+    let below_midpoint = |candidate: PoorlyBehavedDebug| {
+      if candidate.0 < midpoint {
+        Ok(())
+      } else {
+        Err(TestCaseError::Fail("too big".into()))
+      }
+    };
+    let above_midpoint = |candidate: PoorlyBehavedDebug| {
+      if candidate.0 >= midpoint {
+        Ok(())
+      } else {
+        Err(TestCaseError::Fail("too small".into()))
+      }
+    };
+    let runs = [
+      TestRunner::new(config.clone()).run(&input, below_midpoint),
+      TestRunner::new(config.clone()).run(&input, above_midpoint),
+      TestRunner::new(config.clone()).run(&input, below_midpoint),
+      TestRunner::new(config).run(&input, above_midpoint),
+    ];
+    ensure_that(
+      (removed, runs),
+      "both persisted failures replay identically despite debug newlines",
+      |observed| {
+        let [ref first_sub, ref first_super, ref second_sub, ref second_super] = observed.1;
+        (observed.0.is_ok() || observed.0.as_ref().is_err_and(|error| error.kind() == ErrorKind::NotFound))
+          && observed.1.iter().all(Result::is_err)
+          && first_sub == second_sub
+          && first_super == second_super
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn new_rng_makes_separate_rng() -> Result<(), TestFailure> {
+  fn new_rng_makes_separate_rng() -> Result<(), ComparisonFailure<RngBytes, RngBytes>> {
     use rand::RngExt as _;
     let mut runner = TestRunner::new(runner_test_config());
     let from_1 = runner.new_rng().random::<[u8; 16]>();
     let from_2 = runner.rng().random::<[u8; 16]>();
-    ensure(from_1 != from_2, "a new rng draws a different stream")
+    ensure_ne(from_1, from_2, "a new rng draws a different stream").map(drop)
   }
 
   #[test]
-  fn record_rng_use() -> Result<(), TestFailure> {
+  fn record_rng_use() -> Result<(), impl fmt::Debug> {
     use rand::RngExt as _;
-
-    // create value with recorder rng
-    let default_config = runner_test_config();
+    let config = runner_test_config();
     let recorder_rng = TestRng::default_rng(RngSeed::Random, RngAlgorithm::Recorder);
-    let mut recorder_runner = TestRunner::new_with_rng(default_config.clone(), recorder_rng);
-    let random_byte_array1 = recorder_runner.rng().random::<[u8; 16]>();
-    let bytes_used = ensure_some(recorder_runner.bytes_used(), "recorder runner exposes captured bytes")?;
-    // could use more bytes for some reason
-    ensure(bytes_used.len() >= 16, "the recorder captured at least the drawn bytes")?;
-
-    // re-create value with pass-through rng
-    let passthrough_rng = TestRng::from_seed(RngAlgorithm::PassThrough, &bytes_used);
-    let mut passthrough_runner = TestRunner::new_with_rng(default_config, passthrough_rng);
-    let random_byte_array2 = passthrough_runner.rng().random::<[u8; 16]>();
-
-    // make sure the same value was created
-    ensure(
-      random_byte_array1 == random_byte_array2,
-      "replaying recorded bytes recreates the same value",
+    let mut recorder = TestRunner::new_with_rng(config.clone(), recorder_rng);
+    let original = recorder.rng().random::<[u8; 16]>();
+    let bytes = recorder.bytes_used();
+    let replayed = bytes.as_ref().map(|recorded| {
+      let mut runner = TestRunner::new_with_rng(config, TestRng::from_seed(RngAlgorithm::PassThrough, recorded));
+      let value = runner.rng().random::<[u8; 16]>();
+      (runner, value)
+    });
+    ensure_that(
+      (recorder, original, bytes, replayed),
+      "recorded bytes recreate the same generated value",
+      |observed| {
+        observed.2.as_ref().is_some_and(|recorded| recorded.len() >= 16)
+          && observed.3.as_ref().is_some_and(|reached| reached.1 == observed.1)
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[cfg(feature = "fork")]
   #[test]
-  fn run_successful_test_in_fork() -> Result<(), TestFailure> {
+  fn run_successful_test_in_fork() -> Check<ScalarRun> {
     let mut runner = TestRunner::new(Config {
       fork: true,
       test_name: Some(concat!(module_path!(), "::run_successful_test_in_fork")),
       ..runner_test_config()
     });
 
-    ensure(runner.run(&(0_u32..1000), |_| Ok(())).is_ok(), "a passing forked run returns Ok")
+    ensure_that(
+      runner.run(&(0_u32..1000), |_| Ok(())),
+      "a passing forked run returns Ok",
+      Result::is_ok,
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[cfg(feature = "fork")]
   #[test]
-  fn normal_failure_in_fork_results_in_correct_failure() -> Result<(), TestFailure> {
+  fn normal_failure_in_fork_results_in_correct_failure() -> Check<ScalarRun> {
     let mut runner = TestRunner::new(Config {
       fork: true,
       test_name: Some(concat!(module_path!(), "::normal_failure_in_fork_results_in_correct_failure")),
       ..runner_test_config()
     });
 
-    let failure = ensure_some(
-      runner
-        .run(&(0_u32..1000), |candidate| {
-          if candidate < 500 {
-            Ok(())
-          } else {
-            Err(TestCaseError::fail("value reached 500"))
-          }
-        })
-        .err(),
-      "a failing forked run must return the failure",
-    )?;
-
-    match failure {
-      TestError::Fail(_, value) => ensure_eq(&500, &value, "the forked failure shrinks to 500"),
-      TestError::Abort(_) => ensure(false, "the forked failure must be Fail, not Abort"),
-    }
+    let result = runner.run(&(0_u32..1000), |candidate| {
+      if candidate < 500 {
+        Ok(())
+      } else {
+        Err(TestCaseError::fail("value reached 500"))
+      }
+    });
+    ensure_that(result, "the forked failure minimizes to 500 without aborting", |observed| {
+      matches!(*observed, Err(TestError::Fail(_, 500)))
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   // Fork-surface test: the child reports a failure and the parent shrinks
   // it through the fork boundary.
   #[cfg(feature = "fork")]
   #[test]
-  fn nonsuccessful_exit_finds_correct_failure() -> Result<(), TestFailure> {
+  fn nonsuccessful_exit_finds_correct_failure() -> Check<ScalarRun> {
     let mut runner = TestRunner::new(Config {
       fork: true,
       test_name: Some(concat!(module_path!(), "::nonsuccessful_exit_finds_correct_failure")),
       ..runner_test_config()
     });
 
-    let failure = ensure_some(
-      runner
-        .run(&(0_u32..1000), |candidate| {
-          if candidate >= 500 {
-            return Err(TestCaseError::fail("child reported a failure"));
-          }
-          Ok(())
-        })
-        .err(),
-      "a crashing child must surface as a failure",
-    )?;
-
-    match failure {
-      TestError::Fail(_, value) => ensure_eq(&500, &value, "the crash shrinks to 500"),
-      TestError::Abort(_) => ensure(false, "the crash must be Fail, not Abort"),
-    }
+    let result = runner.run(&(0_u32..1000), |candidate| {
+      if candidate >= 500 {
+        return Err(TestCaseError::fail("child reported a failure"));
+      }
+      Ok(())
+    });
+    ensure_that(result, "the forked failure minimizes to 500 without aborting", |observed| {
+      matches!(*observed, Err(TestError::Fail(_, 500)))
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   // Fork-surface test: the child reports a failure after earlier cases
   // pass, so the parent still has to shrink across process isolation.
   #[cfg(feature = "fork")]
   #[test]
-  fn spurious_exit_finds_correct_failure() -> Result<(), TestFailure> {
+  fn spurious_exit_finds_correct_failure() -> Check<ScalarRun> {
     let mut runner = TestRunner::new(Config {
       fork: true,
       test_name: Some(concat!(module_path!(), "::spurious_exit_finds_correct_failure")),
       ..runner_test_config()
     });
 
-    let failure = ensure_some(
-      runner
-        .run(&(0_u32..1000), |candidate| {
-          if candidate >= 500 {
-            return Err(TestCaseError::fail("child reported a late failure"));
-          }
-          Ok(())
-        })
-        .err(),
-      "a spuriously exiting child must surface as a failure",
-    )?;
-
-    match failure {
-      TestError::Fail(_, value) => ensure_eq(&500, &value, "the spurious exit shrinks to 500"),
-      TestError::Abort(_) => ensure(false, "the spurious exit must be Fail, not Abort"),
-    }
+    let result = runner.run(&(0_u32..1000), |candidate| {
+      if candidate >= 500 {
+        return Err(TestCaseError::fail("child reported a late failure"));
+      }
+      Ok(())
+    });
+    ensure_that(result, "the forked failure minimizes to 500 without aborting", |observed| {
+      matches!(*observed, Err(TestError::Fail(_, 500)))
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[cfg(feature = "timeout")]
   #[test]
-  fn long_sleep_timeout_finds_correct_failure() -> Result<(), TestFailure> {
+  fn long_sleep_timeout_finds_correct_failure() -> Check<ScalarRun> {
     let mut runner = TestRunner::new(Config {
       fork: true,
       timeout: 500,
@@ -1687,27 +1766,22 @@ mod test {
       ..runner_test_config()
     });
 
-    let failure = ensure_some(
-      runner
-        .run(&(0_u32..1000), |candidate| {
-          if candidate >= 500 {
-            thread::sleep(Duration::from_secs(10));
-          }
-          Ok(())
-        })
-        .err(),
-      "a long-sleeping case must time out into a failure",
-    )?;
-
-    match failure {
-      TestError::Fail(_, value) => ensure_eq(&500, &value, "the timeout shrinks to 500"),
-      TestError::Abort(_) => ensure(false, "the timeout must be Fail, not Abort"),
-    }
+    let result = runner.run(&(0_u32..1000), |candidate| {
+      if candidate >= 500 {
+        thread::sleep(Duration::from_secs(10));
+      }
+      Ok(())
+    });
+    ensure_that(result, "the forked failure minimizes to 500 without aborting", |observed| {
+      matches!(*observed, Err(TestError::Fail(_, 500)))
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[cfg(feature = "timeout")]
   #[test]
-  fn mid_sleep_timeout_finds_correct_failure() -> Result<(), TestFailure> {
+  fn mid_sleep_timeout_finds_correct_failure() -> Check<ScalarRun> {
     let mut runner = TestRunner::new(Config {
       fork: true,
       timeout: 500,
@@ -1715,155 +1789,234 @@ mod test {
       ..runner_test_config()
     });
 
-    let failure = ensure_some(
-      runner
-        .run(&(0_u32..1000), |candidate| {
-          if candidate >= 500 {
-            // Sleep a little longer than the timeout. This means that
-            // sometimes the test case itself will return before the parent
-            // process has noticed the child is timing out, so it's up to
-            // the child to mark it as a failure.
-            thread::sleep(Duration::from_millis(600));
-          } else {
-            // Sleep a bit so that the parent and child timing don't stay
-            // in sync.
-            thread::sleep(Duration::from_millis(100));
-          }
-          Ok(())
-        })
-        .err(),
-      "a mid-sleep case must time out into a failure",
-    )?;
-
-    match failure {
-      TestError::Fail(_, value) => ensure_eq(&500, &value, "the mid-sleep timeout shrinks to 500"),
-      TestError::Abort(_) => ensure(false, "the mid-sleep timeout must be Fail, not Abort"),
-    }
+    let result = runner.run(&(0_u32..1000), |candidate| {
+      if candidate >= 500 {
+        // Sleep a little longer than the timeout. This means that
+        // sometimes the test case itself will return before the parent
+        // process has noticed the child is timing out, so it's up to
+        // the child to mark it as a failure.
+        thread::sleep(Duration::from_millis(600));
+      } else {
+        // Sleep a bit so that the parent and child timing don't stay
+        // in sync.
+        thread::sleep(Duration::from_millis(100));
+      }
+      Ok(())
+    });
+    ensure_that(result, "the forked failure minimizes to 500 without aborting", |observed| {
+      matches!(*observed, Err(TestError::Fail(_, 500)))
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
-  #[cfg(feature = "std")]
   #[test]
-  fn duplicate_tests_not_run_with_basic_result_cache() -> Result<(), TestFailure> {
-    use std::cell::Cell;
-    use std::cell::RefCell;
+  fn duplicate_tests_not_run_with_basic_result_cache() -> Result<(), impl fmt::Debug> {
     use std::collections::HashSet;
-    use std::rc::Rc;
-
-    fn record_candidate_once(seen: &RefCell<HashSet<u32>>, candidate: u32) -> bool {
-      seen.try_borrow_mut().is_ok_and(|mut seen_values| seen_values.insert(candidate))
-    }
-
-    fn reject_above_five(candidate: u32) -> TestCaseResult {
-      match candidate {
-        0..=5 => Ok(()),
-        _ => Err(TestCaseError::fail("value above 5")),
+    let fails_above_five = |candidate| {
+      if candidate <= 5 {
+        Ok(())
+      } else {
+        Err(TestCaseError::fail("value above 5"))
       }
-    }
-
-    for _ in 0..256 {
-      let mut runner = TestRunner::new(Config {
-        result_cache: basic_result_cache,
-        ..runner_test_config()
-      });
-      let pass = Rc::new(Cell::new(true));
-      let seen = Rc::new(RefCell::new(HashSet::new()));
-      let result = runner.run(&(0_u32..65536_u32).prop_map(|raw| raw.rem_euclid(10)), |candidate| {
-        let inserted = record_candidate_once(&seen, candidate);
-        pass.set(pass.get() && inserted);
-        reject_above_five(candidate)
-      });
-
-      ensure(pass.get(), "no cached value ran more than once")?;
-      match result {
-        Err(TestError::Fail(_, val)) => {
-          ensure_eq(&6, &val, "the failure shrinks to 6")?;
-        }
-        _ => {
-          ensure(false, "the cached run must fail with Fail, not pass or abort")?;
-        }
-      }
-    }
-    Ok(())
+    };
+    let runs: Vec<_> = (0..256)
+      .map(|_| {
+        let mut runner = TestRunner::new(Config {
+          result_cache: basic_result_cache,
+          ..runner_test_config()
+        });
+        let calls = Cell::new(Vec::new());
+        let result = runner.run(&(0_u32..65536).prop_map(|raw| raw.rem_euclid(10)), |candidate| {
+          let mut observed = calls.take();
+          observed.push(candidate);
+          calls.set(observed);
+          fails_above_five(candidate)
+        });
+        (runner, calls.into_inner(), result)
+      })
+      .collect();
+    ensure_that(
+      runs,
+      "cached inputs execute once and the failure still minimizes to six",
+      |observed| {
+        observed.iter().all(|reached| {
+          !reached.1.is_empty()
+            && reached.1.iter().copied().collect::<HashSet<_>>().len() == reached.1.len()
+            && matches!(reached.2, Err(TestError::Fail(_, 6)))
+        })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 }
 
-// Legacy-surface module: `rusty_fork_test!` only accepts unit-returning
-// `#[test]` bodies (the fork protocol reads the child's exit status), so
-// these tests cannot return `Result<(), TestFailure>` — a panic in the
-// child is the failure signal the harness is built around.
+/// Legacy timeout regressions retain native assertions under the original outer watchdog.
 #[cfg(test)]
-#[cfg(feature = "fork")]
-#[cfg(feature = "timeout")]
+#[cfg(all(feature = "fork", feature = "timeout"))]
 mod timeout_tests {
-  use std::string::ToString as _;
+  use std::boxed::Box;
+  use std::env;
+  use std::fmt;
+  use std::io;
+  use std::process::Child;
+  use std::process::Command;
+  use std::process::ExitStatus;
   use std::thread;
   use std::time::Duration;
+  use std::time::Instant;
 
-  use rusty_fork::rusty_fork_test;
-  use strict_test_support::ensure;
+  use rusty_fork::rusty_fork_test_name;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
-  use super::*;
+  use super::Config;
+  use super::TestCaseError;
+  use super::TestError;
+  use super::TestRunner;
+  use super::runner_test_config;
   use crate::num::u64 as num_u64;
   use crate::strategy::Just;
+  use crate::strategy::Strategy as _;
 
-  rusty_fork_test! {
-      #![rusty_fork(timeout_ms = 4_000)]
+  /// Test identity inherited by the watchdog child and any nested runner forks.
+  const WATCHDOG_CHILD: &str = "_PROPTEST_TEST_WATCHDOG";
+  /// The process, its timed wait, and any required kill and reap results.
+  type WatchdogObservation = (
+    Child,
+    io::Result<Option<ExitStatus>>,
+    Option<(io::Result<()>, io::Result<ExitStatus>)>,
+  );
+  /// The runner and its complete legacy shrinking outcome.
+  type ShrinkRun = (TestRunner, Result<(), TestError<u64>>);
 
-      #[test]
-      fn max_shrink_iters_works() {
-          run_shrink_bail(Config {
-              max_shrink_iters: 5,
-              ..runner_test_config()
-          });
-      }
-
-      #[test]
-      fn max_shrink_time_works() {
-          run_shrink_bail(Config {
-              max_shrink_time: 1000,
-              ..runner_test_config()
-          });
-      }
-
-      #[test]
-      fn max_shrink_iters_works_with_forking() {
-          run_shrink_bail(Config {
-              fork: true,
-              test_name: Some(
-                  concat!(module_path!(),
-                          "::max_shrink_iters_works_with_forking")),
-              max_shrink_time: 1000,
-              ..runner_test_config()
-          });
-      }
-
-      #[test]
-      fn detects_child_failure_to_start() {
-          let mut runner = TestRunner::new(Config {
-              timeout: 100,
-              test_name: Some(concat!(
-                  module_path!(),
-                  "::detects_child_failure_to_start"
-              )),
-              ..runner_test_config()
-          });
-          let result = runner.run(
-              &Just(()).prop_map(|()| {
-                  thread::sleep(Duration::from_millis(200));
-              }),
-              Ok,
-          );
-
-          if let Err(failure) = ensure(
-              matches!(result, Err(TestError::Abort(_))),
-              "a child that fails to start is reported as an abort",
-          ) {
-              panic::resume_unwind(Box::new(failure.to_string()));
-          }
-      }
+  /// Each process returns the evidence it owns at the ordinary test boundary.
+  enum WatchdogEvidence<A> {
+    /// The child completed its assertion and retained its native evidence.
+    Child(A),
+    /// The parent supervised the complete child process lifetime.
+    Parent(WatchdogObservation),
   }
 
-  fn run_shrink_bail(config: Config) {
+  impl<A: fmt::Debug> fmt::Debug for WatchdogEvidence<A> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+      match *self {
+        Self::Child(ref evidence) => formatter.debug_tuple("Child").field(evidence).finish(),
+        Self::Parent(ref observation) => formatter.debug_tuple("Parent").field(observation).finish(),
+      }
+    }
+  }
+
+  /// Setup, native child assertions, and process supervision remain distinct.
+  #[derive(Debug, thiserror::Error)]
+  enum WatchdogFailure<E> {
+    /// Resolve or launch the exact current test executable.
+    #[error("watchdog setup failed: {0}")]
+    Setup(io::Error),
+    /// Return the original child assertion through the libtest boundary.
+    #[error("child assertion failed: {0:?}")]
+    Child(E),
+    /// Preserve the process and every reached wait and cleanup observation.
+    #[error("watchdog observed an unsuccessful child: {0:?}")]
+    Parent(Box<PredicateFailure<WatchdogObservation>>),
+  }
+
+  /// Keep the four-second watchdog while the child returns through libtest.
+  fn within_watchdog<A, E: fmt::Debug>(name: &str, body: impl FnOnce() -> Result<A, E>) -> Result<WatchdogEvidence<A>, WatchdogFailure<E>> {
+    if env::var_os(WATCHDOG_CHILD).is_some_and(|selected| selected == name) {
+      return body().map(WatchdogEvidence::Child).map_err(WatchdogFailure::Child);
+    }
+    let executable = env::current_exe().map_err(WatchdogFailure::Setup)?;
+    let mut child = Command::new(executable)
+      .args(["--exact", name, "--nocapture"])
+      .env(WATCHDOG_CHILD, name)
+      .spawn()
+      .map_err(WatchdogFailure::Setup)?;
+    let started = Instant::now();
+    let waited = loop {
+      match child.try_wait() {
+        Ok(None) if started.elapsed() < Duration::from_secs(4) => thread::sleep(Duration::from_millis(10)),
+        completion => break completion,
+      }
+    };
+    // The watchdog owns termination and reaping when the timed wait did not finish.
+    let cleanup = if matches!(waited, Ok(Some(_))) {
+      None
+    } else {
+      Some((child.kill(), child.wait()))
+    };
+    ensure_that(
+      (child, waited, cleanup),
+      "the child assertion succeeds within the four-second watchdog",
+      |observed| {
+        observed
+          .1
+          .as_ref()
+          .is_ok_and(|status| status.is_some_and(|exited| exited.success()))
+          && observed.2.is_none()
+      },
+    )
+    .map(WatchdogEvidence::Parent)
+    .map_err(|failure| WatchdogFailure::Parent(Box::new(failure)))
+  }
+
+  #[test]
+  fn max_shrink_iters_works() -> Result<(), impl fmt::Debug> {
+    within_watchdog(rusty_fork_test_name!(max_shrink_iters_works), || {
+      run_shrink_bail(Config {
+        max_shrink_iters: 5,
+        ..runner_test_config()
+      })
+    })
+    .map(drop)
+  }
+
+  #[test]
+  fn max_shrink_time_works() -> Result<(), impl fmt::Debug> {
+    within_watchdog(rusty_fork_test_name!(max_shrink_time_works), || {
+      run_shrink_bail(Config {
+        max_shrink_time: 1000,
+        ..runner_test_config()
+      })
+    })
+    .map(drop)
+  }
+
+  #[test]
+  fn max_shrink_iters_works_with_forking() -> Result<(), impl fmt::Debug> {
+    within_watchdog(rusty_fork_test_name!(max_shrink_iters_works_with_forking), || {
+      run_shrink_bail(Config {
+        fork: true,
+        test_name: Some(concat!(module_path!(), "::max_shrink_iters_works_with_forking")),
+        max_shrink_time: 1000,
+        ..runner_test_config()
+      })
+    })
+    .map(drop)
+  }
+
+  #[test]
+  fn detects_child_failure_to_start() -> Result<(), impl fmt::Debug> {
+    within_watchdog(rusty_fork_test_name!(detects_child_failure_to_start), || {
+      let mut runner = TestRunner::new(Config {
+        timeout: 100,
+        test_name: Some(concat!(module_path!(), "::detects_child_failure_to_start")),
+        ..runner_test_config()
+      });
+      let result = runner.run(&Just(()).prop_map(|()| thread::sleep(Duration::from_millis(200))), Ok);
+      ensure_that(
+        (runner, result),
+        "a child that fails to start is reported as an abort",
+        |observed| matches!(observed.1, Err(TestError::Abort(_))),
+      )
+      .map_err(Box::new)
+    })
+    .map(drop)
+  }
+
+  /// Exhaust the configured shrink budget without losing the established failing case.
+  fn run_shrink_bail(config: Config) -> Result<ShrinkRun, Box<PredicateFailure<ShrinkRun>>> {
     let mut runner = TestRunner::new(config);
     let result = runner.run(&num_u64::ANY, |candidate| {
       thread::sleep(Duration::from_millis(250));
@@ -1873,14 +2026,11 @@ mod timeout_tests {
         Err(TestCaseError::fail("value exceeds u32::MAX"))
       }
     });
-
-    let verdict = match result {
-      Err(TestError::Fail(_, failing_value)) => ensure(failing_value > u64::from(u32::MAX), "the final value remains a failing case"),
-      Err(TestError::Abort(_)) | Ok(()) => ensure(false, "shrinking bails with a failing case"),
-    };
-
-    if let Err(failure) = verdict {
-      panic::resume_unwind(Box::new(failure.to_string()));
-    }
+    ensure_that(
+      (runner, result),
+      "the final value remains a failing case when shrinking stops",
+      |observed| matches!(observed.1, Err(TestError::Fail(_, failing_value)) if failing_value > u64::from(u32::MAX)),
+    )
+    .map_err(Box::new)
   }
 }

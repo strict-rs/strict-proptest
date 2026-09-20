@@ -9,7 +9,6 @@
 
 //! Arbitrary implementations for `std::option`.
 
-#[cfg(feature = "alt-stable")]
 use core::convert::Infallible;
 use core::ops::RangeInclusive;
 use core::option as opt;
@@ -20,8 +19,6 @@ use crate::arbitrary::any_with;
 use crate::option::OptionStrategy;
 use crate::option::Probability;
 use crate::option::weighted;
-#[cfg(not(feature = "alt-stable"))]
-use crate::std_facade::string;
 use crate::strategy::MapInto;
 use crate::strategy::Strategy as _;
 use crate::strategy::statics::static_map;
@@ -30,13 +27,9 @@ arbitrary!(Probability, MapInto<RangeInclusive<f64>, Self>;
     (0.0..=1.0).prop_map_into()
 );
 
-// These are Option<AnUninhabitedType> impls:
-#[cfg(not(feature = "alt-stable"))]
-arbitrary!(Option<string::ParseError>; None::<string::ParseError>);
-#[cfg(feature = "alt-stable")]
+// `string::ParseError` aliases `Infallible`, which also aliases `!` on current
+// nightly Rust. One implementation covers those names without overlapping.
 arbitrary!(Option<Infallible>; None::<Infallible>);
-#[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
-arbitrary!(Option<!>; None);
 
 arbitrary!([A: Arbitrary] Option<A>, OptionStrategy<A::Strategy>,
     product_type![Probability, A::Parameters];
@@ -60,6 +53,8 @@ lift1!(['static] opt::IntoIter<A>, Probability;
 mod test {
   use super::*;
   use crate::std_facade::string;
+  use crate::strategy::Just;
+  use crate::test_runner::Reason;
 
   no_panic_test!(
       probability => Probability,
@@ -68,20 +63,34 @@ mod test {
       option_parse_error => Option<string::ParseError>
   );
 
-  #[cfg(feature = "alt-stable")]
+  #[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
+  no_panic_test!(option_never => Option<!>);
+
+  /// Retain the tree, its initial value, and the actual simplify result.
+  type NoneObservation = Result<(Just<Option<Infallible>>, Option<Infallible>, bool), Reason>;
+
   #[test]
-  fn option_infallible_always_generates_none() -> Result<(), strict_test_support::TestFailure> {
+  fn option_infallible_always_generates_none() -> Result<(), strict_test_support::PredicateFailure<NoneObservation>> {
     use crate::arbitrary::any;
     use crate::strategy::Strategy as _;
     use crate::strategy::ValueTree as _;
     use crate::test_runner::TestRunner;
 
     let mut runner = TestRunner::deterministic();
-    let mut tree = strict_test_support::ensure_some(
-      any::<Option<Infallible>>().new_tree(&mut runner).ok(),
-      "Option<Infallible> generates a value tree",
-    )?;
-    strict_test_support::ensure(tree.current().is_none(), "Option<Infallible> always generates None")?;
-    strict_test_support::ensure(!tree.simplify(), "a None-only option strategy has no simpler value")
+    let observation = any::<Option<Infallible>>().new_tree(&mut runner).map(|mut tree| {
+      let value = tree.current();
+      let simplified = tree.simplify();
+      (tree, value, simplified)
+    });
+    strict_test_support::ensure_that(
+      observation,
+      "Option<Infallible> generates only None and cannot simplify",
+      |result| {
+        result
+          .as_ref()
+          .is_ok_and(|reached| reached.1.is_none() && reached.0.current().is_none() && !reached.2)
+      },
+    )
+    .map(drop)
   }
 }

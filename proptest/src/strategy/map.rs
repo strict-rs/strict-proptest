@@ -259,60 +259,84 @@ mod test {
   use std::collections::HashSet;
 
   use rand::Rng as _;
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_some;
+  #[cfg(feature = "strict-test")]
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
+  use crate::std_facade::Vec;
   use crate::strategy::just::Just;
   #[cfg(feature = "strict-test")]
   use crate::strict::ensure_property;
+  #[cfg(feature = "strict-test")]
+  use crate::test_runner::PropertyResult;
   use crate::test_runner::test_runner_without_persistence;
 
   #[cfg(feature = "strict-test")]
   #[test]
-  fn test_map() -> Result<(), TestFailure> {
+  fn test_map() -> PropertyResult<i32, i32, PredicateFailure<i32>> {
     ensure_property(
-      &(0..10_i32).prop_map(|element| element * 2),
+      &(0..10_i32).prop_map(|element| element.saturating_mul(2)),
       "prop_map applies the mapping to every value",
-      |mapped| ensure(0 == mapped.rem_euclid(2), "the mapped value is even"),
+      |mapped| ensure_that(mapped, "the mapped value is even", |subject| subject.rem_euclid(2) == 0),
     )
   }
 
   #[cfg(feature = "strict-test")]
   #[test]
-  fn test_map_into() -> Result<(), TestFailure> {
+  fn test_map_into() -> PropertyResult<usize, usize, PredicateFailure<usize>> {
     ensure_property(
       &(0..10_u8).prop_map_into::<usize>(),
       "prop_map_into converts every value",
-      |converted| ensure(converted < 10, "the converted value keeps its bound"),
+      |converted| ensure_that(converted, "the converted value keeps its bound", |subject| *subject < 10),
     )
   }
 
   #[test]
-  fn perturb_uses_same_rng_every_time() -> Result<(), TestFailure> {
+  fn perturb_uses_same_rng_every_time() -> Result<(), impl fmt::Debug> {
     let mut runner = test_runner_without_persistence();
-    let input = Just(1).prop_perturb(|element, mut rng| element + rng.next_u32());
-
-    for _ in 0..16 {
-      let value = ensure_some(input.new_tree(&mut runner).ok(), "perturb strategy generates a value tree")?;
-      ensure_eq(&value.current(), &value.current(), "current() is stable across calls")?;
-    }
-    Ok(())
+    let input = Just(1_u32).prop_perturb(|element, mut rng| element.wrapping_add(rng.next_u32()));
+    let samples: Vec<_> = (0..16)
+      .map(|_| {
+        input.new_tree(&mut runner).map(|tree| {
+          let values = (tree.current(), tree.current());
+          (tree, values)
+        })
+      })
+      .collect();
+    ensure_that(
+      samples,
+      "current is stable across repeated calls on every perturb tree",
+      |observed| {
+        observed
+          .iter()
+          .all(|sample| sample.as_ref().is_ok_and(|reached| reached.1.0 == reached.1.1))
+      },
+    )
+    .map(drop)
   }
 
   #[test]
-  fn perturb_uses_varying_random_seeds() -> Result<(), TestFailure> {
+  fn perturb_uses_varying_random_seeds() -> Result<(), impl fmt::Debug> {
     let mut runner = test_runner_without_persistence();
-    let input = Just(1).prop_perturb(|element, mut rng| element + rng.next_u32());
-
-    let mut seen = HashSet::new();
-    for _ in 0..64 {
-      let value = ensure_some(input.new_tree(&mut runner).ok(), "perturb strategy generates a value tree")?.current();
-      ensure(seen.insert(value), "each perturb seed is distinct")?;
-    }
-
-    ensure_eq(&64, &seen.len(), "every tree drew a distinct seed")
+    let input = Just(1_u32).prop_perturb(|element, mut rng| element.wrapping_add(rng.next_u32()));
+    let samples: Vec<_> = (0..64)
+      .map(|_| {
+        input.new_tree(&mut runner).map(|tree| {
+          let value = tree.current();
+          (tree, value)
+        })
+      })
+      .collect();
+    ensure_that(samples, "each of the 64 perturb trees draws a distinct seed", |observed| {
+      observed.iter().all(Result::is_ok)
+        && observed
+          .iter()
+          .filter_map(|sample| sample.as_ref().ok().map(|reached| &reached.1))
+          .collect::<HashSet<_>>()
+          .len()
+          == 64
+    })
+    .map(drop)
   }
 }

@@ -18,8 +18,12 @@ mod config;
 pub(crate) mod diagnostics;
 /// Per-case and whole-test outcome types (`TestCaseError` / `TestError`).
 pub(crate) mod errors;
+/// Evaluation contracts shared by legacy and typed runner entry points.
+mod execution;
 /// Pluggable storage for minimized failing seeds.
 mod failure_persistence;
+/// Typed evaluation evidence and native stopping causes.
+mod outcome;
 /// The `Reason` wrapper carried by rejects and failures.
 mod reason;
 /// The fork replay log shared between parent and child processes.
@@ -34,6 +38,16 @@ mod runner;
 /// Scoped panic-hook handling that silences shrink-phase panics.
 #[cfg(feature = "std")]
 mod scoped_panic_hook;
+/// Explicit typed transport and local execution channels.
+mod transport;
+/// Runner-owned typed evaluation storage.
+mod typed;
+/// Typed child supervision and temporary-file finalization.
+#[cfg(feature = "fork")]
+mod typed_fork;
+/// Framed typed replay used by forked native execution.
+#[cfg(feature = "fork")]
+mod typed_replay;
 
 #[cfg(feature = "std")]
 use std::fmt::Arguments;
@@ -43,11 +57,15 @@ pub use self::errors::ProptestResultExt;
 pub use self::errors::TestCaseError;
 pub use self::errors::TestCaseResult;
 pub use self::errors::TestError;
+pub use self::execution::CaseOrigin;
 pub use self::failure_persistence::*;
+pub use self::outcome::*;
 pub use self::reason::*;
 pub use self::result_cache::*;
 pub use self::rng::*;
 pub use self::runner::*;
+pub use self::transport::DecodedEvaluation;
+pub use self::transport::PropertyTransport;
 
 /// Emit the closure-style fork/timeout warning used by the public sugar macro.
 #[cfg(feature = "std")]

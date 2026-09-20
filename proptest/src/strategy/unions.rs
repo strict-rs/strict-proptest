@@ -10,11 +10,7 @@
 use core::error::Error;
 use core::mem;
 
-#[cfg(all(not(feature = "std"), not(test)))]
-use num_traits::MulAdd as _;
 use num_traits::ToPrimitive as _;
-#[cfg(all(not(feature = "std"), not(test)))]
-use num_traits::float::FloatCore as _;
 
 use crate::num::sample_uniform;
 use crate::std_facade::Arc;
@@ -807,13 +803,11 @@ pub fn try_float_to_weight(f: f64) -> Result<(u32, u32), UnionBuildError> {
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_ok;
-  use strict_test_support::ensure_some;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
+  use crate::std_facade::Box;
   use crate::std_facade::Rc;
   use crate::std_facade::vec;
   use crate::strategy::CheckStrategySanityOptions;
@@ -824,73 +818,81 @@ mod test {
   #[cfg(feature = "std")]
   use crate::test_runner::TestError;
 
-  // FIXME(2018-06-01): figure out a way to run this test on no_std.
-  // The problem is that the default seed is fixed and does not produce
-  // enough passed tests. We need some universal source of non-determinism
-  // for the seed, which is unlikely.
+  /// Concrete assertion failures retain the complete observation.
+  type Check<S> = Result<(), Box<PredicateFailure<S>>>;
+
+  /// Every generation and native runner outcome in a union shrink experiment.
+  #[cfg(feature = "std")]
+  type UnionRuns = Vec<Result<Result<bool, TestError<u32>>, Reason>>;
+
+  /// Run the same two-minimum property against dynamic and static unions.
+  #[cfg(feature = "std")]
+  fn union_runs(strategy: impl Strategy<Value = u32>) -> UnionRuns {
+    let mut runner = TestRunner::deterministic();
+    let property = |sample| {
+      if sample < 15 {
+        Ok(())
+      } else {
+        Err(TestCaseError::fail("at least 15"))
+      }
+    };
+    (0..256)
+      .map(|_| strategy.new_tree(&mut runner).map(|tree| runner.run_one(tree, property)))
+      .collect()
+  }
+
+  /// Both union representations preserve the expected pass and minimum distribution.
+  #[cfg(feature = "std")]
+  fn has_two_minima(runs: &UnionRuns) -> bool {
+    let passed = runs.iter().filter(|run| matches!(run, Ok(Ok(true)))).count();
+    let low = runs.iter().filter(|run| matches!(run, Ok(Err(TestError::Fail(_, 15))))).count();
+    let high = runs.iter().filter(|run| matches!(run, Ok(Err(TestError::Fail(_, 30))))).count();
+    passed.saturating_add(low).saturating_add(high) == runs.len()
+      && (32..=96).contains(&passed)
+      && (32..=160).contains(&low)
+      && (32..=160).contains(&high)
+  }
+
   #[cfg(feature = "std")]
   #[test]
-  fn test_union() -> Result<(), TestFailure> {
-    let input = (10_u32..20_u32).prop_union(30_u32..40_u32);
-    // Expect that 25% of cases pass (left input happens to be < 15, and
-    // left is chosen as initial value). Of the 75% that fail, 50% should
-    // converge to 15 and 50% to 30 (the latter because the left is beneath
-    // the passing threshold).
-    let mut passed = 0;
-    let mut converged_low = 0;
-    let mut converged_high = 0;
-    let mut runner = TestRunner::deterministic();
-    for _ in 0..256 {
-      let case = ensure_some(input.new_tree(&mut runner).ok(), "union strategy generates a value tree")?;
-      let result = runner.run_one(case, |sample| match sample {
-        0..=14 => Ok(()),
-        _ => Err(TestCaseError::fail("at least 15")),
-      });
-
-      match result {
-        Ok(true) => passed += 1,
-        Err(TestError::Fail(_, 15)) => converged_low += 1,
-        Err(TestError::Fail(_, 30)) => converged_high += 1,
-        _ => {
-          ensure(false, "run_one converges to one of the two minima")?;
-        }
-      }
-    }
-
-    ensure((32..=96).contains(&passed), "a plausible share of cases passed")?;
-    ensure(
-      (32..=160).contains(&converged_low),
-      "a plausible share converged to the low minimum",
-    )?;
-    ensure(
-      (32..=160).contains(&converged_high),
-      "a plausible share converged to the high minimum",
+  fn test_union() -> Check<UnionRuns> {
+    ensure_that(
+      union_runs((10_u32..20).prop_union(30_u32..40)),
+      "union shrinking preserves the pass distribution and both minima",
+      has_two_minima,
     )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  /// Sample all weights while retaining generation failures and generated values.
+  fn weighted_samples(strategy: impl Strategy<Value = usize>) -> Vec<Result<usize, Reason>> {
+    let mut runner = TestRunner::deterministic();
+    (0..65536)
+      .map(|_| strategy.new_tree(&mut runner).map(|tree| tree.current()))
+      .collect()
+  }
+
+  /// The middle branch is twice as likely, while every branch remains reachable.
+  fn middle_weight_dominates(samples: &[Result<usize, Reason>]) -> bool {
+    let first = samples.iter().filter(|sample| matches!(sample, Ok(0))).count();
+    let second = samples.iter().filter(|sample| matches!(sample, Ok(1))).count();
+    let third = samples.iter().filter(|sample| matches!(sample, Ok(2))).count();
+    first.saturating_add(second).saturating_add(third) == samples.len()
+      && first > 0
+      && third > 0
+      && second.saturating_mul(2) > first.saturating_mul(3)
+      && second.saturating_mul(2) > third.saturating_mul(3)
   }
 
   #[test]
-  fn test_union_weighted() -> Result<(), TestFailure> {
-    let input = Union::new_weighted(vec![(1, Just(0_usize)), (2, Just(1_usize)), (1, Just(2_usize))]);
-
-    let mut counts = [0_usize, 0, 0];
-    let mut runner = TestRunner::deterministic();
-    for _ in 0..65536 {
-      let generated = ensure_some(input.new_tree(&mut runner).ok(), "weighted union generates a value tree")?.current();
-      let bucket = ensure_some(counts.get_mut(generated), "generated union value has a histogram bucket")?;
-      *bucket = bucket.saturating_add(1);
-    }
-
-    let [first, second, third] = counts;
-    ensure(first > 0, "the first option is chosen")?;
-    ensure(third > 0, "the third option is chosen")?;
-    ensure(
-      second.saturating_mul(2) > first.saturating_mul(3),
-      "the double-weighted option dominates the first",
-    )?;
-    ensure(
-      second.saturating_mul(2) > third.saturating_mul(3),
-      "the double-weighted option dominates the third",
-    )
+  fn test_union_weighted() -> Check<Vec<Result<usize, Reason>>> {
+    let samples = weighted_samples(Union::new_weighted(vec![(1, Just(0_usize)), (2, Just(1)), (1, Just(2))]));
+    ensure_that(samples, "dynamic union respects relative weights", |observed| {
+      middle_weight_dominates(observed)
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
@@ -901,117 +903,69 @@ mod test {
     )
   }
 
-  // FIXME(2018-06-01): See note on `test_union`.
   #[cfg(feature = "std")]
   #[test]
-  fn test_tuple_union() -> Result<(), TestFailure> {
-    let input = TupleUnion::new(((1, Rc::new(10_u32..20_u32)), (1, Rc::new(30_u32..40_u32))));
-    // Expect that 25% of cases pass (left input happens to be < 15, and
-    // left is chosen as initial value). Of the 75% that fail, 50% should
-    // converge to 15 and 50% to 30 (the latter because the left is beneath
-    // the passing threshold).
-    let mut passed = 0;
-    let mut converged_low = 0;
-    let mut converged_high = 0;
-    let mut runner = TestRunner::deterministic();
-    for _ in 0..256 {
-      let case = ensure_some(input.new_tree(&mut runner).ok(), "tuple union generates a value tree")?;
-      let result = runner.run_one(case, |sample| match sample {
-        0..=14 => Ok(()),
-        _ => Err(TestCaseError::fail("at least 15")),
-      });
-
-      match result {
-        Ok(true) => passed += 1,
-        Err(TestError::Fail(_, 15)) => converged_low += 1,
-        Err(TestError::Fail(_, 30)) => converged_high += 1,
-        _ => {
-          ensure(false, "run_one converges to one of the two minima")?;
-        }
-      }
-    }
-
-    ensure((32..=96).contains(&passed), "a plausible share of cases passed")?;
-    ensure(
-      (32..=160).contains(&converged_low),
-      "a plausible share converged to the low minimum",
-    )?;
-    ensure(
-      (32..=160).contains(&converged_high),
-      "a plausible share converged to the high minimum",
+  fn test_tuple_union() -> Check<UnionRuns> {
+    let input = TupleUnion::new(((1, Rc::new(10_u32..20)), (1, Rc::new(30_u32..40))));
+    ensure_that(
+      union_runs(input),
+      "tuple union shrinking preserves the pass distribution and both minima",
+      has_two_minima,
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn test_tuple_union_weighting() -> Result<(), TestFailure> {
-    let input = TupleUnion::new((
-      (1, Rc::new(Just(0_usize))),
-      (2, Rc::new(Just(1_usize))),
-      (1, Rc::new(Just(2_usize))),
-    ));
-
-    let mut counts = [0_usize, 0, 0];
-    let mut runner = TestRunner::deterministic();
-    for _ in 0..65536 {
-      let generated = ensure_some(input.new_tree(&mut runner).ok(), "weighted tuple union generates a value tree")?.current();
-      let bucket = ensure_some(counts.get_mut(generated), "generated tuple union value has a histogram bucket")?;
-      *bucket = bucket.saturating_add(1);
-    }
-
-    let [first, second, third] = counts;
-    ensure(first > 0, "the first option is chosen")?;
-    ensure(third > 0, "the third option is chosen")?;
-    ensure(
-      second.saturating_mul(2) > first.saturating_mul(3),
-      "the double-weighted option dominates the first",
-    )?;
-    ensure(
-      second.saturating_mul(2) > third.saturating_mul(3),
-      "the double-weighted option dominates the third",
-    )
+  fn test_tuple_union_weighting() -> Check<Vec<Result<usize, Reason>>> {
+    let input = TupleUnion::new(((1, Rc::new(Just(0_usize))), (2, Rc::new(Just(1))), (1, Rc::new(Just(2)))));
+    ensure_that(weighted_samples(input), "tuple union respects relative weights", |samples| {
+      middle_weight_dominates(samples)
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
+  /// Native generated values for each supported tuple arity.
+  type AritySamples = Vec<Vec<Result<i32, Reason>>>;
+
   #[test]
-  fn test_tuple_union_all_sizes() -> Result<(), TestFailure> {
+  fn test_tuple_union_all_sizes() -> Check<AritySamples> {
     let mut runner = TestRunner::deterministic();
     let strategy = Rc::new(1_i32..10);
-
+    let mut arities = Vec::new();
     macro_rules! test {
-            ($($part:expr),*) => {{
-                let input = TupleUnion::new((
-                    $((1, $part.clone())),*,
-                    (1, Rc::new(Just(0_i32)))
-                ));
-
-                let mut pass = false;
-                for _ in 0..1024 {
-                    if 0 == ensure_some(
-                        input.new_tree(&mut runner).ok(),
-                        "tuple union generates a value tree",
-                    )?
-                    .current()
-                    {
-                        pass = true;
-                        break;
-                    }
-                }
-
-                ensure(pass, "the final option is eventually chosen")?;
-            }}
+      ($($part:expr),*) => {{
+        let input = TupleUnion::new(($((1, $part.clone())),*, (1, Rc::new(Just(0_i32)))));
+        let mut samples = Vec::new();
+        for _ in 0..1024 {
+          let sample = input.new_tree(&mut runner).map(|tree| tree.current());
+          let reached_last = matches!(sample, Ok(0));
+          samples.push(sample);
+          if reached_last { break; }
         }
-
-    test!(strategy); // 2
-    test!(strategy, strategy); // 3
-    test!(strategy, strategy, strategy); // 4
-    test!(strategy, strategy, strategy, strategy); // 5
-    test!(strategy, strategy, strategy, strategy, strategy); // 6
-    test!(strategy, strategy, strategy, strategy, strategy, strategy); // 7
-    test!(strategy, strategy, strategy, strategy, strategy, strategy, strategy); // 8
-    test!(strategy, strategy, strategy, strategy, strategy, strategy, strategy, strategy); // 9
+        arities.push(samples);
+      }}
+    }
+    test!(strategy);
+    test!(strategy, strategy);
+    test!(strategy, strategy, strategy);
+    test!(strategy, strategy, strategy, strategy);
+    test!(strategy, strategy, strategy, strategy, strategy);
+    test!(strategy, strategy, strategy, strategy, strategy, strategy);
+    test!(strategy, strategy, strategy, strategy, strategy, strategy, strategy);
+    test!(strategy, strategy, strategy, strategy, strategy, strategy, strategy, strategy);
     test!(
       strategy, strategy, strategy, strategy, strategy, strategy, strategy, strategy, strategy
-    ); // 10
-    Ok(())
+    );
+    ensure_that(arities, "every supported tuple arity generates the final branch", |observed| {
+      observed.len() == 9
+        && observed
+          .iter()
+          .all(|samples| samples.iter().all(Result::is_ok) && matches!(samples.last(), Some(Ok(0))))
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
@@ -1026,68 +980,71 @@ mod test {
     )
   }
 
+  /// Constructor results together with the probability conversion they support.
+  type Construction = (
+    Result<Union<Just<usize>>, UnionBuildError>,
+    Result<Union<Just<usize>>, UnionBuildError>,
+    Result<(u32, u32), UnionBuildError>,
+  );
+
   #[test]
-  fn try_constructors_accept_valid_unions() -> Result<(), TestFailure> {
-    ensure(
-      Union::try_new_uniform(vec![Just(1_usize), Just(2_usize)]).is_ok(),
-      "try_new_uniform accepts a non-empty option list",
-    )?;
-    ensure(
-      Union::try_new_weighted(vec![(1, Just(0_usize)), (3, Just(1))]).is_ok(),
-      "try_new_weighted accepts positive weights",
-    )?;
-    let (pos, neg) = ensure_ok(try_float_to_weight(0.25), "try_float_to_weight accepts a probability inside (0, 1)")?;
-    ensure(
-      pos > 0 && neg > 0 && pos.checked_add(neg).is_some(),
-      "the produced weight pair is non-zero and does not overflow",
+  fn try_constructors_accept_valid_unions() -> Check<Construction> {
+    let subject = (
+      Union::try_new_uniform(vec![Just(1_usize), Just(2)]),
+      Union::try_new_weighted(vec![(1, Just(0_usize)), (3, Just(1))]),
+      try_float_to_weight(0.25),
+    );
+    ensure_that(
+      subject,
+      "valid unions and probabilities produce nonzero, nonoverflowing weights",
+      |observed| {
+        observed.0.is_ok()
+          && observed.1.is_ok()
+          && observed
+            .2
+            .as_ref()
+            .is_ok_and(|&(pos, neg)| pos > 0 && neg > 0 && pos.checked_add(neg).is_some())
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn try_constructors_reject_invalid_unions() -> Result<(), TestFailure> {
-    ensure_eq(
-      &ensure_some(
-        Union::<Just<usize>>::try_new_uniform(vec![]).err(),
-        "try_new_uniform rejects an empty option list",
-      )?,
-      &UnionBuildError::Empty,
-      "the empty union error names the violated invariant",
-    )?;
-    ensure_eq(
-      &ensure_some(
-        Union::try_new_weighted(vec![(0, Just(0_usize))]).err(),
-        "try_new_weighted rejects a zero weight",
-      )?,
-      &UnionBuildError::ZeroWeight,
-      "the zero-weight error names the violated invariant",
-    )?;
-    ensure_eq(
-      &ensure_some(
-        Union::try_new_weighted(vec![(u32::MAX, Just(0_usize)), (u32::MAX, Just(1))]).err(),
-        "try_new_weighted rejects an overflowing weight sum",
-      )?,
-      &UnionBuildError::WeightSumOverflow,
-      "the overflow error names the violated invariant",
-    )?;
-    ensure_eq(
-      &ensure_some(
-        try_float_to_weight(1.5).err(),
-        "try_float_to_weight rejects a probability outside (0, 1)",
-      )?,
-      &UnionBuildError::InvalidProbability,
-      "the probability error names the violated invariant",
-    )?;
-    ensure(try_float_to_weight(f64::NAN).is_err(), "try_float_to_weight rejects NaN")
+  fn try_constructors_reject_invalid_unions() -> Result<(), impl fmt::Debug> {
+    let subject = (
+      [
+        Union::<Just<usize>>::try_new_uniform(vec![]),
+        Union::try_new_weighted(vec![(0, Just(0_usize))]),
+        Union::try_new_weighted(vec![(u32::MAX, Just(0_usize)), (u32::MAX, Just(1))]),
+      ],
+      [try_float_to_weight(1.5), try_float_to_weight(f64::NAN)],
+    );
+    ensure_that(subject, "invalid unions report their precise violated invariants", |observed| {
+      matches!(observed.0, [
+        Err(UnionBuildError::Empty),
+        Err(UnionBuildError::ZeroWeight),
+        Err(UnionBuildError::WeightSumOverflow)
+      ]) && observed
+        .1
+        .iter()
+        .all(|result| *result == Err(UnionBuildError::InvalidProbability))
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn zero_weight_tuple_union_aborts_generation() -> Result<(), TestFailure> {
+  fn zero_weight_tuple_union_aborts_generation() -> Result<(), impl fmt::Debug> {
     let input = TupleUnion::new(((0, Rc::new(Just(0_usize))), (0, Rc::new(Just(1_usize)))));
     let mut runner = TestRunner::deterministic();
-    ensure(
-      input.new_tree(&mut runner).is_err(),
-      "an all-zero-weight tuple union reports a generation error instead of panicking",
+    ensure_that(
+      input.new_tree(&mut runner),
+      "an all-zero-weight tuple union reports a generation error",
+      Result::is_err,
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   /// Test that unions work even if local filtering causes errors.

@@ -12,6 +12,7 @@ use syn::PatType;
 use syn::spanned::Spanned as _;
 
 /// A parsed argument, with an optional custom strategy
+#[cfg_attr(test, derive(Debug))]
 pub(super) struct Argument {
   /// The parameter's pattern and type (`x: i32`), with any strategy
   /// attribute already stripped off.
@@ -81,83 +82,134 @@ pub(super) fn is_strategy(attr: &Attribute) -> bool {
 
 #[cfg(test)]
 mod tests {
-  use quote::ToTokens as _;
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_some;
-  use syn::parse_quote;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
 
-  fn ensure_stripped_args(fixture_fn: ItemFn) -> Result<(ItemFn, Vec<Argument>), TestFailure> {
-    strip_args(fixture_fn).map_err(|error| TestFailure::WasErr {
-      context: "fixture args strip",
-      cause:   error.to_string(),
-    })
+  /// Every native extraction result, including rejected receiver syntax.
+  type Extraction = Result<(ItemFn, Vec<Argument>), TokenStream>;
+
+  /// Parsing failures or the complete rejected extraction.
+  #[derive(Debug, thiserror::Error)]
+  enum ExtractionFailure {
+    /// Fixture parser error.
+    #[error(transparent)]
+    Parse(#[from] syn::Error),
+    /// Original extraction subject.
+    #[error(transparent)]
+    Extraction(#[from] Box<PredicateFailure<Extraction>>),
+    /// Complete attribute observations.
+    #[error(transparent)]
+    Attributes(#[from] PredicateFailure<Vec<(Attribute, bool)>>),
   }
 
   #[test]
-  fn strip_args_works() -> Result<(), TestFailure> {
-    let fixture_fn = parse_quote! { fn foo(i: i32) {} };
-    let (stripped_fn, mut args) = ensure_stripped_args(fixture_fn)?;
-
-    ensure_eq(
-      &stripped_fn.to_token_stream().to_string(),
-      &"fn foo () { }".to_owned(),
-      "stripped fn renders without arguments",
-    )?;
-
-    ensure_eq(&args.len(), &1_usize, "exactly one argument extracted")?;
-    let arg = ensure_some(args.pop(), "extracted argument is present")?;
-    ensure_eq(
-      &arg.pat_ty.to_token_stream().to_string(),
-      &"i : i32".to_owned(),
-      "extracted argument keeps its pattern and type",
-    )?;
-    ensure(arg.strategy.is_none(), "no strategy attribute extracted")
-  }
-
-  #[test]
-  fn strip_args_reports_self() -> Result<(), TestFailure> {
-    let fixture_fn = parse_quote! { fn foo(self) {} };
-    ensure(strip_args(fixture_fn).is_err(), "receiver extraction emits a compile_error")
-  }
-
-  #[test]
-  fn is_strategy_works() -> Result<(), TestFailure> {
-    let outer_name_value = parse_quote! { #[strategy = 123] };
-    ensure(is_strategy(&outer_name_value), "outer name-value strategy is accepted")?;
-
-    let inner_name_value = parse_quote! { #![strategy = 123] };
-    ensure(!is_strategy(&inner_name_value), "inner strategy attribute is rejected")?;
-
-    let other_name = parse_quote! { #[not_strategy = 123] };
-    ensure(!is_strategy(&other_name), "other attribute names are rejected")?;
-
-    let list_form = parse_quote! { #[strategy(but, no, equals)] };
-    ensure(!is_strategy(&list_form), "list-form strategy is rejected")?;
-
-    let bare_name = parse_quote! { #[strategy] };
-    ensure(!is_strategy(&bare_name), "bare strategy attribute is rejected")
-  }
-
-  #[test]
-  fn strip_strategy_works() -> Result<(), TestFailure> {
-    let fixture_fn = parse_quote! {fn foo(#[strategy = 123] x: i32) {} };
-    let Argument {
-      pat_ty,
-      strategy,
-    } = ensure_some(ensure_stripped_args(fixture_fn)?.1.pop(), "one argument extracted from the fixture")?;
-    ensure_eq(
-      &pat_ty.to_token_stream().to_string(),
-      &"x : i32".to_owned(),
-      "strategy attribute is stripped from the parameter",
-    )?;
-    ensure_eq(
-      &strategy.to_token_stream().to_string(),
-      &"123".to_owned(),
-      "strategy expression is extracted",
+  fn strip_args_works() -> Result<(), ExtractionFailure> {
+    let function = syn::parse_str("fn foo(mut i: i32, (x, y): (u8, u8)) -> Alias { check(i, x, y) }")?;
+    ensure_that(
+      strip_args(function),
+      "stripping retains function return, parameter order, patterns and types",
+      |result| {
+        let Ok((ref stripped, ref args)) = *result else {
+          return false;
+        };
+        stripped.sig.inputs.is_empty()
+          && stripped.sig.ident == "foo"
+          && matches!(stripped.sig.output, syn::ReturnType::Type(_, _))
+          && args.len() == 2
+          && args.first().is_some_and(|arg| {
+            matches!(arg.pat_ty.pat.as_ref(), syn::Pat::Ident(pattern)
+          if pattern.ident == "i" && pattern.mutability.is_some())
+              && arg.strategy.is_none()
+          })
+          && args
+            .get(1)
+            .is_some_and(|arg| matches!(arg.pat_ty.pat.as_ref(), syn::Pat::Tuple(tuple) if tuple.elems.len() == 2))
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
+    .map_err(ExtractionFailure::Extraction)
+  }
+
+  #[test]
+  fn strip_args_reports_self() -> Result<(), ExtractionFailure> {
+    ensure_that(
+      strip_args(syn::parse_str("fn foo(self) {}")?),
+      "receiver extraction emits its targeted diagnostic",
+      |result| {
+        result
+          .as_ref()
+          .is_err_and(|error| error.to_string().contains("`self` parameters are forbidden"))
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+    .map_err(ExtractionFailure::Extraction)
+  }
+
+  #[test]
+  fn is_strategy_works() -> Result<(), ExtractionFailure> {
+    use syn::parse::Parser as _;
+    let fixtures = [
+      ("#[strategy = 123]", true),
+      ("#[not_strategy = 123]", false),
+      ("#[strategy(a)]", false),
+      ("#[strategy]", false),
+    ];
+    let mut observed = Vec::new();
+    for (source, expected) in fixtures {
+      observed.extend(
+        Attribute::parse_outer
+          .parse_str(source)?
+          .into_iter()
+          .map(|attribute| (attribute, expected)),
+      );
+    }
+    observed.extend(
+      Attribute::parse_inner
+        .parse_str("#![strategy = 123]")?
+        .into_iter()
+        .map(|attribute| (attribute, false)),
+    );
+    ensure_that(
+      observed,
+      "only outer strategy name-value attributes select a strategy",
+      |attributes| {
+        attributes
+          .iter()
+          .all(|&(ref attribute, expected)| is_strategy(attribute) == expected)
+      },
+    )
+    .map(drop)
+    .map_err(ExtractionFailure::Attributes)
+  }
+
+  #[test]
+  fn strip_strategy_works() -> Result<(), ExtractionFailure> {
+    let function = syn::parse_str("fn foo(#[strategy = 123] #[retained] x: i32) {}")?;
+    ensure_that(
+      strip_args(function),
+      "strategy extraction keeps unrelated attributes and the native expression",
+      |result| {
+        let Ok((_, ref args)) = *result else {
+          return false;
+        };
+        args.len() == 1
+          && args.first().is_some_and(|arg| {
+            arg.pat_ty.attrs.len() == 1
+              && arg
+                .pat_ty
+                .attrs
+                .first()
+                .is_some_and(|attribute| attribute.path().is_ident("retained"))
+              && matches!(arg.strategy, Some(Expr::Lit(_)))
+          })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+    .map_err(ExtractionFailure::Extraction)
   }
 }

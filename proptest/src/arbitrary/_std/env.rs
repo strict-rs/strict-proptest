@@ -177,12 +177,22 @@ mod var_error {
 
 #[cfg(test)]
 mod test {
+  use core::convert::Infallible;
+
   use super::*;
   use crate::num;
-  use crate::strict::TestResult;
+  #[cfg(feature = "strict-test")]
   use crate::strict::ensure_property_with_config;
+  #[cfg(feature = "strict-test")]
   use crate::strict::strict_default_config;
   use crate::test_runner::Config;
+  use crate::test_runner::PropertyResult;
+  #[cfg(not(feature = "strict-test"))]
+  use crate::test_runner::TestRng;
+  #[cfg(not(feature = "strict-test"))]
+  use crate::test_runner::TestRunner;
+  #[cfg(not(feature = "strict-test"))]
+  use crate::test_runner::runner_test_config;
 
   no_panic_test!(
       args => Args,
@@ -193,23 +203,39 @@ mod test {
       var_error => VarError
   );
 
+  /// UTF-16 buffer and mutation position, retained before and after execution.
+  type Utf16Case = ([u16; 3], usize);
+
   #[test]
-  fn make_utf16_invalid_doesnt_panic() -> TestResult {
-    // Keep the legacy 65536-case sweep over (buffer, position); the
-    // strict defaults supply deterministic seeding and disable failure
-    // persistence.
+  fn make_utf16_invalid_doesnt_panic() -> PropertyResult<Utf16Case, Utf16Case, Infallible> {
+    // Keep the 65536-case sweep over (buffer, position), with deterministic
+    // seeding and no failure persistence in either feature configuration.
+    #[cfg(feature = "strict-test")]
+    let defaults = strict_default_config();
+    #[cfg(not(feature = "strict-test"))]
+    let defaults = runner_test_config();
     let config = Config {
       cases: 65536,
-      ..strict_default_config()
+      ..defaults
     };
-    ensure_property_with_config(
-      &([num::u16::ANY; 3], 0_usize..3),
-      "make_utf16_invalid handles every position in a 3-element buffer",
-      config,
-      |(mut buf, pos)| {
-        make_utf16_invalid(&mut buf, pos);
-        Ok(())
-      },
-    )
+    let strategy = ([num::u16::ANY; 3], 0_usize..3);
+    let mutate = |(mut buf, pos): Utf16Case| {
+      make_utf16_invalid(&mut buf, pos);
+      Ok((buf, pos))
+    };
+    #[cfg(feature = "strict-test")]
+    {
+      ensure_property_with_config(
+        &strategy,
+        "make_utf16_invalid handles every position in a 3-element buffer",
+        config,
+        mutate,
+      )
+    }
+    #[cfg(not(feature = "strict-test"))]
+    {
+      let rng = TestRng::deterministic_rng(config.rng_algorithm);
+      TestRunner::new_with_rng(config, rng).run_typed(&strategy, mutate)
+    }
   }
 }

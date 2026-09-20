@@ -309,6 +309,10 @@ pub fn vec_deque<T: Strategy>(element: T, size: impl Into<SizeRange>) -> VecDequ
 ///
 /// Returns [`EmptySizeRange`] when `size` resolves to an empty range such as
 /// `0..0`.
+#[allow(
+  clippy::single_call_fn,
+  reason = "the public deque constructor owns typed size validation independently of infallible strategy construction"
+)]
 pub fn try_vec_deque<T: Strategy>(element: T, size: impl Into<SizeRange>) -> Result<VecDequeStrategy<T>, EmptySizeRange> {
   Ok(VecDequeStrategy(statics::Map::new(try_vec(element, size)?, VecToDeque)))
 }
@@ -347,6 +351,10 @@ pub fn linked_list<T: Strategy>(element: T, size: impl Into<SizeRange>) -> Linke
 ///
 /// Returns [`EmptySizeRange`] when `size` resolves to an empty range such as
 /// `0..0`.
+#[allow(
+  clippy::single_call_fn,
+  reason = "the public linked list constructor owns typed size validation independently of infallible strategy construction"
+)]
 pub fn try_linked_list<T: Strategy>(element: T, size: impl Into<SizeRange>) -> Result<LinkedListStrategy<T>, EmptySizeRange> {
   Ok(LinkedListStrategy(statics::Map::new(try_vec(element, size)?, VecToLl)))
 }
@@ -388,6 +396,10 @@ where
 ///
 /// Returns [`EmptySizeRange`] when `size` resolves to an empty range such as
 /// `0..0`.
+#[allow(
+  clippy::single_call_fn,
+  reason = "the public binary heap constructor owns typed size validation independently of infallible strategy construction"
+)]
 pub fn try_binary_heap<T: Strategy>(element: T, size: impl Into<SizeRange>) -> Result<BinaryHeapStrategy<T>, EmptySizeRange>
 where
   T::Value: Ord,
@@ -463,6 +475,10 @@ where
 /// `0..0`.
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+#[allow(
+  clippy::single_call_fn,
+  reason = "the public hash set constructor owns typed size validation independently of infallible strategy construction"
+)]
 pub fn try_hash_set<T: Strategy>(element: T, size: impl Into<SizeRange>) -> Result<HashSetStrategy<T>, EmptySizeRange>
 where
   T::Value: Hash + Eq,
@@ -528,6 +544,10 @@ where
 ///
 /// Returns [`EmptySizeRange`] when `size` resolves to an empty range such as
 /// `0..0`.
+#[allow(
+  clippy::single_call_fn,
+  reason = "the public ordered set constructor owns typed size validation independently of infallible strategy construction"
+)]
 pub fn try_btree_set<T: Strategy>(element: T, size: impl Into<SizeRange>) -> Result<BTreeSetStrategy<T>, EmptySizeRange>
 where
   T::Value: Ord,
@@ -607,6 +627,10 @@ where
 /// `0..0`.
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+#[allow(
+  clippy::single_call_fn,
+  reason = "the public hash map constructor owns typed size validation independently of infallible strategy construction"
+)]
 pub fn try_hash_map<K: Strategy, V: Strategy>(
   key: K,
   value_strategy: V,
@@ -682,6 +706,10 @@ where
 ///
 /// Returns [`EmptySizeRange`] when `size` resolves to an empty range such as
 /// `0..0`.
+#[allow(
+  clippy::single_call_fn,
+  reason = "the public ordered map constructor owns typed size validation independently of infallible strategy construction"
+)]
 pub fn try_btree_map<K: Strategy, V: Strategy>(
   key: K,
   value_strategy: V,
@@ -862,142 +890,197 @@ mod test {
   use std::string::ToString as _;
   use std::vec;
 
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_contains;
-  use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_ok;
-  use strict_test_support::ensure_some;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
   use crate::bits;
+  use crate::std_facade::Box;
+  use crate::strategy::BoxedStrategy;
   use crate::strategy::check_strategy_sanity;
+  use crate::strategy::trace_shrink_steps;
   use crate::test_runner::TestCaseError;
   use crate::test_runner::TestCaseResult;
   use crate::test_runner::TestError;
   use crate::test_runner::test_runner_without_persistence;
 
+  /// Native assertion subjects stay concrete and allocated on failure.
+  type Check<S> = Result<(), Box<PredicateFailure<S>>>;
+  /// Native integer-range map strategies retain key and value generation contracts.
+  type OrderedMap = BTreeMapStrategy<Range<u8>, Range<u8>>;
+  /// Native hashed map strategies retain key and value generation contracts.
+  #[cfg(feature = "std")]
+  type HashedMap = HashMapStrategy<Range<u8>, Range<u8>>;
+  /// A collection constructor retains its concrete strategy or size error.
+  type Construction<S> = Result<S, EmptySizeRange>;
+  /// Deterministic generation preserves every native tree or reason.
+  #[cfg(feature = "std")]
+  type Samples<S> = Vec<NewTree<S>>;
+  /// A constructed strategy and its native generation result.
+  type Constructed<S> = Result<(S, NewTree<S>), EmptySizeRange>;
+  /// All collection constructors retain their concrete strategy and error types.
+  #[derive(Debug)]
+  struct Constructors {
+    /// Variable vector constructor and actual generated tree.
+    vector:      Constructed<VecStrategy<Range<u8>>>,
+    /// Deque constructor.
+    deque:       Result<VecDequeStrategy<Range<u8>>, EmptySizeRange>,
+    /// Linked-list constructor.
+    list:        Result<LinkedListStrategy<Range<u8>>, EmptySizeRange>,
+    /// Binary-heap constructor.
+    heap:        Result<BinaryHeapStrategy<Range<u8>>, EmptySizeRange>,
+    /// Ordered-set constructor.
+    ordered_set: Result<BTreeSetStrategy<Range<u8>>, EmptySizeRange>,
+    /// Ordered-map constructor.
+    ordered_map: Construction<OrderedMap>,
+    /// Hash-set constructor.
+    #[cfg(feature = "std")]
+    hashed_set:  Result<HashSetStrategy<Range<u8>>, EmptySizeRange>,
+    /// Hash-map constructor.
+    #[cfg(feature = "std")]
+    hashed_map:  Construction<HashedMap>,
+  }
+
+  /// Exercise each public fallible constructor without erasing successful strategies.
+  fn constructors(vector_size: Range<usize>, other_size: Range<usize>) -> Constructors {
+    let mut runner = TestRunner::deterministic();
+    Constructors {
+      vector: try_vec(0_u8..4, vector_size).map(|strategy| {
+        let tree = strategy.new_tree(&mut runner);
+        (strategy, tree)
+      }),
+      deque: try_vec_deque(0_u8..4, other_size.clone()),
+      list: try_linked_list(0_u8..4, other_size.clone()),
+      heap: try_binary_heap(0_u8..4, other_size.clone()),
+      ordered_set: try_btree_set(0_u8..4, other_size.clone()),
+      #[cfg(feature = "std")]
+      hashed_set: try_hash_set(0_u8..4, other_size.clone()),
+      #[cfg(feature = "std")]
+      hashed_map: try_hash_map(0_u8..4, 0_u8..4, other_size.clone()),
+      ordered_map: try_btree_map(0_u8..4, 0_u8..4, other_size),
+    }
+  }
+
+  #[test]
+  fn try_constructors_accept_nonempty_size_ranges() -> Check<Constructors> {
+    ensure_that(
+      constructors(1..4, 1..4),
+      "nonempty size ranges preserve successful constructors and a correctly sized generated vector",
+      |observed| {
+        let accepted = observed
+          .vector
+          .as_ref()
+          .is_ok_and(|reached| reached.1.as_ref().is_ok_and(|tree| (1..4).contains(&tree.current().len())))
+          && observed.deque.is_ok()
+          && observed.list.is_ok()
+          && observed.heap.is_ok()
+          && observed.ordered_set.is_ok()
+          && observed.ordered_map.is_ok();
+        #[cfg(feature = "std")]
+        {
+          accepted && observed.hashed_set.is_ok() && observed.hashed_map.is_ok()
+        }
+        #[cfg(not(feature = "std"))]
+        {
+          accepted
+        }
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn try_constructors_reject_empty_size_ranges() -> Check<Constructors> {
+    ensure_that(
+      constructors(3..3, 0..0),
+      "empty ranges retain their concrete bounds and corrective diagnostic",
+      |observed| {
+        let empty = Some(&EmptySizeRange {
+          start: 0, end_excl: 0
+        });
+        let rejected = observed.vector.as_ref().is_err_and(|error| {
+          *error
+            == EmptySizeRange {
+              start: 3, end_excl: 3
+            }
+            && error
+              .to_string()
+              .contains("did you accidentally write 3..3 where you meant 3..=3")
+        }) && observed.deque.as_ref().err() == empty
+          && observed.list.as_ref().err() == empty
+          && observed.heap.as_ref().err() == empty
+          && observed.ordered_set.as_ref().err() == empty
+          && observed.ordered_map.as_ref().err() == empty;
+        #[cfg(feature = "std")]
+        {
+          rejected && observed.hashed_set.as_ref().err() == empty && observed.hashed_map.as_ref().err() == empty
+        }
+        #[cfg(not(feature = "std"))]
+        {
+          rejected
+        }
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  /// The native one-case API deliberately receives its own legacy failure contract.
   #[allow(
     clippy::single_call_fn,
-    reason = "the vec shrink test names the sum threshold that should falsify the generated case"
+    reason = "the sum boundary names the failing property independently of generation and shrinking observations"
   )]
   fn reject_vec_sum_at_nine(generated: &[usize]) -> TestCaseResult {
-    if generated.iter().copied().sum::<usize>() >= 9 {
-      return Err(TestCaseError::fail("greater than 8"));
+    if generated.iter().copied().fold(0_usize, usize::saturating_add) >= 9 {
+      Err(TestCaseError::fail("greater than 8"))
+    } else {
+      Ok(())
     }
-    Ok(())
   }
 
-  fn ensure_parallel_vec_value(current: &[u32]) -> Result<(), TestFailure> {
-    ensure_eq(&2, &current.len(), "a parallel vec keeps its fixed length")?;
-    let first = ensure_some(current.first().copied(), "parallel vec exposes its first generated value")?;
-    let second = ensure_some(current.get(1).copied(), "parallel vec exposes its second generated value")?;
-    ensure((1..=10).contains(&first), "the first element obeys its range strategy")?;
-    ensure_eq(&0, &(second & !0xF0), "the second element obeys its bit mask")
-  }
+  /// Initial vector and the reached legacy one-case outcome.
+  type VectorCase = Result<(Vec<usize>, Result<bool, TestError<Vec<usize>>>), Reason>;
 
   #[test]
-  fn try_constructors_accept_nonempty_size_ranges() -> Result<(), TestFailure> {
+  fn test_vec() -> Check<Vec<VectorCase>> {
+    let input = vec(1_usize..20, 5..20);
     let mut runner = TestRunner::deterministic();
-    let strategy = ensure_ok(try_vec(0_u8..4, 1..4), "try_vec accepts a non-empty size range")?;
-    let value = ensure_some(
-      strategy.new_tree(&mut runner).ok(),
-      "the fallibly constructed vec strategy generates",
-    )?
-    .current();
-    ensure((1..4).contains(&value.len()), "the generated vec honors the requested size range")?;
-    ensure(try_vec_deque(0_u8..4, 1..4).is_ok(), "try_vec_deque accepts a non-empty size range")?;
-    ensure(
-      try_linked_list(0_u8..4, 1..4).is_ok(),
-      "try_linked_list accepts a non-empty size range",
-    )?;
-    ensure(
-      try_binary_heap(0_u8..4, 1..4).is_ok(),
-      "try_binary_heap accepts a non-empty size range",
-    )?;
-    ensure(try_btree_set(0_u8..4, 1..4).is_ok(), "try_btree_set accepts a non-empty size range")?;
-    ensure(
-      try_btree_map(0_u8..4, 0_u8..4, 1..4).is_ok(),
-      "try_btree_map accepts a non-empty size range",
-    )?;
-    #[cfg(feature = "std")]
-    ensure(try_hash_set(0_u8..4, 1..4).is_ok(), "try_hash_set accepts a non-empty size range")?;
-    #[cfg(feature = "std")]
-    ensure(
-      try_hash_map(0_u8..4, 0_u8..4, 1..4).is_ok(),
-      "try_hash_map accepts a non-empty size range",
-    )?;
-    Ok(())
-  }
-
-  #[test]
-  fn try_constructors_reject_empty_size_ranges() -> Result<(), TestFailure> {
-    let error = ensure_some(try_vec(0_u8..4, 3..3).err(), "try_vec rejects an empty size range")?;
-    ensure_contains(
-      &error.to_string(),
-      "did you accidentally write 3..3 where you meant 3..=3",
-      "the typed error carries the corrective hint",
-    )?;
-    ensure(try_vec_deque(0_u8..4, 0..0).is_err(), "try_vec_deque rejects an empty size range")?;
-    ensure(
-      try_linked_list(0_u8..4, 0..0).is_err(),
-      "try_linked_list rejects an empty size range",
-    )?;
-    ensure(
-      try_binary_heap(0_u8..4, 0..0).is_err(),
-      "try_binary_heap rejects an empty size range",
-    )?;
-    ensure(try_btree_set(0_u8..4, 0..0).is_err(), "try_btree_set rejects an empty size range")?;
-    ensure(
-      try_btree_map(0_u8..4, 0_u8..4, 0..0).is_err(),
-      "try_btree_map rejects an empty size range",
-    )?;
-    #[cfg(feature = "std")]
-    ensure(try_hash_set(0_u8..4, 0..0).is_err(), "try_hash_set rejects an empty size range")?;
-    #[cfg(feature = "std")]
-    ensure(
-      try_hash_map(0_u8..4, 0_u8..4, 0..0).is_err(),
-      "try_hash_map rejects an empty size range",
-    )?;
-    Ok(())
-  }
-
-  #[test]
-  fn test_vec() -> Result<(), TestFailure> {
-    let input = vec(1_usize..20_usize, 5..20);
-    let mut num_successes = 0;
-
-    let mut runner = TestRunner::deterministic();
-    for _ in 0..256 {
-      let case = ensure_some(input.new_tree(&mut runner).ok(), "vec strategy generates a value tree")?;
-      let start = case.current();
-      // Has correct length
-      ensure(start.len() >= 5 && start.len() < 20, "the generated vec has the requested length")?;
-      // Has at least 2 distinct values
-      ensure(
-        start.iter().copied().collect::<VarBitSet>().len() >= 2,
-        "the generated vec has at least two distinct values",
-      )?;
-
-      let result = runner.run_one(case, |generated| reject_vec_sum_at_nine(&generated));
-
-      match result {
-        Ok(true) => num_successes += 1,
-        Err(TestError::Fail(_, value)) => {
-          // The minimal case always has between 5 (due to min
-          // length) and 9 (min element value = 1) elements, and
-          // always sums to exactly 9.
-          ensure(
-            value.len() >= 5 && value.len() <= 9 && value.iter().copied().sum::<usize>() == 9,
-            "the minimal value has 5..=9 elements summing to exactly 9",
-          )?;
+    let observations = (0..256)
+      .map(|_| {
+        input.new_tree(&mut runner).map(|case| {
+          let start = case.current();
+          let result = runner.run_one(case, |generated| reject_vec_sum_at_nine(&generated));
+          (start, result)
+        })
+      })
+      .collect();
+    let minimal_vector = |observation: &VectorCase| {
+      let Ok(ref reached) = *observation else {
+        return false;
+      };
+      (5..20).contains(&reached.0.len())
+        && reached.0.iter().copied().collect::<BTreeSet<_>>().len() >= 2
+        && match reached.1 {
+          Ok(true) => true,
+          Err(TestError::Fail(_, ref minimal)) => {
+            (5..=9).contains(&minimal.len()) && minimal.iter().copied().fold(0_usize, usize::saturating_add) == 9
+          }
+          Ok(false) | Err(TestError::Abort(_)) => false,
         }
-        _ => ensure(false, "run_one yields either a success or a failed case")?,
-      }
-    }
-
-    ensure(num_successes < 256, "at least one case falsified")?;
-    Ok(())
+    };
+    ensure_that(
+      observations,
+      "generated vectors satisfy their shape and shrink to the minimal nine-sum counterexample",
+      |subjects: &Vec<VectorCase>| {
+        subjects.iter().all(minimal_vector)
+          && subjects
+            .iter()
+            .any(|observation| matches!(*observation, Ok((_, Err(TestError::Fail(..))))))
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
@@ -1005,47 +1088,96 @@ mod test {
     check_strategy_sanity(vec(0_i32..1000, 5..10), None)
   }
 
-  #[test]
-  fn test_parallel_vec() -> Result<(), TestFailure> {
-    let input = vec![(1_u32..10).boxed(), bits::u32::masked(0xF0_u32).boxed()];
+  /// Reached parallel vector tree and every native vector produced during shrinking.
+  struct ParallelWalk {
+    /// Keep the original heterogeneous value trees available to the caller.
+    tree:   <Vec<BoxedStrategy<u32>> as Strategy>::Tree,
+    /// Every observed candidate, in shrink order.
+    values: Vec<Vec<u32>>,
+  }
 
-    for _ in 0..256 {
-      let mut runner = test_runner_without_persistence();
-      let mut case = ensure_some(input.new_tree(&mut runner).ok(), "parallel vec strategy generates a value tree")?;
-
-      ensure_parallel_vec_value(&case.current())?;
-      while case.simplify() {
-        ensure_parallel_vec_value(&case.current())?;
-      }
+  impl fmt::Debug for ParallelWalk {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+      // Boxed value trees do not promise Debug, but their native current value does.
+      formatter
+        .debug_struct("ParallelWalk")
+        .field("current", &self.tree.current())
+        .field("values", &self.values)
+        .finish_non_exhaustive()
     }
-    Ok(())
+  }
+
+  #[test]
+  fn test_parallel_vec() -> Check<Vec<Result<ParallelWalk, Reason>>> {
+    let input = vec![(1_u32..10).boxed(), bits::u32::masked(0xf0_u32).boxed()];
+    let observations = (0..256)
+      .map(|_| {
+        let mut runner = test_runner_without_persistence();
+        input.new_tree(&mut runner)
+      })
+      .map(|generated| {
+        generated.map(|initial_tree| {
+          let (tree, values) = trace_shrink_steps(initial_tree);
+          ParallelWalk {
+            tree,
+            values,
+          }
+        })
+      })
+      .collect();
+    let valid_parallel_walk = |observation: &Result<ParallelWalk, Reason>| {
+      let Ok(ref walk) = *observation else {
+        return false;
+      };
+      walk
+        .values
+        .iter()
+        .all(|value| matches!(*value.as_slice(), [first, second] if (1..=10).contains(&first) && second & !0xf0 == 0))
+    };
+    ensure_that(
+      observations,
+      "parallel vectors keep their fixed length and both element strategies during shrinking",
+      |subjects: &Vec<Result<ParallelWalk, Reason>>| subjects.iter().all(valid_parallel_walk),
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[cfg(feature = "std")]
   #[test]
-  fn test_map() -> Result<(), TestFailure> {
-    // Only 8 possible keys
+  fn test_map() -> Check<Samples<HashMapStrategy<&'static str, &'static str>>> {
     let input = hash_map("[ab]{3}", "a", 2..3);
     let mut runner = TestRunner::deterministic();
-
-    for _ in 0..256 {
-      let map = ensure_some(input.new_tree(&mut runner).ok(), "hash_map strategy generates a value tree")?.current();
-      ensure_eq(&2, &map.len(), "the map has the requested size")?;
-    }
-    Ok(())
+    let observed = (0..256).map(|_| input.new_tree(&mut runner)).collect();
+    ensure_that(
+      observed,
+      "maps keep their requested size despite duplicate generated keys",
+      |subjects: &Samples<HashMapStrategy<&str, &str>>| {
+        subjects
+          .iter()
+          .all(|result| result.as_ref().is_ok_and(|tree| tree.current().len() == 2))
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[cfg(feature = "std")]
   #[test]
-  fn test_set() -> Result<(), TestFailure> {
-    // Only 8 possible values
+  fn test_set() -> Check<Samples<HashSetStrategy<&'static str>>> {
     let input = hash_set("[ab]{3}", 2..3);
     let mut runner = TestRunner::deterministic();
-
-    for _ in 0..256 {
-      let set = ensure_some(input.new_tree(&mut runner).ok(), "hash_set strategy generates a value tree")?.current();
-      ensure_eq(&2, &set.len(), "the set has the requested size")?;
-    }
-    Ok(())
+    let observed = (0..256).map(|_| input.new_tree(&mut runner)).collect();
+    ensure_that(
+      observed,
+      "sets keep their requested size despite duplicate generated values",
+      |subjects: &Samples<HashSetStrategy<&str>>| {
+        subjects
+          .iter()
+          .all(|result| result.as_ref().is_ok_and(|tree| tree.current().len() == 2))
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

@@ -260,27 +260,31 @@ pub(crate) fn eval_expr(expr: &Expr) -> Option<u128> {
 mod test {
   use super::*;
 
-  fn eval(expr: &str) -> Result<Option<u128>, ::strict_test_support::TestFailure> {
-    use syn::parse_str;
-    let parsed = ::strict_test_support::ensure_ok(parse_str(expr), "the test case parses as a valid expression")?;
-    Ok(eval_expr(&parsed))
+  /// Original parser and native comparison failures of the constant evaluator.
+  #[derive(Debug, thiserror::Error)]
+  enum EvaluationFailure {
+    /// Invalid fixture expression.
+    #[error(transparent)]
+    Parse(#[from] syn::Error),
+    /// Native interpreted and expected optional integer values.
+    #[error(transparent)]
+    Comparison(#[from] strict_test_support::ComparisonFailure<Option<u128>, Option<u128>>),
   }
 
-  // `Option<u128>` has no `Display`, so the comparison flows through
-  // `ensure` rather than `ensure_eq`.
+  /// Parse a fixture and retain its native evaluation.
+  fn eval(expr: &str) -> Result<Option<u128>, syn::Error> {
+    Ok(eval_expr(&syn::parse_str(expr)?))
+  }
+
   macro_rules! test {
-        ($($name: ident, $case: expr => $result:expr;)*) => {$(
-            #[test]
-            fn $name(
-            ) -> ::core::result::Result<(), ::strict_test_support::TestFailure>
-            {
-                ::strict_test_support::ensure(
-                    eval($case)? == $result,
-                    "the interpreted value matches the expected evaluation",
-                )
-            }
-        )*};
-    }
+    ($($name:ident, $case:expr => $result:expr;)*) => {$(
+      #[test]
+      fn $name() -> Result<(), EvaluationFailure> {
+        strict_test_support::ensure_eq(eval($case)?, $result, "the interpreted value matches the expected evaluation")
+          .map(drop).map_err(EvaluationFailure::Comparison)
+      }
+    )*};
+  }
 
   test! {
       accept_lit_bare, "1" => Some(1);

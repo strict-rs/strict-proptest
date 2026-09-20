@@ -13,25 +13,15 @@ proptest! {
     }
 }
 
-fn main() -> proptest::strict::TestResult {
+fn main() -> Result<(), impl std::fmt::Debug> {
     let config = Config {
         failure_persistence: None,
         ..Config::default()
     };
 
-    strict_test_support::ensure(
-        proptest!(&config, |(value in 0_u32..1)| {
-            let _observed = value;
-        })
-        .is_ok(),
-        "public closure form runs through the exported macro",
-    )?;
-
-    strict_test_support::ensure(
-        proptest!(&config, |(value: u8)| {
-            let _observed = value;
-        })
-        .is_ok(),
-        "public configured typed closure form runs through the exported macro",
-    )
+    let ranged = proptest!(&config, |(value in 0_u32..1)| { let _observed = value; });
+    let typed = proptest!(&config, |(value: u8)| { let _observed = value; });
+    strict_test_support::ensure_that((ranged, typed), "both public closure forms run through the exported macro", |(ranged, typed)| {
+        ranged.is_ok() && typed.is_ok()
+    }).map(drop)
 }

@@ -696,24 +696,29 @@ impl Default for Config {
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_all;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
-  use crate::test_runner::errors::TestCaseResult;
+  use crate::test_runner::EvaluationId;
+
+  /// Native configuration subjects retained by the equality checks.
+  type Check<S> = Result<(), Box<PredicateFailure<S>>>;
   use crate::test_runner::result_cache::ResultCacheKey;
 
   #[test]
-  fn config_partial_eq_default_equals_self_and_clone() -> Result<(), TestFailure> {
+  fn config_partial_eq_default_equals_self_and_clone() -> Check<(Config, Config)> {
     let default = Config::default();
-
-    ensure(default.eq(&default), "Config PartialEq is reflexive")?;
-    ensure(default == default.clone(), "default equals its clone")
+    let cloned = default.clone();
+    ensure_that((default, cloned), "Config equality is reflexive and preserves clones", |observed| {
+      observed.0.eq(&observed.0) && observed.0 == observed.1
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn config_partial_eq_result_cache_factory_uses_explicit_helper() -> Result<(), TestFailure> {
+  fn config_partial_eq_result_cache_factory_uses_explicit_helper() -> Check<(Config, Config, Config)> {
     struct TestResultCache;
 
     impl ResultCache for TestResultCache {
@@ -721,9 +726,9 @@ mod tests {
         1
       }
 
-      fn put(&mut self, _: u64, _: &TestCaseResult) {}
+      fn put(&mut self, _: u64, _: EvaluationId) {}
 
-      fn get(&self, _: u64) -> Option<&TestCaseResult> {
+      fn get(&self, _: u64) -> Option<EvaluationId> {
         None
       }
     }
@@ -742,17 +747,17 @@ mod tests {
       ..default.clone()
     };
 
-    ensure_all(&[
-      (
-        result_cache_eq(default.result_cache, same_factory.result_cache),
-        "the same factory pointer compares equal",
-      ),
-      (default == same_factory, "configs sharing a factory are equal"),
-      (
-        !result_cache_eq(default.result_cache, different_factory.result_cache),
-        "a different factory pointer compares unequal",
-      ),
-      (default != different_factory, "configs with different factories are unequal"),
-    ])
+    ensure_that(
+      (default, same_factory, different_factory),
+      "factory identity controls config equality",
+      |observed| {
+        result_cache_eq(observed.0.result_cache, observed.1.result_cache)
+          && observed.0 == observed.1
+          && !result_cache_eq(observed.0.result_cache, observed.2.result_cache)
+          && observed.0 != observed.2
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

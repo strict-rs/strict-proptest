@@ -18,10 +18,14 @@ mod tests {
   use proptest::prelude::Arbitrary;
   use proptest::prelude::Strategy;
   use proptest::prelude::any;
-  use proptest::strict::TestResult;
   use proptest::strict::ensure_property;
+  use proptest::test_runner::PropertyResult;
   use proptest_derive::Arbitrary;
-  use strict_test_support::ensure;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
+
+  /// The generated value is retained on either assertion outcome.
+  type Checked<T> = PropertyResult<T, T, PredicateFailure<T>>;
 
   fn make_strategy(start: usize) -> impl Strategy<Value = usize> {
     (start..100).prop_map(|x| x.saturating_mul(2))
@@ -67,51 +71,50 @@ mod tests {
     },
   }
 
-  const fn ensure_consistency(start: usize, produced: usize) -> TestResult {
-    ensure(
-      produced.is_multiple_of(2) && produced < 200 && produced >= start.saturating_mul(2),
-      "the custom strategy doubles a value from its start range",
-    )
+  const fn is_consistent(start: usize, produced: usize) -> bool {
+    produced.is_multiple_of(2) && produced < 200 && produced >= start.saturating_mul(2)
   }
 
   #[test]
-  fn t0_test() -> TestResult {
-    ensure_property(&any::<T0>(), "every strategy spelling drives its named struct field", |sample| {
-      ensure_consistency(0, sample.foo)?;
-      ensure_consistency(11, sample.bar)?;
-      ensure_consistency(88, sample.baz)
+  fn t0_test() -> Checked<T0> {
+    ensure_property(&any::<T0>(), "every strategy spelling drives its named struct field", |generated| {
+      ensure_that(generated, "each named field doubles a value from its start range", |sample| {
+        is_consistent(0, sample.foo) && is_consistent(11, sample.bar) && is_consistent(88, sample.baz)
+      })
     })
   }
 
   #[test]
-  fn t1_test() -> TestResult {
-    ensure_property(&any::<T1>(), "every strategy spelling drives its tuple field", |sample| {
-      ensure_consistency(22, sample.0)?;
-      ensure_consistency(33, sample.1)?;
-      ensure_consistency(88, sample.2)
+  fn t1_test() -> Checked<T1> {
+    ensure_property(&any::<T1>(), "every strategy spelling drives its tuple field", |generated| {
+      ensure_that(generated, "each tuple field doubles a value from its start range", |sample| {
+        is_consistent(22, sample.0) && is_consistent(33, sample.1) && is_consistent(88, sample.2)
+      })
     })
   }
 
   #[test]
-  fn t2_test() -> TestResult {
-    ensure_property(
-      &any::<T2>(),
-      "every strategy spelling drives its enum variant field",
-      |sample| match sample {
-        T2::V0(field) => ensure_consistency(44, field),
-        T2::V1 {
-          field,
-        } => ensure_consistency(55, field),
-        T2::V2(field) => ensure_consistency(66, field),
-        T2::V3 {
-          field,
-        } => ensure_consistency(77, field),
-        T2::V4(payload) => ensure_consistency(88, payload),
-        T2::V5 {
-          field,
-        } => ensure_consistency(88, field),
-      },
-    )
+  fn t2_test() -> Checked<T2> {
+    ensure_property(&any::<T2>(), "every strategy spelling drives its enum variant field", |generated| {
+      ensure_that(
+        generated,
+        "each variant doubles a value from its start range",
+        |sample| match *sample {
+          T2::V0(field) => is_consistent(44, field),
+          T2::V1 {
+            field,
+          } => is_consistent(55, field),
+          T2::V2(field) => is_consistent(66, field),
+          T2::V3 {
+            field,
+          } => is_consistent(77, field),
+          T2::V4(payload) => is_consistent(88, payload),
+          T2::V5 {
+            field,
+          } => is_consistent(88, field),
+        },
+      )
+    })
   }
 
   #[test]

@@ -3,19 +3,13 @@
 ### Breaking Changes
 
 - The minimum supported Rust version has been increased to 1.96.0.
-- `prop_state_machine!` now expands to ordinary `#[test]` functions that
-  return `proptest::strict::TestResult` and run the generated transition
-  sequence through `proptest::strict::ensure_property`, instead of expanding
-  to a `proptest!` block that panics on failure.
-- `StateMachineTest::apply` now returns
-  `Result<Self::SystemUnderTest, TestFailure>`, and `check_invariants`,
-  `teardown`, and `test_sequential` return `proptest::strict::TestResult`.
-  Post-condition and invariant failures propagate
-  `strict_test_support::TestFailure` values instead of panicking, so
-  implementations report failures with the `ensure*` helpers and `?`.
-- Because the generated tests run through the strict runner, they seed deterministically by default (`STRICT_TEST_SEED` selects the seed: unset or unparseable pins `0x5EED`, `random` opts into OS entropy, an integer pins that seed) and no longer write `proptest-regressions/` files; the shrunk minimal failing transition sequence is carried in the returned `TestFailure::PropertyFalsified` report instead.
+- `prop_state_machine!` returns `StateMachinePropertyResult<M>` through the strict runner. Falsifications carry the minimized native state/transition/counter tuple and matching concrete sequential failure. Default runs use deterministic `STRICT_TEST_SEED` behavior and disable regression-file persistence.
+- `StateMachineTest` declares `Failure`, `TransitionEvidence`, and `InvariantEvidence`. `apply` returns the next SUT with its evidence; `check_invariants` returns concrete invariant evidence. `test_sequential` preserves ordered observations, partial checks, driver-owned states, the failed hook, and the unattempted transition iterator.
+- The model still advances before SUT application, the seen counter increments before application, hook failures short-circuit, and teardown runs only after successful transitions. Consuming hooks own preservation of resources in their concrete failure types.
 
 ### New Additions
+
+- State-machine sequence strategies work with explicit `PropertyTransport` implementations that restore the shared seen-transition counter during child replay. Transported success evidence and minimized failures agree with in-process execution.
 
 - `SequentialValueTree` now implements `Debug`, rendering the shrink cursor (the transition count, the included/shrinkable bit-set counts, `max_ix`, and the current/last shrink operations) while omitting the non-`Debug` callback and generic value-tree fields.
 

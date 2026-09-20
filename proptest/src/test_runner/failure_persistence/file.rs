@@ -407,18 +407,22 @@ impl FileFailurePersistence {
 
 #[cfg(test)]
 mod tests {
+  use std::boxed::Box;
   use std::iter::once;
+  use std::string::FromUtf8Error;
   use std::sync::LazyLock;
 
+  use strict_test_support::CapturedBinary;
+  use strict_test_support::ComparisonFailure;
+  use strict_test_support::PredicateFailure;
   use strict_test_support::TempDir;
   use strict_test_support::TestFailure;
   use strict_test_support::capture_ignored_test;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_contains;
-  use strict_test_support::ensure_ok;
-  use strict_test_support::ensure_some;
+  use strict_test_support::ensure_eq;
+  use strict_test_support::ensure_that;
 
   use super::*;
+  use crate::test_runner::Seed;
 
   struct TestPaths {
     crate_root:     &'static Path,
@@ -446,229 +450,229 @@ mod tests {
     "test_runner::failure_persistence::file::tests::persistence_file_location_resolved_correctly_child";
   const TORN_LINES_CHILD: &str = "test_runner::failure_persistence::file::tests::torn_or_garbage_lines_are_skipped_on_read_child";
 
-  #[test]
-  fn persistence_file_location_resolved_correctly() -> Result<(), TestFailure> {
-    let captured = capture_ignored_test(PERSISTENCE_LOCATION_CHILD)?;
-    ensure(captured.status.success(), "the captured persistence-location child passes")?;
-    ensure_contains(
-      &captured.stderr,
-      "FileFailurePersistence::WithSource set, but no source file known",
-      "WithSource sourceless diagnostic is captured",
-    )?;
-    ensure_contains(
-      &captured.stderr,
-      "FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs",
-      "SourceParallel rootless diagnostic is captured",
-    )?;
-    ensure_contains(
-      &captured.stderr,
-      "FileFailurePersistence::SourceParallel set, but no source file known",
-      "SourceParallel sourceless diagnostic is captured",
-    )
+  /// Captured subprocess preparation, request, status, and complete output.
+  type Capture = Result<(CapturedBinary, Result<String, FromUtf8Error>), TestFailure>;
+  /// Run the real fixture and retain its native output and stderr decoding result.
+  fn capture_with_stderr(test_name: &'static str) -> Capture {
+    capture_ignored_test(test_name).map(|captured| {
+      let stderr = String::from_utf8(captured.output.stderr.clone());
+      (captured, stderr)
+    })
   }
+  /// Complete assertion subjects remain concrete and allocated on failure.
+  type Check<S> = Result<(), Box<PredicateFailure<S>>>;
+  /// Both source-resolution observations retain their owned or borrowed paths.
+  type AbsoluteSources = [Option<Cow<'static, Path>>; 2];
+
+  #[test]
+  fn persistence_file_location_resolved_correctly() -> Check<Capture> {
+    ensure_that(
+      capture_with_stderr(PERSISTENCE_LOCATION_CHILD),
+      "the child passes and emits each path-resolution warning",
+      |capture| {
+        let Ok(ref reached) = *capture else {
+          return false;
+        };
+        reached.0.output.status.success()
+          && reached.1.as_ref().is_ok_and(|stderr| {
+            [
+              "FileFailurePersistence::WithSource set, but no source file known",
+              "FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs",
+              "FileFailurePersistence::SourceParallel set, but no source file known",
+            ]
+            .iter()
+            .all(|message| stderr.contains(message))
+          })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  /// Resolved and expected persistence locations for every path strategy.
+  type Locations = Vec<Option<PathBuf>>;
 
   #[test]
   #[ignore = "captured by persistence_file_location_resolved_correctly"]
-  fn persistence_file_location_resolved_correctly_child() -> Result<(), TestFailure> {
-    // If off, there is never a file
-    ensure(Off.resolve(None).is_none(), "Off resolves no path")?;
-    ensure(
-      Off.resolve(Some(&TEST_PATHS.subdir_file)).is_none(),
-      "Off resolves no path even with a source file",
-    )?;
-
-    // For direct, we don't care about the source file, and instead always
-    // use whatever is in the config.
-    ensure(
-      Direct("bar.txt").resolve(None) == Some(Path::new("bar.txt").to_owned()),
-      "Direct uses the configured path without a source",
-    )?;
-    ensure(
-      Direct("bar.txt").resolve(Some(&TEST_PATHS.subdir_file)) == Some(Path::new("bar.txt").to_owned()),
-      "Direct ignores the source file",
-    )?;
-
-    // For WithSource, only the extension changes, but we get nothing if no
-    // source file was configured.
-    // Accounting for the way absolute paths work on Windows would be more
-    // complex, so for now don't test that case.
-    #[cfg(unix)]
-    ensure(
-      WithSource("ext").resolve(Some(Path::new("/foo/bar.rs"))) == Some(Path::new("/foo/bar.ext").to_owned()),
-      "WithSource swaps only the extension",
-    )?;
-    #[cfg(unix)]
-    ensure(
-      WithSource("ext").resolve(Some(Path::new("/"))) == Some(Path::new("/").to_owned()),
-      "WithSource leaves a filename-free root path unchanged",
-    )?;
-    ensure(
-      WithSource("ext").resolve(None).is_none(),
-      "WithSource resolves no path without a source",
-    )?;
-
-    // For SourceParallel, we make a sibling directory tree and change the
-    // extensions to .txt ...
-    ensure(
-      SourceParallel("sib").resolve(Some(&TEST_PATHS.src_file)) == Some(TEST_PATHS.crate_root.join("sib").join("foo.txt")),
-      "SourceParallel mirrors a src file into the sibling tree",
-    )?;
-    ensure(
-      SourceParallel("sib").resolve(Some(&TEST_PATHS.subdir_file))
-        == Some(TEST_PATHS.crate_root.join("sib").join("strategy").join("foo.txt")),
-      "SourceParallel preserves the source-relative subtree",
-    )?;
-    // ... but if we can't find lib.rs / main.rs, give up and set the
-    // extension instead ...
-    ensure(
-      SourceParallel("sib").resolve(Some(&TEST_PATHS.misplaced_file)) == Some(TEST_PATHS.crate_root.join("foo.sib")),
-      "SourceParallel falls back to WithSource without a crate root",
-    )?;
-    // ... and if no source is configured, we do nothing
-    ensure(
-      SourceParallel("ext").resolve(None).is_none(),
-      "SourceParallel resolves no path without a source",
+  fn persistence_file_location_resolved_correctly_child() -> Result<(), ComparisonFailure<Locations, Locations>> {
+    let actual = vec![
+      Off.resolve(None),
+      Off.resolve(Some(&TEST_PATHS.subdir_file)),
+      Direct("bar.txt").resolve(None),
+      Direct("bar.txt").resolve(Some(&TEST_PATHS.subdir_file)),
+      #[cfg(unix)]
+      WithSource("ext").resolve(Some(Path::new("/foo/bar.rs"))),
+      #[cfg(unix)]
+      WithSource("ext").resolve(Some(Path::new("/"))),
+      WithSource("ext").resolve(None),
+      SourceParallel("sib").resolve(Some(&TEST_PATHS.src_file)),
+      SourceParallel("sib").resolve(Some(&TEST_PATHS.subdir_file)),
+      SourceParallel("sib").resolve(Some(&TEST_PATHS.misplaced_file)),
+      SourceParallel("ext").resolve(None),
+    ];
+    let expected = vec![
+      None,
+      None,
+      Some(PathBuf::from("bar.txt")),
+      Some(PathBuf::from("bar.txt")),
+      #[cfg(unix)]
+      Some(PathBuf::from("/foo/bar.ext")),
+      #[cfg(unix)]
+      Some(PathBuf::from("/")),
+      None,
+      Some(TEST_PATHS.crate_root.join("sib/foo.txt")),
+      Some(TEST_PATHS.crate_root.join("sib/strategy/foo.txt")),
+      Some(TEST_PATHS.crate_root.join("foo.sib")),
+      None,
+    ];
+    ensure_eq(
+      actual,
+      expected,
+      "persistence locations preserve source-relative paths, fallback, and disabled behavior",
     )
+    .map(drop)
   }
 
   #[test]
-  fn relative_source_files_absolutified() -> Result<(), TestFailure> {
+  fn relative_source_files_absolutified() -> Result<(), ComparisonFailure<AbsoluteSources, AbsoluteSources>> {
     const TEST_RUNNER_PATH: &[&str] = &["src", "test_runner.rs"];
     static TEST_RUNNER_RELATIVE: LazyLock<PathBuf> = LazyLock::new(|| TEST_RUNNER_PATH.iter().collect());
     const CARGO_DIR: &str = env!("CARGO_MANIFEST_DIR");
-
     let expected = once(CARGO_DIR).chain(TEST_RUNNER_PATH.iter().copied()).collect::<PathBuf>();
-
-    // Running from crate root
-    let from_root = ensure_some(
-      absolutize_source_file_with_cwd(|| Ok(Path::new(CARGO_DIR).to_owned()), TEST_RUNNER_RELATIVE.as_path()),
-      "absolutizing from the crate root succeeds",
-    )?;
-    ensure(
-      expected.as_path() == from_root.as_ref(),
-      "the crate-root cwd absolutizes to the manifest path",
-    )?;
-
-    // Running from test subdirectory
-    let from_subdir = ensure_some(
+    let actual = [
+      absolutize_source_file_with_cwd(|| Ok(PathBuf::from(CARGO_DIR)), TEST_RUNNER_RELATIVE.as_path()),
       absolutize_source_file_with_cwd(|| Ok(Path::new(CARGO_DIR).join("target")), TEST_RUNNER_RELATIVE.as_path()),
-      "absolutizing from a subdirectory succeeds",
-    )?;
-    ensure(
-      expected.as_path() == from_subdir.as_ref(),
-      "a subdirectory cwd pops up to the manifest path",
+    ];
+    ensure_eq(
+      actual,
+      [Some(Cow::Owned(expected.clone())), Some(Cow::Owned(expected))],
+      "both crate-root and subdirectory working directories resolve the same source",
     )
+    .map(drop)
   }
 
-  /// Parse every seed line in the file at `path`, skipping header and
-  /// unparsable lines exactly as the load path does.
-  fn read_persisted_seeds(path: &Path) -> Result<Vec<PersistedSeed>, TestFailure> {
-    let contents = ensure_ok(fs::read_to_string(path), "the persistence file is readable")?;
-    Ok(
-      contents
+  /// Raw file contents and each native seed-line parse, including skipped lines.
+  type SeedRead = io::Result<(String, Vec<Option<PersistedSeed>>)>;
+
+  /// Read the persisted text and retain the parse outcome of every line.
+  fn read_persisted_seeds(path: &Path) -> SeedRead {
+    fs::read_to_string(path).map(|contents| {
+      let seeds = contents
         .lines()
         .enumerate()
-        .filter_map(|(lineno, line)| parse_seed_line(line, path, lineno))
-        .collect(),
+        .map(|(lineno, line)| parse_seed_line(line, path, lineno))
+        .collect();
+      (contents, seeds)
+    })
+  }
+
+  /// Two distinct seeds whose persisted ordering can be observed directly.
+  const FIRST_SEED: PersistedSeed = PersistedSeed(Seed::XorShift([1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0]));
+  /// A different seed for the second append.
+  const SECOND_SEED: PersistedSeed = PersistedSeed(Seed::XorShift([5, 0, 0, 0, 6, 0, 0, 0, 7, 0, 0, 0, 8, 0, 0, 0]));
+
+  #[test]
+  fn new_file_gets_exactly_one_header_and_appends_stay_headerless() -> Result<(), impl Debug> {
+    let subject = TempDir::new("persistence-header").map(|dir| {
+      let path = dir.child("regressions.txt");
+      let created = write_seed_data_to_file(&path, seed_line(&FIRST_SEED, &"first").as_bytes());
+      let appended = write_seed_data_to_file(&path, seed_line(&SECOND_SEED, &"second").as_bytes());
+      let read = read_persisted_seeds(&path);
+      (dir, path, created, appended, read)
+    });
+    ensure_that(
+      subject,
+      "the first save writes one header and later saves append ordered seeds",
+      |observed| {
+        let Ok(ref reached) = *observed else {
+          return false;
+        };
+        matches!(reached.2, Ok(true))
+          && matches!(reached.3, Ok(false))
+          && reached.4.as_ref().is_ok_and(|decoded| {
+            decoded.0.matches("# Seeds for failure cases").count() == 1 && decoded.1.iter().flatten().eq([&FIRST_SEED, &SECOND_SEED])
+          })
+      },
     )
-  }
-
-  fn sample_seed(wire: &'static str) -> Result<PersistedSeed, TestFailure> {
-    ensure_some(wire.parse::<PersistedSeed>().ok(), "the sample wire seed parses")
-  }
-
-  #[test]
-  fn new_file_gets_exactly_one_header_and_appends_stay_headerless() -> Result<(), TestFailure> {
-    let dir = TempDir::new("persistence-header")?;
-    let path = dir.child("regressions.txt");
-
-    let first = sample_seed("xs 1 2 3 4")?;
-    let second = sample_seed("xs 5 6 7 8")?;
-
-    let created = ensure_ok(
-      write_seed_data_to_file(&path, seed_line(&first, &"first").as_bytes()),
-      "the first save succeeds",
-    )?;
-    ensure(created, "the first save reports the file as new")?;
-
-    let appended = ensure_ok(
-      write_seed_data_to_file(&path, seed_line(&second, &"second").as_bytes()),
-      "the second save succeeds",
-    )?;
-    ensure(!appended, "the second save appends to the existing file")?;
-
-    let contents = ensure_ok(fs::read_to_string(&path), "the persistence file is readable")?;
-    ensure(
-      contents.matches("# Seeds for failure cases").count() == 1,
-      "the header is written exactly once",
-    )?;
-
-    let seeds = read_persisted_seeds(&path)?;
-    ensure(seeds == vec![first, second], "both persisted seeds read back in order")
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn preexisting_file_is_never_reheadered() -> Result<(), TestFailure> {
-    let dir = TempDir::new("persistence-existing")?;
-    let path = dir.child("regressions.txt");
-    ensure_ok(fs::write(&path, ""), "pre-creating the persistence file succeeds")?;
-
-    let seed = sample_seed("xs 9 10 11 12")?;
-    let created = ensure_ok(
-      write_seed_data_to_file(&path, seed_line(&seed, &"value").as_bytes()),
-      "saving into the pre-existing file succeeds",
-    )?;
-    ensure(!created, "a pre-existing file is not treated as new")?;
-
-    let contents = ensure_ok(fs::read_to_string(&path), "the persistence file is readable")?;
-    ensure(
-      !contents.contains("# Seeds for failure cases"),
-      "no header is added to a file this save did not create",
-    )?;
-    let seeds = read_persisted_seeds(&path)?;
-    ensure(seeds == vec![seed], "the appended seed reads back")
+  fn preexisting_file_is_never_reheadered() -> Result<(), impl Debug> {
+    let subject = TempDir::new("persistence-existing").map(|dir| {
+      let path = dir.child("regressions.txt");
+      let precreated = fs::write(&path, "");
+      let appended = write_seed_data_to_file(&path, seed_line(&FIRST_SEED, &"value").as_bytes());
+      let read = read_persisted_seeds(&path);
+      (dir, path, precreated, appended, read)
+    });
+    ensure_that(subject, "appending to a pre-existing file does not add a header", |observed| {
+      let Ok(ref reached) = *observed else {
+        return false;
+      };
+      reached.2.is_ok()
+        && matches!(reached.3, Ok(false))
+        && reached
+          .4
+          .as_ref()
+          .is_ok_and(|decoded| !decoded.0.contains("# Seeds for failure cases") && decoded.1.iter().flatten().eq([&FIRST_SEED]))
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn torn_or_garbage_lines_are_skipped_on_read() -> Result<(), TestFailure> {
-    let captured = capture_ignored_test(TORN_LINES_CHILD)?;
-    ensure(captured.status.success(), "the captured torn-line child passes")?;
-    ensure_contains(
-      &captured.stderr,
-      "unparsable line, ignoring",
-      "the unparsable-line diagnostic is captured",
+  fn torn_or_garbage_lines_are_skipped_on_read() -> Check<Capture> {
+    ensure_that(
+      capture_with_stderr(TORN_LINES_CHILD),
+      "the child passes and emits the unparsable-line warning",
+      |capture| {
+        let Ok(ref reached) = *capture else {
+          return false;
+        };
+        reached.0.output.status.success()
+          && reached
+            .1
+            .as_ref()
+            .is_ok_and(|stderr| stderr.contains("unparsable line, ignoring"))
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
   #[ignore = "captured by torn_or_garbage_lines_are_skipped_on_read"]
-  fn torn_or_garbage_lines_are_skipped_on_read_child() -> Result<(), TestFailure> {
-    let dir = TempDir::new("persistence-torn")?;
-    let path = dir.child("regressions.txt");
-
-    let seed = sample_seed("xs 13 14 15 16")?;
-    let created = ensure_ok(
-      write_seed_data_to_file(&path, seed_line(&seed, &"value").as_bytes()),
-      "the initial save succeeds",
-    )?;
-    ensure(created, "the initial save creates the file")?;
-    // Simulate a torn concurrent append: a trailing half-record with
-    // no terminating newline.
-    ensure_ok(
-      fs::OpenOptions::new()
+  fn torn_or_garbage_lines_are_skipped_on_read_child() -> Result<(), impl Debug> {
+    let subject = TempDir::new("persistence-torn").map(|dir| {
+      let path = dir.child("regressions.txt");
+      let created = write_seed_data_to_file(&path, seed_line(&FIRST_SEED, &"value").as_bytes());
+      let torn = fs::OpenOptions::new()
         .append(true)
         .open(&path)
-        .and_then(|mut f| f.write_all(b"cc deadbe")),
-      "appending the torn suffix succeeds",
-    )?;
-
-    let seeds = read_persisted_seeds(&path)?;
-    ensure(seeds == vec![seed.clone()], "the valid seed survives and the torn line is skipped")?;
-
-    let flattened = seed_line(&seed, &"multi\nline\rdebug");
-    ensure(
-      !flattened.trim_end_matches('\n').contains(['\n', '\r']),
-      "seed_line flattens newlines so a record stays one line",
+        .and_then(|mut file| file.write_all(b"cc deadbe"));
+      let read = read_persisted_seeds(&path);
+      let flattened = seed_line(&FIRST_SEED, &"multi\nline\rdebug");
+      (dir, path, created, torn, read, flattened)
+    });
+    ensure_that(
+      subject,
+      "valid records survive a torn suffix and debug newlines stay inside one record",
+      |observed| {
+        let Ok(ref reached) = *observed else {
+          return false;
+        };
+        matches!(reached.2, Ok(true))
+          && reached.3.is_ok()
+          && reached
+            .4
+            .as_ref()
+            .is_ok_and(|decoded| decoded.1.iter().flatten().eq([&FIRST_SEED]))
+          && !reached.5.trim_end_matches('\n').contains(['\n', '\r'])
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

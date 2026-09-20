@@ -3,111 +3,76 @@ use quote::quote;
 use syn::Block;
 use syn::Ident;
 use syn::Pat;
-use syn::parse_quote;
-use syn::parse2;
+use syn::Type;
 
-use super::field_name_for_arg;
-use super::struct_name;
 use crate::property_test::options::Options;
 use crate::property_test::utils::Argument;
 
-/// Generate the new test body by putting the struct and arbitrary impl at the
-/// start, then handing the labeled strategy to the strict runner: the final
-/// expression is the `<proptest>::strict::ensure_property` (or
-/// `ensure_property_with_config`) call, whose verdict is the wrapper's return
-/// value
+/// Compose the argument strategy and preserve the annotated callback's native result.
 #[allow(
   clippy::single_call_fn,
-  reason = "the strict-runner block wrapping the original property body"
+  reason = "isolate runtime body construction from the wrapper's type projection and item attributes"
 )]
-pub(super) fn body(block: &Block, args: &[Argument], struct_and_impl: &TokenStream, fn_name: &Ident, options: &Options) -> Block {
-  let struct_name = struct_name(fn_name);
-
-  // convert each arg to `field0: x`
-  let struct_fields = args.iter().enumerate().map(|(index, arg)| {
-    let pat = arg.pat_ty.pat.as_ref();
-    let field_name = field_name_for_arg(arg, index);
-
-    // If the pattern is an ident, we know that the field name is equal to the pattern name.
-    // This means we need to avoid generating: `x: x`, which would trigger a lint suggesting
-    // shorthand struct initialization.
-
-    // We need to make sure to handle any mutability modifiers here, i.e. if the user wrote
-    // `mut x: i32`, we have to generate `mut x`, not `x: mut x`
-    //
-    // See https://github.com/proptest-rs/proptest/issues/601
-    if let Pat::Ident(ref i) = *pat {
-      i.mutability
-        .map_or_else(|| quote!(#field_name,), |mutability| quote!(#mutability #field_name,))
-    } else {
-      quote!(#field_name: #pat,)
-    }
-  });
-
-  // e.g. FooArgs { field0: x, field1: (y, z), }
-  let struct_pattern = quote! {
-      #struct_name { #(#struct_fields)* }
-  };
-
+pub(super) fn body(block: &Block, args: &[Argument], result: &Type, name: &Ident, options: &Options) -> TokenStream {
   let proptest = options.true_proptest_path();
-
-  let context = quote! {
-      concat!(module_path!(), "::", stringify!(#fn_name))
+  let strategies = args.iter().map(|arg| {
+    let ty = &arg.pat_ty.ty;
+    arg
+      .strategy
+      .as_ref()
+      .map_or_else(|| quote!(#proptest::prelude::any::<#ty>()), |strategy| quote!(#strategy))
+  });
+  let strategy = if args.is_empty() {
+    quote!(#proptest::prelude::any::<()>())
+  } else {
+    quote!((#(#strategies,)*))
   };
-
-  let property = quote! {
-      |#proptest::sugar::NamedArguments(_, #struct_pattern)| #block
-  };
-
-  // With an explicit `config = <expr>`, `test_name`/`source_file` are still
-  // forced over the caller's expression so failure reports keep naming the
-  // annotated test (matching the pre-strict runner glue); the config is then
-  // used verbatim by the strict runner. Without one, the strict defaults
-  // apply (deterministic `STRICT_TEST_SEED` seeding, persistence disabled).
-  let default_ensure_property_tokens = || {
-    quote! {
-        #proptest::strict::ensure_property(&strategy, #context, #property)
-    }
-  };
-  let configured_ensure_property_tokens = |config| {
-    quote! {
-        #proptest::strict::ensure_property_with_config(
-            &strategy,
-            #context,
-            #proptest::test_runner::Config {
-                test_name: Some(concat!(module_path!(), "::", stringify!(#fn_name))),
-                source_file: Some(file!()),
-                ..#config
-            },
-            #property,
-        )
-    }
-  };
-  let run = options
+  let patterns = args.iter().map(|arg| &arg.pat_ty.pat);
+  let types = args.iter().map(|arg| &arg.pat_ty.ty);
+  let labels: Vec<_> = args
+    .iter()
+    .map(|arg| {
+      if let Pat::Ident(ref pattern) = *arg.pat_ty.pat {
+        let ident = &pattern.ident;
+        quote!(stringify!(#ident))
+      } else {
+        let pattern = &arg.pat_ty.pat;
+        quote!(stringify!(#pattern))
+      }
+    })
+    .collect();
+  let context = quote!(concat!(module_path!(), "::", stringify!(#name)));
+  let config = options
     .config
     .as_ref()
-    .map_or_else(default_ensure_property_tokens, configured_ensure_property_tokens);
-
-  let tokens = quote!( {
-
-        #struct_and_impl
-
-        let strategy = #proptest::strategy::Strategy::prop_map(
-            #proptest::prelude::any::<#struct_name>(),
-            |values| #proptest::sugar::NamedArguments(stringify!(#struct_name), values),
-        );
-
-        #run
-    } );
-
-  // Every accumulated diagnostic is emitted as a full `compile_error!(...);`
-  // statement, so this block always parses; the fallback exists so any
-  // future emission bug surfaces as a compile error at the use site rather
-  // than a proc-macro panic.
-  parse2(tokens).unwrap_or_else(|error| {
-    let message = error.to_string();
-    parse_quote!({
-      ::core::compile_error!(#message);
-    })
+    .map_or_else(|| quote!(#proptest::strict::strict_default_config()), |config| quote!(#config));
+  let run = options.transport.as_ref().map_or_else(
+    || quote!(#proptest::strict::ensure_property_with_config(&strategy, #context, config, property)),
+    |transport| {
+      let constructor = &transport.value;
+      let ty = &transport.ty;
+      quote! {
+        let transport: #ty = #constructor;
+        #proptest::strict::ensure_property_with_transport(&strategy, #context, config, transport, property)
+      }
+    },
+  );
+  quote!({
+    let strategy = #strategy;
+    let config = #proptest::test_runner::Config {
+      test_name: Some(#context),
+      source_file: Some(file!()),
+      ..#config
+    };
+    let property = |input| {
+      let evaluate = |(#(#patterns,)*): (#(#types,)*)| -> #result #block;
+      #proptest::test_runner::PropertyReturn::into_result(evaluate(input))
+    };
+    let mut outcome = { #run };
+    match &mut outcome {
+      Ok(run) => run.argument_labels = &[#(#labels,)*],
+      Err(failure) => failure.run.argument_labels = &[#(#labels,)*],
+    }
+    outcome
   })
 }

@@ -7,58 +7,86 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Consumer-side runtime coverage for the `#[property_test]` attribute
-//! macro: the generated wrappers run through the strict runner and hand
-//! back `proptest::strict::TestResult` instead of panicking.
+//! Runtime contracts of typed attribute-generated property wrappers.
 
 #![cfg(feature = "attr-macro")]
 
 #[cfg(test)]
 mod tests {
-  use proptest::strict::TestResult;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_contains;
+  use proptest::strategy::Just;
+  use proptest::strict::strict_default_config;
+  use proptest::test_runner::Config;
+  use proptest::test_runner::EvaluationOutcome;
+  use proptest::test_runner::PropertyCause;
+  use proptest::test_runner::PropertyResult;
+  use strict_test_support::ComparisonFailure;
+  use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_some;
+  use strict_test_support::ensure_that;
 
-  /// Regression for <https://github.com/proptest-rs/proptest/issues/601>
-  ///
-  /// `mut` must survive both on a plain ident argument and on an ident
-  /// nested inside a tuple-destructuring pattern when the macro rewrites
-  /// the signature into a generated params struct.
+  /// A result alias must preserve both native comparison subjects.
+  type Comparison = Result<(i32, i32), ComparisonFailure<i32, i32>>;
+
+  /// Regression for issue 601: plain and destructured mutable bindings survive.
   #[proptest::property_test]
-  fn attr_macro_does_not_clobber_mutability(mut x: i32, (mut y, _z): (i32, i32)) -> TestResult {
+  fn attr_macro_does_not_clobber_mutability(mut x: i32, (mut y, _z): (i32, i32)) -> Comparison {
     x = x.saturating_sub(x);
     y = y.saturating_sub(y);
-    ensure_eq(&x, &y, "reassigned mut bindings agree after zeroing")
+    ensure_eq(x, y, "reassigned mut bindings agree after zeroing")
   }
 
-  /// Falsifying fixture for the negative-polarity check below. `#[ignore]`
-  /// keeps the harness from running it as a failing test; the wrapper is
-  /// still an ordinary `fn() -> TestResult`, so the test after it calls it
-  /// directly.
-  #[ignore = "falsifying fixture: exercised by the test below via a direct call"]
+  /// The harness skips this intentionally falsifying fixture; its wrapper is callable.
+  #[ignore = "falsifying fixture exercised through its returned typed outcome"]
   #[proptest::property_test]
-  fn falsifying_wrapper_surfaces_test_failure(x: i32) -> TestResult {
-    ensure(x < 1, "input stays below one")
+  fn falsifying_wrapper_surfaces_test_failure(x: i32) -> Result<i32, PredicateFailure<i32>> {
+    ensure_that(x, "input stays below one", |observed| *observed < 1)
   }
 
-  /// The generated wrapper propagates a falsified property as an `Err`
-  /// carrying the shrunk minimal counterexample — the call returning at all
-  /// proves no panic path is involved.
+  /// The native counterexample has a concrete tuple type visible to the consumer.
+  type Falsification = PropertyResult<(i32,), i32, PredicateFailure<i32>>;
+
   #[test]
-  fn generated_wrapper_returns_test_failure_instead_of_panicking() -> TestResult {
-    let failure = ensure_some(
-      falsifying_wrapper_surfaces_test_failure().err(),
-      "a falsifying property must surface as Err",
-    )?;
-    let rendered = failure.to_string();
-    ensure_contains(&rendered, "property falsified", "the verdict names the falsified family")?;
-    ensure_contains(
-      &rendered,
-      "minimal failing input:",
-      "the verdict carries the engine's shrink report",
-    )?;
-    ensure_contains(&rendered, "x: 1", "shrinking converges to the minimal counterexample")
+  fn generated_wrapper_returns_test_failure_instead_of_panicking() -> Result<(), PredicateFailure<Falsification>> {
+    ensure_that(
+      falsifying_wrapper_surfaces_test_failure(),
+      "the original failure and minimal argument tuple agree",
+      |outcome| {
+        outcome.as_ref().is_err_and(|report| {
+          report.run.argument_labels == ["x"]
+            && matches!(report.cause, PropertyCause::Falsified { counterexample: (1,), ref failure, .. } if failure.subject == 1)
+        })
+      },
+    )
+    .map(drop)
+  }
+
+  #[proptest::property_test(config = Config { cases: 3, ..strict_default_config() })]
+  fn custom_strategy_returns_owned_subject(
+    #[strategy = Just(String::from("owned"))] text: String,
+  ) -> Result<String, PredicateFailure<String>> {
+    ensure_that(text, "custom strategy produces owned text", |observed| observed == "owned")
+  }
+
+  /// Owned returns and their complete property execution evidence.
+  type OwnedRun = PropertyResult<(String,), String, PredicateFailure<String>>;
+
+  #[test]
+  fn generated_wrapper_retains_every_success() -> Result<(), PredicateFailure<OwnedRun>> {
+    ensure_that(
+      custom_strategy_returns_owned_subject(),
+      "configured case count and owned successes reach callers",
+      |outcome| {
+        outcome.as_ref().is_ok_and(|run| {
+          run.statistics.successes == 3
+            && run.evaluations.len() == 3
+            && run.argument_labels == ["text"]
+            && run
+              .evaluations
+              .iter()
+              .all(|evaluation| matches!(&evaluation.outcome, EvaluationOutcome::Returned(Ok(subject)) if subject == "owned"))
+        })
+      },
+    )
+    .map(drop)
   }
 }

@@ -225,17 +225,21 @@ pub(crate) fn static_map<S: Strategy, O: fmt::Debug>(strat: S, fun: StaticMapFn<
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_some;
+  #[cfg(feature = "strict-test")]
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
+  use crate::std_facade::Vec;
+  use crate::strategy::traits::trace_simplifications;
   #[cfg(feature = "strict-test")]
   use crate::strict::ensure_property;
+  #[cfg(feature = "strict-test")]
+  use crate::test_runner::PropertyResult;
   use crate::test_runner::test_runner_without_persistence;
 
   #[test]
-  fn test_static_filter() -> Result<(), TestFailure> {
+  fn test_static_filter() -> Result<(), impl fmt::Debug> {
     #[derive(Clone, Copy, Debug)]
     struct MyFilter;
     impl FilterFn<i32> for MyFilter {
@@ -246,36 +250,43 @@ mod test {
 
     let input = Filter::new(0..256_i32, "%3".into(), MyFilter);
 
-    for _ in 0..256 {
-      let mut runner = test_runner_without_persistence();
-      let mut case = ensure_some(input.new_tree(&mut runner).ok(), "static filter generates a value tree")?;
-
-      ensure(0 == case.current().rem_euclid(3), "the generated value satisfies the filter")?;
-
-      while case.simplify() {
-        ensure(0 == case.current().rem_euclid(3), "every simplified value satisfies the filter")?;
-      }
-      ensure(0 == case.current().rem_euclid(3), "the fully simplified value satisfies the filter")?;
-    }
-    Ok(())
+    let walks: Vec<_> = (0..256)
+      .map(|_| {
+        input
+          .new_tree(&mut test_runner_without_persistence())
+          .map(trace_simplifications)
+      })
+      .collect();
+    ensure_that(
+      walks,
+      "the static filter preserves every generated, intermediate, and final survivor",
+      |observed| {
+        observed.iter().all(|walk| {
+          walk
+            .as_ref()
+            .is_ok_and(|reached| reached.1.iter().all(|value| value.rem_euclid(3) == 0))
+        })
+      },
+    )
+    .map(drop)
   }
 
   #[cfg(feature = "strict-test")]
   #[test]
-  fn test_static_map() -> Result<(), TestFailure> {
+  fn test_static_map() -> PropertyResult<i32, i32, PredicateFailure<i32>> {
     #[derive(Clone, Copy, Debug)]
     struct MyMap;
     impl MapFn<i32> for MyMap {
       type Output = i32;
       fn apply(&self, element: i32) -> i32 {
-        element * 2
+        element.saturating_mul(2)
       }
     }
 
     let input = Map::new(0..10_i32, MyMap);
 
     ensure_property(&input, "the static map applies its function to every value", |mapped| {
-      ensure(0 == mapped.rem_euclid(2), "the mapped value is even")
+      ensure_that(mapped, "the mapped value is even", |subject| subject.rem_euclid(2) == 0)
     })
   }
 }

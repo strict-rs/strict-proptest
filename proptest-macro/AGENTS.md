@@ -2,22 +2,23 @@
 
 This file provides guidance to coding agents when working with code in this repository.
 
-Scope: `proptest-macro/` — the `proptest-macro` procedural-macro crate (`[lib] proc-macro = true`, v0.5.0) providing the `#[property_test]` attribute macro: it rewrites an annotated fn into a strict property test whose generated wrapper returns `proptest::strict::TestResult` and runs through `proptest::strict::ensure_property`, with per-argument `#[strategy = <expr>]` overrides for the default `Arbitrary` strategy. A `()` (or literal `-> ()`) property body is a compile error — bodies return `Result<(), TestFailure>`. For shared conventions see the workspace-root `AGENTS.md`.
+Scope: `proptest-macro/` — the `proptest-macro` procedural-macro crate (`[lib] proc-macro = true`) providing the `#[property_test]` attribute macro. The annotated body returns `Result<A, E>` or an alias; the generated wrapper returns `proptest::test_runner::PropertyResult<(ArgumentTypes, ...), A, E, TransportError>`. Per-argument `#[strategy = <expr>]` overrides replace the default `Arbitrary` strategies. A missing return type or literal `-> ()` is a compile error. For shared conventions see the workspace-root `AGENTS.md`.
 
 ## Where the code is
 
-`src/lib.rs` is a thin `#[proc_macro_attribute] pub fn property_test(attr, item)` shim: it only `.into()`-converts the `proc_macro::TokenStream` arguments to `proc_macro2` (and the result back) before delegating to the `property_test` module. Its rustdoc — the `# Example`, the optional `config = …` / `proptest_path = ::path::to::proptest` attributes, and the `#[strategy = <expr>]` example — is the **user-facing semver contract**, so behavioral documentation belongs there. The per-test struct the macro synthesizes (its name, fields, even whether it exists) is explicitly an implementation detail that can change without a major bump, so never let docs or callers depend on it.
+`src/lib.rs` is a thin `#[proc_macro_attribute] pub fn property_test(attr, item)` shim: it converts `proc_macro::TokenStream` to and from `proc_macro2` and delegates to the `property_test` module. Its rustdoc is the user-facing semver contract, including `config = …`, `proptest_path = ::path::to::proptest`, `transport = CodecType => codec_expression`, and `#[strategy = <expr>]`. Counterexamples are concrete argument tuples in declaration order, with diagnostic labels retained separately in the run.
 
-Everything else lives under `src/property_test/` (its own `AGENTS.md`): a parse / validate / options front end, then `codegen/` (also its own `AGENTS.md`) that rewrites the annotated fn into a params struct, an `Arbitrary` impl, and a tail call into the strict runner (`<proptest>::strict::ensure_property`, or `ensure_property_with_config` when `config = …` is given).
+Everything else lives under `src/property_test/` (its own `AGENTS.md`): a parse / validate / options front end, then `codegen/` (also its own `AGENTS.md`) that builds a tuple strategy, a typed callback preserving the original patterns and return type, and a strict runner invocation. Explicit transport selects `ensure_property_with_transport`; other wrappers use `ensure_property_with_config` with caller configuration or strict defaults.
 
 ## Deps & testing
 
-- Built on `syn` (feature `full`), `quote`, `proc-macro2`, and `convert_case`.
-- Tested with **`insta` snapshot tests** (dev-deps `insta` + `prettyplease`, the latter pretty-printing the generated code into readable Rust for the snapshot, plus `strict-test-support` for the `ensure*` vocabulary the unit tests return through):
+- Built on `syn` (feature `full`), `quote`, and `proc-macro2`.
+- Expansion tests use `prettyplease` and `strict_test_support::ensure_snapshot`, with committed artifacts under `tests/snapshots/`. The `proptest` dev-dependency executes the public macro doctests:
 
   ```sh
   cargo test -p proptest-macro
-  cargo insta review     # review/accept changed snapshots
+  SNAPSHOTS=overwrite cargo test -p proptest-macro
+  git diff -- proptest-macro/tests/snapshots
   ```
 
 When you change generated code, expect snapshots to change — review them deliberately rather than blindly accepting. For the full feature/test matrix, defer to the workspace-root `AGENTS.md`.

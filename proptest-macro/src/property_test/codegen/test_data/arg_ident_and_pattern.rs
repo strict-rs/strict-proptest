@@ -1,6 +1,4 @@
-// Make sure that code for choosing names for the generated struct is robust against mixtures of
-// ident and non-ident parameter patterns
-
+// Every argument keeps its original pattern in the typed callback.
 fn foo(
     a: i32,
     (b, c): (i32, i32),
@@ -9,6 +7,6 @@ fn foo(
     [f, g]: [i32; 2],
     h: i32,
     Point { x, y }: Point,
-) -> ::proptest::strict::TestResult {
-    Ok(())
+) -> CheckResult {
+    check((a, b, c, d, e, f, g, h, x, y))
 }

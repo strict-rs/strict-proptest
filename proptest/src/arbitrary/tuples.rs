@@ -45,12 +45,13 @@ impl_tuple!(T0 p0, T1 p1, T2 p2, T3 p3, T4 p4, T5 p5, T6 p6, T7 p7, T8 p8, T9 p9
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_some;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
+  use crate::arbitrary::StrategyFor;
   use crate::strategy::Just;
+  use crate::strategy::NewTree;
   use crate::strategy::Strategy as _;
   use crate::strategy::ValueTree as _;
   use crate::test_runner::TestRunner;
@@ -71,36 +72,34 @@ mod test {
     }
   }
 
+  /// Native value trees for the single, ordered, and reversed parameter products.
+  type ParameterTrees = (
+    NewTree<StrategyFor<(ParamEcho,)>>,
+    NewTree<StrategyFor<(ParamEcho, ParamEcho)>>,
+    NewTree<StrategyFor<(ParamEcho, ParamEcho)>>,
+  );
+
   #[test]
-  fn tuple_parameters_preserve_product_order() -> Result<(), TestFailure> {
+  fn tuple_parameters_preserve_product_order() -> Result<(), PredicateFailure<ParameterTrees>> {
     let mut runner = TestRunner::deterministic();
-
-    let one = ensure_some(
-      any_with::<(ParamEcho,)>(product_pack![7]).new_tree(&mut runner).ok(),
-      "single-element tuple strategy generates a value tree",
-    )?
-    .current();
-    ensure(one == (ParamEcho(7),), "a single tuple element receives its parameter")?;
-
-    let two = ensure_some(
-      any_with::<(ParamEcho, ParamEcho)>(product_pack![1, 2])
-        .new_tree(&mut runner)
-        .ok(),
-      "two-element tuple strategy generates a value tree",
-    )?
-    .current();
-    ensure(two == (ParamEcho(1), ParamEcho(2)), "tuple parameters stay in field order")?;
-
-    let reversed = ensure_some(
-      any_with::<(ParamEcho, ParamEcho)>(product_pack![2, 1])
-        .new_tree(&mut runner)
-        .ok(),
-      "reversed tuple strategy generates a value tree",
-    )?
-    .current();
-    ensure(
-      reversed != (ParamEcho(1), ParamEcho(2)),
-      "reversing parameters changes the generated tuple",
+    let one = any_with::<(ParamEcho,)>(product_pack![7]).new_tree(&mut runner);
+    let two = any_with::<(ParamEcho, ParamEcho)>(product_pack![1, 2]).new_tree(&mut runner);
+    let reversed = any_with::<(ParamEcho, ParamEcho)>(product_pack![2, 1]).new_tree(&mut runner);
+    ensure_that(
+      (one, two, reversed),
+      "tuple parameters preserve field order and reversing them reverses the fields",
+      |observed| {
+        observed.0.as_ref().is_ok_and(|tree| tree.current() == (ParamEcho(7),))
+          && observed
+            .1
+            .as_ref()
+            .is_ok_and(|tree| tree.current() == (ParamEcho(1), ParamEcho(2)))
+          && observed
+            .2
+            .as_ref()
+            .is_ok_and(|tree| tree.current() == (ParamEcho(2), ParamEcho(1)))
+      },
     )
+    .map(drop)
   }
 }

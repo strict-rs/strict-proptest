@@ -669,15 +669,77 @@ impl Selector {
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_some;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
   use crate::arbitrary::any;
   use crate::std_facade::BTreeSet;
+  use crate::std_facade::Box;
   use crate::std_facade::vec;
+
+  /// Complete concrete assertion subjects stay allocated on failure.
+  type Check<S> = Result<(), Box<PredicateFailure<S>>>;
+
+  /// Native values produced by sampling, retaining each generation error.
+  type Samples<T> = Vec<Result<T, Reason>>;
+  /// Complete fallible construction and generation outcomes for valid inputs.
+  type ValidConstruction = (
+    Result<(Subsequence<u8>, NewTree<Subsequence<u8>>), SubsequenceError>,
+    Result<(Select<u8>, NewTree<Select<u8>>), EmptySelection>,
+    Index,
+    Option<usize>,
+    Option<usize>,
+  );
+  /// Distinct invalid construction outcomes and the zero-size index result.
+  type InvalidConstruction = (
+    Result<Subsequence<u8>, SubsequenceError>,
+    Result<Subsequence<u8>, SubsequenceError>,
+    Result<Select<u8>, EmptySelection>,
+    Option<usize>,
+  );
+  /// A reached selector tree and every native selection made while shrinking.
+  type SelectionWalks<T, V> = Vec<Result<SelectionWalk<T, V>, Reason>>;
+  /// A selection tree and every native value and selection it produced.
+  type SelectionWalk<T, V> = (T, Vec<(V, Option<&'static str>)>);
+
+  /// Exercise selection through every simplification while retaining the tree.
+  fn selection_walk<T: ValueTree>(mut tree: T, select_value: impl Fn(&T::Value) -> Option<&'static str>) -> SelectionWalk<T, T::Value> {
+    let mut observations = Vec::new();
+    loop {
+      let current = tree.current();
+      let selected = select_value(&current);
+      observations.push((current, selected));
+      if !tree.simplify() {
+        break;
+      }
+    }
+    (tree, observations)
+  }
+
+  /// Check selection coverage and the minimal selected element from native walks.
+  fn selection_contract<T, V>(walks: &SelectionWalks<T, V>, first: &str, mut expected: impl Iterator<Item = &'static str>) -> bool {
+    walks.iter().all(|walk| {
+      let Ok(ref reached) = *walk else {
+        return false;
+      };
+      reached.1.iter().all(|step| step.1.is_some()) && reached.1.last().is_some_and(|step| step.1 == Some(first))
+    }) && expected.all(|value| {
+      walks.iter().any(|walk| {
+        walk
+          .as_ref()
+          .is_ok_and(|reached| reached.1.first().is_some_and(|step| step.1 == Some(value)))
+      })
+    })
+  }
+
+  /// Draw native values without discarding failed generation outcomes.
+  fn sample_values<S: Strategy>(strategy: S, count: usize) -> Samples<S::Value> {
+    let mut runner = TestRunner::deterministic();
+    (0..count)
+      .map(|_| strategy.new_tree(&mut runner).map(|tree| tree.current()))
+      .collect()
+  }
 
   #[test]
   fn strategy_construction_errors_are_copy() {
@@ -698,146 +760,141 @@ mod test {
   }
 
   #[test]
-  fn try_constructors_accept_valid_inputs() -> Result<(), TestFailure> {
-    let subsequence_strategy = ensure_some(
-      try_subsequence(vec![1_u8, 2, 3, 4], 1..3).ok(),
-      "try_subsequence accepts a size range within the input length",
-    )?;
+  fn try_constructors_accept_valid_inputs() -> Check<ValidConstruction> {
     let mut runner = TestRunner::deterministic();
-    let subsequence_value = ensure_some(
-      subsequence_strategy.new_tree(&mut runner).ok(),
-      "the fallibly constructed subsequence strategy generates",
-    )?
-    .current();
-    ensure(
-      (1..3).contains(&subsequence_value.len()),
-      "the sampled subsequence honors the size range",
-    )?;
-    let select_strategy = ensure_some(try_select(vec![7_u8, 8, 9]).ok(), "try_select accepts a non-empty collection")?;
-    let selected = ensure_some(
-      select_strategy.new_tree(&mut runner).ok(),
-      "the fallibly constructed select strategy generates",
-    )?
-    .current();
-    ensure(
-      [7_u8, 8, 9].contains(&selected),
-      "the selected value comes from the input collection",
-    )?;
+    let subsequence = try_subsequence(vec![1_u8, 2, 3, 4], 1..3).map(|strategy| {
+      let tree = strategy.new_tree(&mut runner);
+      (strategy, tree)
+    });
+    let selected = try_select(vec![7_u8, 8, 9]).map(|strategy| {
+      let tree = strategy.new_tree(&mut runner);
+      (strategy, tree)
+    });
     let index = Index(usize::MAX.div_euclid(2));
-    ensure_eq(
-      &ensure_some(index.try_index(10), "try_index accepts a non-zero collection size")?,
-      &ensure_some(index.index(10), "index accepts a non-zero collection size")?,
-      "index agrees with try_index on valid sizes",
-    )
-  }
-
-  #[test]
-  fn try_constructors_reject_invalid_inputs() -> Result<(), TestFailure> {
-    ensure(
-      matches!(try_subsequence(vec![1_u8, 2, 3], 2..2), Err(SubsequenceError::EmptySizeRange(_))),
-      "try_subsequence rejects an empty size range",
-    )?;
-    ensure_eq(
-      &ensure_some(
-        try_subsequence(vec![1_u8, 2, 3], 1..=5).err(),
-        "try_subsequence rejects a size range beyond the input",
-      )?,
-      &SubsequenceError::TooLarge {
-        size_end_incl: 5,
-        len:           3,
+    ensure_that(
+      (subsequence, selected, index, index.try_index(10), index.index(10)),
+      "valid constructors generate bounded samples and both index APIs agree",
+      |observed| {
+        observed
+          .0
+          .as_ref()
+          .is_ok_and(|reached| reached.1.as_ref().is_ok_and(|tree| (1..3).contains(&tree.current().len())))
+          && observed
+            .1
+            .as_ref()
+            .is_ok_and(|reached| reached.1.as_ref().is_ok_and(|tree| [7, 8, 9].contains(&tree.current())))
+          && observed.3.is_some()
+          && observed.3 == observed.4
       },
-      "the typed error names the requested size and input length",
-    )?;
-    ensure_eq(
-      &ensure_some(try_select(Vec::<u8>::new()).err(), "try_select rejects an empty collection")?,
-      &EmptySelection,
-      "the typed error names the empty selection",
-    )?;
-    ensure(Index(0).try_index(0).is_none(), "try_index reports a zero-size collection as None")
-  }
-
-  #[test]
-  fn sample_slice() -> Result<(), TestFailure> {
-    static VALUES: &[usize] = &[0, 1, 2, 3, 4, 5, 6, 7];
-    let mut size_counts = [0; 8];
-    let mut value_counts = [0; 8];
-
-    let mut runner = TestRunner::deterministic();
-    let input = subsequence(VALUES, 3..7);
-
-    for _ in 0..2048 {
-      let value = ensure_some(input.new_tree(&mut runner).ok(), "subsequence strategy generates a value tree")?.current();
-      // Generated the correct number of items
-      ensure(
-        (3..7).contains(&value.len()),
-        "the subsequence length stays within the requested range",
-      )?;
-      // Chose distinct items
-      ensure_eq(
-        &value.len(),
-        &value.iter().copied().collect::<BTreeSet<_>>().len(),
-        "the subsequence contains only distinct items",
-      )?;
-      // Values are in correct order
-      let mut sorted = value.clone();
-      sorted.sort_unstable();
-      ensure(sorted == value, "the subsequence preserves the source order")?;
-
-      *ensure_some(size_counts.get_mut(value.len()), "the subsequence size has a count slot")? += 1;
-
-      for selected_value in value {
-        *ensure_some(value_counts.get_mut(selected_value), "the selected value has a count slot")? += 1;
-      }
-    }
-
-    for count in size_counts.iter().take(7).skip(3) {
-      ensure(
-        (256..1024).contains(count),
-        "each size in the requested range is chosen a plausible number of times",
-      )?;
-    }
-
-    for &pick_count in &value_counts {
-      ensure(
-        (1024..1500).contains(&pick_count),
-        "each value is chosen a plausible number of times",
-      )?;
-    }
-    Ok(())
-  }
-
-  #[test]
-  fn sample_vec() -> Result<(), TestFailure> {
-    // Just test that the types work out
-    let values = vec![0, 1, 2, 3, 4];
-
-    let mut runner = TestRunner::deterministic();
-    let input = subsequence(values, 1..3);
-
-    let sample = ensure_some(input.new_tree(&mut runner).ok(), "subsequence strategy generates a value tree")?.current();
-    ensure(
-      (1..3).contains(&sample.len()),
-      "the sampled subsequence respects the requested size range",
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn test_select() -> Result<(), TestFailure> {
-    let values = vec![0, 1, 2, 3, 4, 5, 6, 7];
-    let mut counts = [0; 8];
+  fn try_constructors_reject_invalid_inputs() -> Check<InvalidConstruction> {
+    ensure_that(
+      (
+        try_subsequence(vec![1_u8, 2, 3], 2..2),
+        try_subsequence(vec![1_u8, 2, 3], 1..=5),
+        try_select(Vec::<u8>::new()),
+        Index(0).try_index(0),
+      ),
+      "invalid requests retain empty-size, oversized, empty-selection, and absent-index outcomes",
+      |outcomes| {
+        matches!(
+          *outcomes,
+          (
+            Err(SubsequenceError::EmptySizeRange(_)),
+            Err(SubsequenceError::TooLarge {
+              size_end_incl: 5,
+              len:           3,
+            }),
+            Err(EmptySelection),
+            None
+          )
+        )
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
 
-    let mut runner = TestRunner::deterministic();
-    let input = select(values);
+  #[test]
+  fn sample_slice() -> Check<Samples<Vec<usize>>> {
+    static VALUES: &[usize] = &[0, 1, 2, 3, 4, 5, 6, 7];
+    let valid_subsequence = |sample: &Result<Vec<usize>, Reason>| {
+      let Ok(ref values) = *sample else {
+        return false;
+      };
+      (3..7).contains(&values.len())
+        && values.iter().all(|value| VALUES.contains(value))
+        && values.iter().collect::<BTreeSet<_>>().len() == values.len()
+        && values.is_sorted()
+    };
+    ensure_that(
+      sample_values(subsequence(VALUES, 3..7), 2048),
+      "subsequences preserve source order, distinct values, and the requested size and sampling frequencies",
+      |samples| {
+        samples.iter().all(valid_subsequence)
+          && (3..7).all(|size| {
+            (256..1024).contains(
+              &samples
+                .iter()
+                .filter(|sample| sample.as_ref().is_ok_and(|values| values.len() == size))
+                .count(),
+            )
+          })
+          && VALUES.iter().all(|value| {
+            (1024..1500).contains(
+              &samples
+                .iter()
+                .filter(|sample| sample.as_ref().is_ok_and(|values| values.contains(value)))
+                .count(),
+            )
+          })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
 
-    for _ in 0..1024 {
-      let selected = ensure_some(input.new_tree(&mut runner).ok(), "select strategy generates a value tree")?.current();
-      *ensure_some(counts.get_mut(selected), "the selected value has a count slot")? += 1;
-    }
+  #[test]
+  fn sample_vec() -> Check<Samples<Vec<i32>>> {
+    ensure_that(
+      sample_values(subsequence(vec![0, 1, 2, 3, 4], 1..3), 1),
+      "a vector-backed subsequence respects the requested size range",
+      |samples| {
+        samples
+          .iter()
+          .all(|sample| sample.as_ref().is_ok_and(|values| (1..3).contains(&values.len())))
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
 
-    for &count in &counts {
-      ensure((64..256).contains(&count), "each value is generated a plausible number of times")?;
-    }
-    Ok(())
+  #[test]
+  fn test_select() -> Check<Samples<usize>> {
+    ensure_that(
+      sample_values(select(vec![0_usize, 1, 2, 3, 4, 5, 6, 7]), 1024),
+      "every selection comes from the pool with a plausible frequency",
+      |samples| {
+        samples
+          .iter()
+          .all(|sample| sample.as_ref().is_ok_and(|value| (0..8).contains(value)))
+          && (0..8).all(|value| {
+            (64..256).contains(
+              &samples
+                .iter()
+                .filter(|sample| sample.as_ref().is_ok_and(|selected| *selected == value))
+                .count(),
+            )
+          })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
@@ -851,75 +908,70 @@ mod test {
   }
 
   #[test]
-  fn subseq_empty_vec_works() -> Result<(), TestFailure> {
-    let mut runner = TestRunner::deterministic();
-    let input = subsequence(Vec::<()>::new(), 0..1);
-    ensure(
-      Vec::<()>::new() == ensure_some(input.new_tree(&mut runner).ok(), "subsequence strategy generates a value tree")?.current(),
+  fn subseq_empty_vec_works() -> Check<Samples<Vec<()>>> {
+    ensure_that(
+      sample_values(subsequence(Vec::<()>::new(), 0..1), 1),
       "an empty source yields the empty subsequence",
+      |samples| samples.iter().all(|sample| sample.as_ref().is_ok_and(Vec::is_empty)),
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn subseq_full_vec_works() -> Result<(), TestFailure> {
-    let source = vec![1_u32, 2_u32, 3_u32];
-    let mut runner = TestRunner::deterministic();
-    let input = subsequence(source.clone(), 3);
-    ensure(
-      source == ensure_some(input.new_tree(&mut runner).ok(), "subsequence strategy generates a value tree")?.current(),
-      "a full-width subsequence covers the whole source",
+  fn subseq_full_vec_works() -> Check<Samples<Vec<u32>>> {
+    ensure_that(
+      sample_values(subsequence(vec![1_u32, 2, 3], 3), 1),
+      "a full-width subsequence preserves the whole source in order",
+      |samples| {
+        samples
+          .iter()
+          .all(|sample| sample.as_ref().is_ok_and(|values| values == &[1, 2, 3]))
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn index_works() -> Result<(), TestFailure> {
+  fn index_works() -> Check<SelectionWalks<IndexValueTree, Index>> {
     let mut runner = TestRunner::deterministic();
     let input = any::<Index>();
-    let col = vec!["foo", "bar", "baz"];
-    let mut seen = BTreeSet::new();
-
-    for _ in 0..16 {
-      let mut tree = ensure_some(input.new_tree(&mut runner).ok(), "index strategy generates a value tree")?;
-      let generated_index = tree.current();
-      let selected = ensure_some(generated_index.get(&col), "index selects a value")?;
-      let _was_new = seen.insert(*selected);
-
-      while tree.simplify() {}
-
-      let simplified_index = tree.current();
-      ensure_eq(
-        &"foo",
-        ensure_some(simplified_index.get(&col), "simplified index selects a value")?,
-        "a fully simplified index lands on the first element",
-      )?;
-    }
-
-    ensure(col.into_iter().collect::<BTreeSet<_>>() == seen, "sampling touched every element")
+    let collection = ["foo", "bar", "baz"];
+    let walks = (0..16)
+      .map(|_| {
+        input
+          .new_tree(&mut runner)
+          .map(|tree| selection_walk(tree, |candidate| candidate.get(&collection).copied()))
+      })
+      .collect::<SelectionWalks<IndexValueTree, Index>>();
+    ensure_that(
+      walks,
+      "indices visit every source value and each shrinks to the first element",
+      |observed| selection_contract(observed, "foo", collection.iter().copied()),
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn selector_works() -> Result<(), TestFailure> {
+  fn selector_works() -> Check<SelectionWalks<SelectorValueTree, Selector>> {
     let mut runner = TestRunner::deterministic();
     let input = any::<Selector>();
-    let col: BTreeSet<&str> = vec!["foo", "bar", "baz"].into_iter().collect();
-    let mut seen = BTreeSet::new();
-
-    for _ in 0..16 {
-      let mut tree = ensure_some(input.new_tree(&mut runner).ok(), "selector strategy generates a value tree")?;
-      let generated_selector = tree.current();
-      let selected = ensure_some(generated_selector.select(&col), "selector selects a value")?;
-      let _was_new = seen.insert(*selected);
-
-      while tree.simplify() {}
-
-      let simplified_selector = tree.current();
-      ensure_eq(
-        &"bar",
-        ensure_some(simplified_selector.select(&col), "simplified selector selects a value")?,
-        "a fully simplified selector lands on the first ordered element",
-      )?;
-    }
-
-    ensure(col == seen, "selection touched every element")
+    let collection: BTreeSet<_> = ["foo", "bar", "baz"].into_iter().collect();
+    let walks = (0..16)
+      .map(|_| {
+        input
+          .new_tree(&mut runner)
+          .map(|tree| selection_walk(tree, |candidate| candidate.select(&collection).copied()))
+      })
+      .collect::<SelectionWalks<SelectorValueTree, Selector>>();
+    ensure_that(
+      walks,
+      "selectors visit every value and each shrinks to the first ordered element",
+      |observed| selection_contract(observed, "bar", collection.iter().copied()),
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

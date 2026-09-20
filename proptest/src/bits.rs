@@ -661,240 +661,335 @@ pub(crate) fn sampled_var_bitset(size: impl Into<SizeRange>, bits: impl Into<Siz
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_some;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
+  use crate::std_facade::Box;
+  use crate::strategy::trace_shrink_steps;
   use crate::test_runner::Reason;
-  use crate::test_runner::test_runner_without_persistence;
 
-  #[test]
-  fn zero_capacity_bitset_is_empty() -> Result<(), TestFailure> {
-    let int_bits = u32::new_bitset(0);
-    ensure(int_bits.is_empty(), "new primitive bitsets report no set bits")?;
+  /// Complete native assertion subjects remain allocated on failure.
+  type Check<S> = Result<(), Box<PredicateFailure<S>>>;
+  /// Both rejected bitset constructor requests.
+  type InvalidRequests = [Result<SampledBitSetStrategy<u32>, SampledBitsError>; 2];
+  /// Mask strategy samples together with both mask insertion outcomes.
+  #[cfg(feature = "bit-set")]
+  type MaskSamples = (Samples<BitSetStrategy<BitSet>>, [bool; 2]);
+  /// Every variable-bitset mutation and its out-of-bounds read.
+  type VariableOperations = (Vec<Vec<bool>>, bool);
+  /// One bitset and its simplify/complicate observations.
+  type Complication = (BitSetValueTree<u32>, u32, bool, Option<bool>);
 
-    let var_bits = VarBitSet::new_bitset(0);
-    ensure(var_bits.is_empty(), "zero-capacity bitsets report empty")
-  }
+  /// Native strategy and every generated value tree or generation failure.
+  type Samples<S> = (S, Vec<NewTree<S>>);
+  /// A complete bit-clearing trace and its reached tree.
+  type Shrink<T> = (BitSetValueTree<T>, Vec<T>);
+  /// Native generation results after exercising each tree's shrink contract.
+  type Shrinks<T> = Vec<Result<Shrink<T>, Reason>>;
 
-  #[test]
-  fn try_new_accepts_a_satisfiable_sample_request() -> Result<(), TestFailure> {
-    let strategy = ensure_some(
-      SampledBitSetStrategy::<u32>::try_new(2..=4, 0..8).ok(),
-      "try_new accepts a size range covered by the bit range",
-    )?;
+  /// Preserve strategy parameters and generated trees under deterministic sampling.
+  fn samples<S: Strategy>(strategy: S, count: usize) -> Samples<S> {
     let mut runner = TestRunner::deterministic();
-    let value = ensure_some(strategy.new_tree(&mut runner).ok(), "the fallibly constructed strategy generates")?.current();
-    let count = usize::try_from(value.count_ones()).unwrap_or(usize::MAX);
-    ensure((2..=4).contains(&count), "the sampled bit count honors the size range")
+    let samples = (0..count).map(|_| strategy.new_tree(&mut runner)).collect();
+    (strategy, samples)
+  }
+
+  /// Observe every native bitset visited while simplifying each generated tree.
+  fn shrinks<T: BitSetLike>(strategy: impl Strategy<Tree = BitSetValueTree<T>>, count: usize) -> Shrinks<T> {
+    let mut runner = TestRunner::deterministic();
+    (0..count)
+      .map(|_| strategy.new_tree(&mut runner).map(trace_shrink_steps))
+      .collect()
   }
 
   #[test]
-  fn try_new_rejects_unsatisfiable_sample_requests() -> Result<(), TestFailure> {
-    ensure(
-      matches!(
-        SampledBitSetStrategy::<u32>::try_new(4..4, 0..8),
-        Err(SampledBitsError::EmptySizeRange(_))
-      ),
-      "try_new rejects an empty size range with the typed error",
-    )?;
-    let error = ensure_some(
-      SampledBitSetStrategy::<u32>::try_new(0..=9, 0..8).err(),
-      "try_new rejects a size range exceeding the available bits",
-    )?;
-    ensure_eq(
-      &error,
-      &SampledBitsError::NotEnoughBits {
-        available:     8,
-        size_start:    0,
-        size_end_excl: 10,
+  fn zero_capacity_bitset_is_empty() -> Check<(u32, VarBitSet)> {
+    ensure_that(
+      (u32::new_bitset(0), VarBitSet::new_bitset(0)),
+      "new primitive and variable bitsets contain no set bits",
+      |observed| observed.0.is_empty() && observed.1.is_empty(),
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  /// Construction and generation remain separate, concrete result boundaries.
+  type Constructed<T> = Result<(SampledBitSetStrategy<T>, NewTree<SampledBitSetStrategy<T>>), SampledBitsError>;
+
+  #[test]
+  fn try_new_accepts_a_satisfiable_sample_request() -> Check<Constructed<u32>> {
+    let mut runner = TestRunner::deterministic();
+    let observed = SampledBitSetStrategy::<u32>::try_new(2..=4, 0..8).map(|strategy| {
+      let tree = strategy.new_tree(&mut runner);
+      (strategy, tree)
+    });
+    ensure_that(
+      observed,
+      "valid construction generates a bit count in the requested size range",
+      |result| {
+        result.as_ref().is_ok_and(|reached| {
+          reached
+            .1
+            .as_ref()
+            .is_ok_and(|tree| (2..=4).contains(&tree.current().count_ones()))
+        })
       },
-      "the typed error names the available and requested sizes",
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn undersized_bitset_reports_generation_failure() -> Result<(), TestFailure> {
-    // `u8` can only represent 8 bits, but the bit range requests 20; the
-    // constructor cannot see the concrete capacity, so generation reports
-    // a typed failure instead of panicking.
-    let strategy = ensure_some(
-      SampledBitSetStrategy::<u8>::try_new(16..=16, 0..20).ok(),
-      "the constructor accepts a range the type cannot represent",
-    )?;
-    let mut runner = TestRunner::deterministic();
-    ensure(
-      strategy.new_tree(&mut runner).is_err(),
-      "generation reports the capacity shortfall as an error",
+  fn try_new_rejects_unsatisfiable_sample_requests() -> Check<InvalidRequests> {
+    ensure_that(
+      [
+        SampledBitSetStrategy::try_new(4..4, 0..8),
+        SampledBitSetStrategy::try_new(0..=9, 0..8),
+      ],
+      "invalid sizes retain the precise empty-range and available-bit errors",
+      |results| {
+        matches!(*results, [
+          Err(SampledBitsError::EmptySizeRange(_)),
+          Err(SampledBitsError::NotEnoughBits {
+            available:     8,
+            size_start:    0,
+            size_end_excl: 10,
+          })
+        ])
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn generates_values_in_range() -> Result<(), TestFailure> {
-    let input = u32::between(4, 8);
-
-    let mut runner = test_runner_without_persistence();
-    for _ in 0..256 {
-      let value = ensure_some(input.new_tree(&mut runner).ok(), "bit strategy generates a value tree")?.current();
-      ensure(0 == value & !0xF0_u32, "generated bits stay within the requested range")?;
-    }
-    Ok(())
-  }
-
-  #[test]
-  fn generates_values_in_mask() -> Result<(), TestFailure> {
-    let mut accum = 0;
-
+  fn undersized_bitset_reports_generation_failure() -> Check<Constructed<u8>> {
     let mut runner = TestRunner::deterministic();
-    let input = u32::masked(0xdead_beef);
-    for _ in 0..1024 {
-      accum |= ensure_some(input.new_tree(&mut runner).ok(), "masked bit strategy generates a value tree")?.current();
-    }
+    let observed = SampledBitSetStrategy::<u8>::try_new(16..=16, 0..20).map(|strategy| {
+      let tree = strategy.new_tree(&mut runner);
+      (strategy, tree)
+    });
+    ensure_that(
+      observed,
+      "a constructible request reports the concrete type's capacity shortfall during generation",
+      |result| {
+        result.as_ref().is_ok_and(|reached| {
+          reached
+            .1
+            .as_ref()
+            .is_err_and(|reason| reason.message() == "not enough bits to sample")
+        })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
 
-    ensure_eq(&0xdead_beef_u32, &accum, "every masked bit is eventually generated")
+  #[test]
+  fn generates_values_in_range() -> Check<Samples<BitSetStrategy<u32>>> {
+    ensure_that(
+      samples(u32::between(4, 8), 256),
+      "generated bits stay within the requested range",
+      |observed| {
+        observed
+          .1
+          .iter()
+          .all(|sample| sample.as_ref().is_ok_and(|tree| tree.current() & !0xf0_u32 == 0))
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn generates_values_in_mask() -> Check<Samples<BitSetStrategy<u32>>> {
+    ensure_that(
+      samples(u32::masked(0xdead_beef), 1024),
+      "every masked bit is eventually generated and no unmasked bit appears",
+      |observed| {
+        observed.1.iter().all(Result::is_ok)
+          && observed
+            .1
+            .iter()
+            .filter_map(|sample| sample.as_ref().ok())
+            .fold(0, |bits, tree| bits | tree.current())
+            == 0xdead_beef
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[cfg(feature = "bit-set")]
   #[test]
-  fn mask_bounds_for_bitset_correct() -> Result<(), TestFailure> {
-    let mut seen_0 = false;
-    let mut seen_2 = false;
-
+  fn mask_bounds_for_bitset_correct() -> Check<MaskSamples> {
     let mut mask = BitSet::new();
-    ensure(mask.insert(0), "bit 0 starts absent")?;
-    ensure(mask.insert(2), "bit 2 starts absent")?;
-
-    let mut runner = TestRunner::deterministic();
-    let input = bitset::masked(mask);
-    for _ in 0..32 {
-      let bits = ensure_some(input.new_tree(&mut runner).ok(), "bitset strategy generates a value tree")?.current();
-      seen_0 |= bits.contains(0);
-      seen_2 |= bits.contains(2);
-    }
-
-    ensure(seen_0, "bit 0 of the mask is generated")?;
-    ensure(seen_2, "bit 2 of the mask is generated")
+    let insertions = [mask.insert(0), mask.insert(2)];
+    ensure_that(
+      (samples(bitset::masked(mask), 32), insertions),
+      "each requested mask bit is generated",
+      |observed| {
+        observed.1 == [true, true]
+          && observed.0.1.iter().all(Result::is_ok)
+          && [0, 2].into_iter().all(|bit| {
+            observed
+              .0
+              .1
+              .iter()
+              .any(|sample| sample.as_ref().is_ok_and(|tree| tree.current().contains(bit)))
+          })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[cfg(feature = "bit-set")]
   #[test]
-  fn bitset_set_and_clear_are_idempotent() -> Result<(), TestFailure> {
+  fn bitset_set_and_clear_are_idempotent() -> Check<(BitSet, BitSet)> {
     let mut bits = BitSet::new();
-
     BitSetLike::set(&mut bits, 7);
     BitSetLike::set(&mut bits, 7);
-    ensure_eq(&1, &BitSetLike::count(&bits), "setting the same bit twice stores it once")?;
-
+    let set = bits.clone();
     BitSetLike::clear(&mut bits, 7);
     BitSetLike::clear(&mut bits, 7);
-    ensure_eq(&0, &BitSetLike::count(&bits), "clearing the same bit twice leaves the set empty")
-  }
-
-  #[test]
-  fn mask_bounds_for_vecbool_correct() -> Result<(), TestFailure> {
-    let mut seen_0 = false;
-    let mut seen_2 = false;
-
-    let mask = vec![true, false, true, false];
-
-    let mut runner = TestRunner::deterministic();
-    let input = bool_vec::masked(mask);
-    for _ in 0..32 {
-      let bits = ensure_some(input.new_tree(&mut runner).ok(), "bool-vec strategy generates a value tree")?.current();
-      ensure_eq(&4, &bits.len(), "the bool vec keeps the mask length")?;
-      seen_0 |= ensure_some(bits.first().copied(), "the bool vec has bit 0")?;
-      seen_2 |= ensure_some(bits.get(2).copied(), "the bool vec has bit 2")?;
-    }
-
-    ensure(seen_0, "bit 0 of the mask is generated")?;
-    ensure(seen_2, "bit 2 of the mask is generated")
-  }
-
-  #[test]
-  fn shrinks_to_zero() -> Result<(), TestFailure> {
-    let input = u32::between(4, 24);
-
-    let mut runner = test_runner_without_persistence();
-    for _ in 0..256 {
-      let mut value = ensure_some(input.new_tree(&mut runner).ok(), "bit strategy generates a value tree")?;
-      let mut prev = value.current();
-      while value.simplify() {
-        let current = value.current();
-        ensure((prev & !current).is_power_of_two(), "each simplify step clears exactly one bit")?;
-        prev = current;
-      }
-
-      ensure_eq(&0, &value.current(), "shrinking converges to zero")?;
-    }
-    Ok(())
-  }
-
-  #[test]
-  fn complicates_to_previous() -> Result<(), TestFailure> {
-    let input = u32::between(4, 24);
-
-    let mut runner = test_runner_without_persistence();
-    for _ in 0..256 {
-      let mut value = ensure_some(input.new_tree(&mut runner).ok(), "bit strategy generates a value tree")?;
-      let orig = value.current();
-      if value.simplify() {
-        ensure(value.complicate(), "a simplified tree complicates back")?;
-        ensure_eq(&orig, &value.current(), "complicate restores the previous value")?;
-      }
-    }
-    Ok(())
-  }
-
-  #[test]
-  fn sampled_selects_correct_sizes_and_bits() -> Result<(), TestFailure> {
-    let input = u32::sampled(4..8, 10..20);
-    let mut seen_counts = [0_usize; 32];
-    let mut seen_bits = [0_u32; 32];
-
-    let mut runner = TestRunner::deterministic();
-    for _ in 0..2048 {
-      let value = ensure_some(input.new_tree(&mut runner).ok(), "sampled bit strategy generates a value tree")?.current();
-      let count = usize::try_from(value.count_ones()).unwrap_or(usize::MAX);
-      ensure((4..8).contains(&count), "the sampled bit count stays in range")?;
-      let count_slot = ensure_some(seen_counts.get_mut(count), "the sampled bit count has a count slot")?;
-      *count_slot = count_slot.saturating_add(1);
-
-      for (bit, seen_bit) in seen_bits.iter_mut().enumerate().filter_map(|(bit, seen_bit)| {
-        let bit_mask = u32::try_from(bit).ok().and_then(|shift| 1_u32.checked_shl(shift)).unwrap_or(0);
-        (value & bit_mask != 0).then_some((bit, seen_bit))
-      }) {
-        ensure((10..20).contains(&bit), "only bits within the sampled range are set")?;
-        *seen_bit = seen_bit.saturating_add(value);
-      }
-    }
-
-    for count in seen_counts.iter().take(8).skip(4) {
-      ensure((256..1024).contains(count), "each bit count is chosen a plausible number of times")?;
-    }
-
-    let least_seen_bit_count = ensure_some(seen_bits[10..20].iter().copied().min(), "the sampled range has a least-seen bit")?;
-    let most_seen_bit_count = ensure_some(seen_bits[10..20].iter().copied().max(), "the sampled range has a most-seen bit")?;
-    ensure_eq(
-      &1,
-      &most_seen_bit_count.div_euclid(least_seen_bit_count),
-      "bit selection is roughly uniform",
+    ensure_that(
+      (set, bits),
+      "repeated set stores one bit and repeated clear removes it",
+      |observed| observed.0.count() == 1 && observed.0.contains(7) && observed.1.is_empty(),
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn sampled_doesnt_shrink_below_min_size() -> Result<(), TestFailure> {
-    let input = u32::sampled(4..8, 10..20);
+  fn mask_bounds_for_vecbool_correct() -> Check<Samples<BitSetStrategy<Vec<bool>>>> {
+    ensure_that(
+      samples(bool_vec::masked(vec![true, false, true, false]), 32),
+      "the mask length is preserved and both mask bits are generated",
+      |observed| {
+        observed
+          .1
+          .iter()
+          .all(|sample| sample.as_ref().is_ok_and(|tree| tree.current().len() == 4))
+          && [0, 2].into_iter().all(|bit| {
+            observed
+              .1
+              .iter()
+              .any(|sample| sample.as_ref().is_ok_and(|tree| tree.current().test(bit)))
+          })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
 
-    let mut runner = test_runner_without_persistence();
-    for _ in 0..256 {
-      let mut value = ensure_some(input.new_tree(&mut runner).ok(), "sampled bit strategy generates a value tree")?;
-      while value.simplify() {}
+  #[test]
+  fn shrinks_to_zero() -> Check<Shrinks<u32>> {
+    let clears_one_bit = |sample: &Result<Shrink<u32>, Reason>| {
+      let Ok(ref reached) = *sample else {
+        return false;
+      };
+      reached.0.current() == 0
+        && reached
+          .1
+          .array_windows::<2>()
+          .all(|&[before, after]| (before & !after).is_power_of_two())
+    };
+    ensure_that(
+      shrinks(u32::between(4, 24), 256),
+      "each simplification clears exactly one bit until reaching zero",
+      |samples| samples.iter().all(clears_one_bit),
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
 
-      ensure_eq(&4, &value.current().count_ones(), "shrinking stops at the minimum bit count")?;
-    }
-    Ok(())
+  #[test]
+  fn complicates_to_previous() -> Check<Vec<Result<Complication, Reason>>> {
+    let (_, generated) = samples(u32::between(4, 24), 256);
+    let observations = generated
+      .into_iter()
+      .map(|sample| {
+        sample.map(|mut tree| {
+          let original = tree.current();
+          let simplified = tree.simplify();
+          let complicated = simplified.then(|| tree.complicate());
+          (tree, original, simplified, complicated)
+        })
+      })
+      .collect();
+    let restores_original = |sample: &Result<Complication, Reason>| {
+      let Ok(ref reached) = *sample else {
+        return false;
+      };
+      (reached.2 && reached.3 == Some(true) && reached.0.current() == reached.1) || (!reached.2 && reached.3.is_none())
+    };
+    ensure_that(
+      observations,
+      "a successful simplification complicates back to the original value",
+      |samples: &Vec<Result<_, Reason>>| samples.iter().all(restores_original),
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn sampled_selects_correct_sizes_and_bits() -> Check<Samples<SampledBitSetStrategy<u32>>> {
+    let valid_bits = |value: u32| (4..8).contains(&value.count_ones()) && value & !0x000f_fc00 == 0;
+    ensure_that(
+      samples(u32::sampled(4..8, 10..20), 2048),
+      "sampled sizes and bits obey their ranges with roughly uniform selection",
+      |observed| {
+        let valid = observed
+          .1
+          .iter()
+          .all(|sample| sample.as_ref().is_ok_and(|tree| valid_bits(tree.current())));
+        let counts = [4, 5, 6, 7].map(|width| {
+          observed
+            .1
+            .iter()
+            .filter(|sample| sample.as_ref().is_ok_and(|tree| tree.current().count_ones() == width))
+            .count()
+        });
+        let bits: Vec<_> = (10..20)
+          .map(|bit| {
+            observed
+              .1
+              .iter()
+              .filter(|sample| sample.as_ref().is_ok_and(|tree| tree.current().test(bit)))
+              .count()
+          })
+          .collect();
+        valid
+          && counts.iter().all(|count| (256..1024).contains(count))
+          && bits
+            .iter()
+            .min()
+            .zip(bits.iter().max())
+            .is_some_and(|(min, max)| max.checked_div(*min) == Some(1))
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn sampled_doesnt_shrink_below_min_size() -> Check<Shrinks<u32>> {
+    ensure_that(
+      shrinks(u32::sampled(4..8, 10..20), 256),
+      "shrinking stops at four set bits",
+      |samples| {
+        samples.iter().all(|sample| {
+          sample
+            .as_ref()
+            .is_ok_and(|reached| reached.0.current().count_ones() == 4 && reached.1.iter().all(|value| value.count_ones() >= 4))
+        })
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
@@ -903,66 +998,76 @@ mod test {
   }
 
   #[test]
-  fn u128_generates_values_in_range() -> Result<(), TestFailure> {
-    let input = u128::between(64, 128);
-
-    let mut runner = test_runner_without_persistence();
-    for _ in 0..256 {
-      let value = ensure_some(input.new_tree(&mut runner).ok(), "u128 bit strategy generates a value tree")?.current();
-      // Only bits 64..128 should be set
-      ensure(0 == value & ((1_u128 << 64) - 1), "the generated value has no low bits set")?;
-    }
-    Ok(())
+  fn u128_generates_values_in_range() -> Check<Samples<BitSetStrategy<u128>>> {
+    ensure_that(
+      samples(u128::between(64, 128), 256),
+      "generated u128 values have no low bits set",
+      |observed| {
+        observed
+          .1
+          .iter()
+          .all(|sample| sample.as_ref().is_ok_and(|tree| tree.current() & u128::from(u64::MAX) == 0))
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn u128_shrinks_to_zero() -> Result<(), TestFailure> {
-    let input = u128::between(64, 128);
-
-    let mut runner = test_runner_without_persistence();
-    for _ in 0..256 {
-      let mut value = ensure_some(input.new_tree(&mut runner).ok(), "u128 bit strategy generates a value tree")?;
-      while value.simplify() {}
-      ensure_eq(&0, &value.current(), "shrinking converges to zero")?;
-    }
-    Ok(())
+  fn u128_shrinks_to_zero() -> Check<Shrinks<u128>> {
+    ensure_that(shrinks(u128::between(64, 128), 256), "u128 bitsets shrink to zero", |samples| {
+      samples
+        .iter()
+        .all(|sample| sample.as_ref().is_ok_and(|reached| reached.0.current() == 0))
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn i128_generates_values_in_mask() -> Result<(), TestFailure> {
-    let mut accum: i128 = 0;
-    let mask: i128 = 0x0123_4567_89ab_cdef_0123_4567_89ab_cdef;
-
-    let mut runner = TestRunner::deterministic();
-    let input = i128::masked(mask);
-    for _ in 0..1024 {
-      accum |= ensure_some(input.new_tree(&mut runner).ok(), "i128 masked strategy generates a value tree")?.current();
-    }
-
-    ensure_eq(&mask, &accum, "every masked bit is eventually generated")
+  fn i128_generates_values_in_mask() -> Check<Samples<BitSetStrategy<i128>>> {
+    let mask = 0x0123_4567_89ab_cdef_0123_4567_89ab_cdef_i128;
+    ensure_that(samples(i128::masked(mask), 1024), "every i128 mask bit is generated", |observed| {
+      observed.1.iter().all(Result::is_ok)
+        && observed
+          .1
+          .iter()
+          .filter_map(|sample| sample.as_ref().ok())
+          .fold(0, |bits, tree| bits | tree.current())
+          == mask
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
   fn u128_test_sanity() -> Result<(), Reason> {
     check_strategy_sanity(u128::masked(0xdead_beef_cafe_babe_1234_5678_9abc_def0), None)
   }
+
   #[test]
-  fn vec_bool_bitset_ops_are_bounds_checked() -> Result<(), TestFailure> {
+  fn vec_bool_bitset_ops_are_bounds_checked() -> Check<VariableOperations> {
     let mut bits = vec![false; 4];
     BitSetLike::set(&mut bits, 2);
-    ensure(BitSetLike::test(&bits, 2), "an in-bounds set bit reads back")?;
+    let mut observed = vec![bits.clone()];
     BitSetLike::clear(&mut bits, 2);
-    ensure(!BitSetLike::test(&bits, 2), "an in-bounds cleared bit reads back cleared")?;
-    ensure(
-      !BitSetLike::test(&bits, 100),
-      "an out-of-bounds test reads as unset instead of panicking",
-    )?;
+    observed.push(bits.clone());
+    let outside = BitSetLike::test(&bits, 100);
     BitSetLike::clear(&mut bits, 100);
-    ensure_eq(&4, &BitSetLike::len(&bits), "an out-of-bounds clear leaves the length unchanged")?;
+    observed.push(bits.clone());
     BitSetLike::set(&mut bits, 6);
-    ensure(
-      BitSetLike::test(&bits, 6),
-      "an out-of-len set grows the vector, matching its resize contract",
+    observed.push(bits);
+    ensure_that(
+      (observed, outside),
+      "clear and reads are bounds checked while set grows the bit vector",
+      |subject| {
+        !subject.1
+          && matches!(*subject.0.as_slice(), [ref set, ref cleared, ref outside_cleared, ref grown]
+        if set == &[false, false, true, false] && cleared == &[false; 4] && outside_cleared == cleared
+          && grown == &[false, false, false, false, false, false, true])
+      },
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

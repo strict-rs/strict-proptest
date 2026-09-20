@@ -19,7 +19,7 @@
 #![no_std]
 #![cfg_attr(
   all(feature = "unstable", not(feature = "alt-stable")),
-  feature(allocator_api, coroutine_trait, never_type)
+  feature(allocator_api, coroutine_trait)
 )]
 #![cfg_attr(all(feature = "f16", not(feature = "alt-stable")), feature(f16))]
 #![cfg_attr(

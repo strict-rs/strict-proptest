@@ -144,32 +144,39 @@ mod test {
   macro_rules! coroutine_state_generates_both_variants {
     ($name:ident, $typ:ident) => {
       #[test]
-      fn $name() -> Result<(), strict_test_support::TestFailure> {
-        use strict_test_support::ensure;
-        use strict_test_support::ensure_some;
+      fn $name() -> Result<
+        (),
+        strict_test_support::PredicateFailure<
+          crate::std_facade::Vec<crate::strategy::NewTree<crate::arbitrary::StrategyFor<$typ<bool, bool>>>>,
+        >,
+      > {
+        use strict_test_support::ensure_that;
 
+        use crate::arbitrary::StrategyFor;
         use crate::arbitrary::any;
+        use crate::std_facade::Vec;
+        use crate::strategy::NewTree;
         use crate::strategy::Strategy;
         use crate::strategy::ValueTree;
         use crate::test_runner::TestRunner;
 
         let mut runner = TestRunner::deterministic();
         let strategy = any::<$typ<bool, bool>>();
-        let mut saw_yielded = false;
-        let mut saw_complete = false;
-
-        for _ in 0..64 {
-          let sample = ensure_some(
-            strategy.new_tree(&mut runner).ok(),
-            "CoroutineState strategy generates a value tree",
-          )?
-          .current();
-          saw_yielded |= matches!(sample, $typ::Yielded(_));
-          saw_complete |= matches!(sample, $typ::Complete(_));
-        }
-
-        ensure(saw_yielded, "CoroutineState generation can yield")?;
-        ensure(saw_complete, "CoroutineState generation can complete")
+        let samples = (0..64).map(|_| strategy.new_tree(&mut runner)).collect();
+        ensure_that(
+          samples,
+          "coroutine-state generation succeeds and reaches both variants",
+          |samples: &Vec<NewTree<StrategyFor<$typ<bool, bool>>>>| {
+            samples.iter().all(Result::is_ok)
+              && samples
+                .iter()
+                .any(|sample| sample.as_ref().is_ok_and(|tree| matches!(tree.current(), $typ::Yielded(_))))
+              && samples
+                .iter()
+                .any(|sample| sample.as_ref().is_ok_and(|tree| matches!(tree.current(), $typ::Complete(_))))
+          },
+        )
+        .map(drop)
       }
     };
   }

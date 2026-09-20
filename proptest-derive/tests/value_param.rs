@@ -18,11 +18,14 @@
 #[cfg(test)]
 mod tests {
   use proptest::prelude::*;
-  use proptest::strict::TestResult;
   use proptest::strict::ensure_property;
+  use proptest::test_runner::PropertyResult;
   use proptest_derive::Arbitrary;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_eq;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
+
+  /// Each assertion retains the complete generated value.
+  type Checked<T> = PropertyResult<T, T, PredicateFailure<T>>;
 
   #[derive(Debug, Arbitrary)]
   enum T0 {
@@ -32,7 +35,7 @@ mod tests {
 
   #[derive(Debug, Arbitrary)]
   enum T1 {
-    #[proptest(params = "u8", value = "T1::V0 { field: params * 2 }")]
+    #[proptest(params = "u8", value = "T1::V0 { field: params.saturating_mul(2) }")]
     V0 { field: u8 },
   }
 
@@ -44,14 +47,14 @@ mod tests {
   #[derive(Debug, Arbitrary)]
   enum T3 {
     V0 {
-      #[proptest(params = "u8", value = "params * params")]
+      #[proptest(params = "u8", value = "params.saturating_mul(params)")]
       field: u8,
     },
   }
 
   #[derive(Debug, Arbitrary)]
   struct T4 {
-    #[proptest(params = "u8", value = "params - 3")]
+    #[proptest(params = "u8", value = "params.saturating_sub(3)")]
     field: u8,
   }
 
@@ -79,70 +82,65 @@ mod tests {
   }
 
   #[test]
-  fn t0_test() -> TestResult {
-    ensure_property(&any_with::<T0>(4), "a tuple-variant value expression reads params", |sample| {
-      let T0::V0(x) = sample;
-      ensure_eq(&x, &2, "the value expression halves the param")
+  fn t0_test() -> Checked<T0> {
+    ensure_property(&any_with::<T0>(4), "the value expression halves the param", |generated| {
+      ensure_that(generated, "the value expression halves the param", |sample| {
+        matches!(sample, T0::V0(2))
+      })
     })
   }
 
   #[test]
-  fn t1_test() -> TestResult {
-    ensure_property(&any_with::<T1>(4), "a struct-variant value expression reads params", |sample| {
-      let T1::V0 {
-        field: x,
-      } = sample;
-      ensure_eq(&x, &8, "the value expression doubles the param")
+  fn t1_test() -> Checked<T1> {
+    ensure_property(&any_with::<T1>(4), "the value expression doubles the param", |generated| {
+      ensure_that(generated, "the value expression doubles the param", |sample| {
+        matches!(sample, T1::V0 {
+          field: 8
+        })
+      })
     })
   }
 
   #[test]
-  fn t2_test_true() -> TestResult {
-    ensure_property(&any_with::<T2>(4), "a field value expression sees a power-of-two param", |sample| {
-      let T2::V0(x) = sample;
-      ensure(x, "the power-of-two check holds for four")
+  fn t2_test_true() -> Checked<T2> {
+    ensure_property(&any_with::<T2>(4), "the power-of-two check holds for four", |generated| {
+      ensure_that(generated, "the power-of-two check holds for four", |sample| {
+        matches!(sample, T2::V0(true))
+      })
     })
   }
 
   #[test]
-  fn t2_test_false() -> TestResult {
-    ensure_property(
-      &any_with::<T2>(10),
-      "a field value expression sees a non-power-of-two param",
-      |sample| {
-        let T2::V0(x) = sample;
-        ensure(!x, "the power-of-two check fails for ten")
-      },
-    )
+  fn t2_test_false() -> Checked<T2> {
+    ensure_property(&any_with::<T2>(10), "the power-of-two check fails for ten", |generated| {
+      ensure_that(generated, "the power-of-two check fails for ten", |sample| {
+        matches!(sample, T2::V0(false))
+      })
+    })
   }
 
   #[test]
-  fn t3_test() -> TestResult {
-    ensure_property(
-      &any_with::<T3>(4),
-      "a struct-variant field value expression squares params",
-      |sample| {
-        let T3::V0 {
-          field: x,
-        } = sample;
-        ensure_eq(&x, &16, "the value expression squares the param")
-      },
-    )
+  fn t3_test() -> Checked<T3> {
+    ensure_property(&any_with::<T3>(4), "the value expression squares the param", |generated| {
+      ensure_that(generated, "the value expression squares the param", |sample| {
+        matches!(sample, T3::V0 {
+          field: 16
+        })
+      })
+    })
   }
 
   #[test]
-  fn t4_test() -> TestResult {
-    ensure_property(
-      &any_with::<T4>(4),
-      "a struct field value expression subtracts from params",
-      |sample| ensure_eq(&sample.field, &1, "the value expression subtracts three"),
-    )
+  fn t4_test() -> Checked<T4> {
+    ensure_property(&any_with::<T4>(4), "the value expression subtracts three", |generated| {
+      ensure_that(generated, "the value expression subtracts three", |sample| sample.field == 1)
+    })
   }
 
   #[test]
-  fn t5_test() -> TestResult {
-    ensure_property(&any_with::<T5>(4), "a fn-call value expression receives params", |sample| {
-      ensure_eq(&sample.0, &5, "the fn-call value adds one")
+  fn t5_test() -> Checked<T5> {
+    ensure_property(&any_with::<T5>(4), "the fn-call value adds one", |generated| {
+      ensure_that(generated, "the fn-call value adds one", |sample| sample.0 == 5)
     })
   }
 }

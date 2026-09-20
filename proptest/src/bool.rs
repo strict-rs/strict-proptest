@@ -127,8 +127,8 @@ impl ValueTree for BoolValueTree {
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure_all;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
   use crate::test_runner::Reason;
@@ -138,25 +138,43 @@ mod test {
     check_strategy_sanity(ANY, None)
   }
 
-  #[test]
-  fn shrinks_properly() -> Result<(), TestFailure> {
-    let mut tree = BoolValueTree::new(true);
-    ensure_all(&[
-      (tree.simplify(), "true simplifies once"),
-      (!tree.current(), "simplified tree reads false"),
-      (!tree.clone().simplify(), "simplified tree cannot simplify"),
-      (tree.complicate(), "simplified tree complicates back"),
-      (!tree.clone().complicate(), "complicated tree cannot complicate again"),
-      (tree.current(), "complicated tree reads true"),
-      (!tree.simplify(), "complicated tree cannot simplify"),
-      (tree.current(), "tree still reads true"),
-    ])?;
+  /// Each attempted change and the complete tree reached by that operation.
+  type BooleanWalk = [(bool, BoolValueTree); 7];
 
-    tree = BoolValueTree::new(false);
-    ensure_all(&[
-      (!tree.clone().simplify(), "false cannot simplify"),
-      (!tree.clone().complicate(), "false cannot complicate"),
-      (!tree.current(), "false tree reads false"),
-    ])
+  #[test]
+  fn shrinks_properly() -> Result<(), PredicateFailure<BooleanWalk>> {
+    let mut tree = BoolValueTree::new(true);
+    let simplified = (tree.simplify(), tree);
+    let mut simplified_copy = tree;
+    let simplified_again = (simplified_copy.simplify(), simplified_copy);
+    let complicated = (tree.complicate(), tree);
+    let mut complicated_copy = tree;
+    let complicated_again = (complicated_copy.complicate(), complicated_copy);
+    let exhausted = (tree.simplify(), tree);
+    let mut false_simple = BoolValueTree::new(false);
+    let false_simplified = (false_simple.simplify(), false_simple);
+    let mut false_complex = BoolValueTree::new(false);
+    let false_complicated = (false_complex.complicate(), false_complex);
+    ensure_that(
+      [
+        simplified, simplified_again, complicated, complicated_again, exhausted, false_simplified, false_complicated,
+      ],
+      "true simplifies once and backtracks once; false and exhausted trees cannot change",
+      |walk| {
+        walk
+          .iter()
+          .zip([
+            (true, false),
+            (false, false),
+            (true, true),
+            (false, true),
+            (false, true),
+            (false, false),
+            (false, false),
+          ])
+          .all(|(reached, expected)| reached.0 == expected.0 && reached.1.current() == expected.1)
+      },
+    )
+    .map(drop)
   }
 }

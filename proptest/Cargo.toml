@@ -9,8 +9,8 @@ homepage.workspace = true
 documentation.workspace = true
 keywords = ["property", "testing", "quickcheck", "fuzz", "hypothesis"]
 categories.workspace = true
-edition.workspace = true
-rust-version.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
 exclude = ["/gen-*.sh", "/readme-*.md"]
 
 description = """
@@ -26,37 +26,38 @@ default = ["std", "fork", "timeout", "bit-set", "strict-test"]
 # Everything in `default` that doesn't break code coverage builds
 default-code-coverage = ["std", "fork", "timeout", "bit-set"]
 
-attr-macro = ["proptest-macro"]
+# Generated property wrappers execute through the strict runner.
+attr-macro = ["dep:proptest-macro", "strict-test"]
 
 # Enables exact nightly-only Rust API support.
 unstable = ["f16"]
 
 # Enables primitive nightly `f16` support. When `alt-stable` is also enabled,
 # the stable `half::f16` substitute is selected instead.
-f16 = []
+f16 = ["alloc"]
 
 # Enables stable substitute implementations for APIs that are still nightly in
 # `std`/`core`/`alloc`. This wins over `unstable` when both are enabled, so
 # `--all-features` remains usable on stable Rust.
-alt-stable = ["dep:allocator-api2", "allocator-api2/alloc", "dep:half", "half/num-traits"]
+alt-stable = ["libm", "dep:allocator-api2", "allocator-api2/alloc", "dep:half", "half/num-traits"]
 
 # Enables the use of standard-library dependent features
-std = ["rand/std", "rand/sys_rng", "regex-syntax", "num-traits/std"]
+std = ["rand/std", "rand/sys_rng", "dep:regex-syntax", "num-traits/std"]
 
 # Enables libm-backed float math without enabling std.
-libm = ["num-traits/libm"]
+libm = ["alloc", "num-traits/libm"]
 
 # For use in no_std environments with access to an allocator
 #alloc = ["hashmap_core"]
 alloc = []
 
 # Use hardware entropy instead of static seeds for x86/x86_64 no_std targets.
-hardware-rng = ["dep:getrandom"]
+hardware-rng = ["alloc", "dep:getrandom"]
 
 # Enables use of the "fork" feature.
 #
 # Requires std.
-fork = ["std", "rusty-fork", "tempfile"]
+fork = ["std", "dep:rusty-fork", "dep:tempfile"]
 
 # Enables use of the "timeout" feature.
 #
@@ -64,23 +65,23 @@ fork = ["std", "rusty-fork", "tempfile"]
 timeout = ["fork", "rusty-fork/timeout"]
 
 # Enables support for 64-bit atomic integers.
-# This is enabled by default. Some no_std environments do not support it and
-# need it excluded, however.
-atomic64bit = []
+# Some no_std environments do not support these atomics and must leave this off.
+atomic64bit = ["alloc"]
 
-bit-set = ["dep:bit-set", "dep:bit-vec"]
+bit-set = ["alloc", "dep:bit-set", "dep:bit-vec"]
 
 # Enables proper handling of panics
 # In particular, hides all intermediate panics flowing into stderr during shrink phase
 handle-panics = ["std"]
 
 # Enables the native strict property-testing surface, which reports property
-# outcomes as `strict_test_support::TestFailure` values instead of panicking.
+# outcomes with native success evidence, failures, and counterexamples.
 #
 # Requires std.
-strict-test = ["std", "dep:strict-test-support"]
+strict-test = ["std"]
 
 [dependencies]
+thiserror = { workspace = true }
 bitflags = { workspace = true }
 unarray = { workspace = true }
 allocator-api2 = { workspace = true, optional = true }
@@ -96,7 +97,6 @@ rand_xorshift = { workspace = true }
 rand_chacha = { workspace = true }
 rusty-fork = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
-strict-test-support = { workspace = true, optional = true }
 
 [package.metadata.docs.rs]
 all-features = true

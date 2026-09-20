@@ -784,23 +784,27 @@ impl TestRng {
 
 #[cfg(test)]
 mod test {
-  use std::borrow::ToOwned as _;
+  use core::array::from_fn;
   use std::string::ToString as _;
 
   use rand::Rng as _;
   #[cfg(feature = "strict-test")]
   use rand::RngExt as _;
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_all;
+  use strict_test_support::ComparisonFailure;
+  use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_some;
+  use strict_test_support::ensure_that;
 
+  use super::EntropySeedStatus;
   use super::RngAlgorithm;
   use super::Seed;
+  use super::SeedLengthError;
   use super::TestRng;
   #[cfg(feature = "strict-test")]
   use crate::arbitrary::any;
+  use crate::std_facade::Box;
+  #[cfg(feature = "strict-test")]
+  use crate::std_facade::String;
   use crate::std_facade::Vec;
   #[cfg(feature = "strict-test")]
   use crate::std_facade::vec;
@@ -808,10 +812,32 @@ mod test {
   use crate::strategy::*;
   #[cfg(feature = "strict-test")]
   use crate::strict::ensure_property;
+  #[cfg(feature = "strict-test")]
+  use crate::test_runner::PropertyResult;
+
+  /// Complete concrete assertion failures remain allocated.
+  type Check<S> = Result<(), Box<PredicateFailure<S>>>;
+  /// Native comparison operands stay together without a large stack error.
+  type Equality<L, R = L> = Result<(), Box<ComparisonFailure<L, R>>>;
+  /// Entropy filling retains both bytes and the fallback decision.
+  type Entropy = ([u8; 4], EntropySeedStatus);
+  /// The original seed, wire representation, and parsed seed.
+  #[cfg(feature = "strict-test")]
+  type SeedRoundTrip = (Seed, String, Option<Seed>);
+  /// Seeded properties retain complete success and failure subjects.
+  #[cfg(feature = "strict-test")]
+  type SeedProperty<S> = PropertyResult<Seed, S, Box<PredicateFailure<S>>>;
+  /// All parent, sibling, and grandchild rngs and their emitted bytes.
+  #[cfg(feature = "strict-test")]
+  type Streams = (Seed, [(TestRng, [u8; 32]); 6]);
+  /// Recorder state and each emitted value alongside the captured bytes.
+  type Recording = (TestRng, u32, u64, [u8; 16], Option<Vec<u8>>);
+  /// Malformed seeds and the valid empty pass-through seed.
+  type ParsedSeeds = [Option<Seed>; 5];
 
   #[cfg(feature = "strict-test")]
   #[test]
-  fn gen_parse_seeds() -> Result<(), TestFailure> {
+  fn gen_parse_seeds() -> SeedProperty<SeedRoundTrip> {
     let seeds = prop_oneof![
       any::<[u8; 16]>().prop_map(Seed::XorShift),
       any::<[u8; 32]>().prop_map(Seed::ChaCha),
@@ -819,13 +845,17 @@ mod test {
       any::<[u8; 32]>().prop_map(Seed::Recorder),
     ];
     ensure_property(&seeds, "every seed round-trips through the persistence codec", |seed| {
-      let parsed = ensure_some(Seed::from_persistence(&seed.to_persistence()), "a persisted seed parses back")?;
-      ensure(seed == parsed, "the parsed seed equals the original")
+      let wire = seed.to_persistence();
+      let parsed = Seed::from_persistence(&wire);
+      ensure_that((seed, wire, parsed), "the parsed seed equals the original", |observed| {
+        observed.2.as_ref() == Some(&observed.0)
+      })
+      .map_err(Box::new)
     })
   }
 
   #[test]
-  fn entropy_seed_fill_replaces_fallback_on_success() -> Result<(), TestFailure> {
+  fn entropy_seed_fill_replaces_fallback_on_success() -> Equality<Entropy, Entropy> {
     let fallback = [1_u8, 2, 3, 4];
     let (seed, status) = super::fill_entropy_seed(fallback, |dest| {
       for (slot, value) in dest.iter_mut().zip([9_u8, 8, 7, 6]) {
@@ -834,25 +864,32 @@ mod test {
       Ok::<(), ()>(())
     });
 
-    ensure(status == super::EntropySeedStatus::Filled, "successful entropy fill reports Filled")?;
-    ensure(seed == [9, 8, 7, 6], "successful entropy fill replaces the fallback seed")
+    ensure_eq(
+      (seed, status),
+      ([9, 8, 7, 6], EntropySeedStatus::Filled),
+      "successful entropy fill replaces the fallback seed",
+    )
+    .map_err(Box::new)
+    .map(drop)
   }
 
   #[test]
-  fn entropy_seed_fill_keeps_fallback_on_error() -> Result<(), TestFailure> {
+  fn entropy_seed_fill_keeps_fallback_on_error() -> Equality<Entropy, Entropy> {
     let fallback = [1_u8, 2, 3, 4];
     let (seed, status) = super::fill_entropy_seed(fallback, |_dest| Err::<(), ()>(()));
 
-    ensure(status == super::EntropySeedStatus::Fallback, "failed entropy fill reports Fallback")?;
-    ensure(
-      seed == [1, 2, 3, 4],
-      "failed entropy fill preserves the deterministic fallback seed",
+    ensure_eq(
+      (seed, status),
+      (fallback, EntropySeedStatus::Fallback),
+      "failed entropy fill preserves the fallback seed",
     )
+    .map_err(Box::new)
+    .map(drop)
   }
 
   #[cfg(feature = "strict-test")]
   #[test]
-  fn rngs_dont_clone_self_on_genrng() -> Result<(), TestFailure> {
+  fn rngs_dont_clone_self_on_genrng() -> SeedProperty<Streams> {
     let seeds = prop_oneof![
       any::<[u8; 16]>().prop_map(Seed::XorShift),
       any::<[u8; 32]>().prop_map(Seed::ChaCha),
@@ -864,116 +901,123 @@ mod test {
       any::<[u8; 32]>().prop_map(Seed::Recorder),
     ];
     ensure_property(&seeds, "derived rngs never repeat their parent's stream", |seed| {
-      type Value = [u8; 32];
-      let orig = TestRng::from_seed_internal(seed);
-
+      let orig = TestRng::from_seed_internal(seed.clone());
       let mut parent_clone = orig.clone();
-      let mut first_child = parent_clone.gen_rng();
-      ensure(
-        parent_clone.random::<Value>() != first_child.random::<Value>(),
-        "a child rng differs from its parent",
-      )?;
-
-      let mut rng1 = orig;
-      let mut rng2 = rng1.gen_rng();
-      let mut rng3 = rng1.gen_rng();
-      let mut rng4 = rng2.gen_rng();
-      let parent = rng1.random::<Value>();
-      let child = rng2.random::<Value>();
-      let sibling = rng3.random::<Value>();
-      let grandchild = rng4.random::<Value>();
-      ensure_all(&[
-        (parent != child, "first child differs from the parent"),
-        (parent != sibling, "second child differs from the parent"),
-        (parent != grandchild, "grandchild differs from the parent"),
-        (child != sibling, "siblings differ from each other"),
-        (child != grandchild, "grandchild differs from its parent's sibling"),
-        (sibling != grandchild, "second sibling differs from the grandchild"),
-      ])
+      let first_child = parent_clone.gen_rng();
+      let mut parent = orig;
+      let mut child = parent.gen_rng();
+      let sibling = parent.gen_rng();
+      let grandchild = child.gen_rng();
+      let streams = [parent_clone, first_child, parent, child, sibling, grandchild].map(|mut rng| {
+        let bytes = rng.random::<[u8; 32]>();
+        (rng, bytes)
+      });
+      ensure_that(
+        (seed, streams),
+        "derived streams differ from parents, siblings, and grandchildren",
+        |observed| {
+          let [
+            original_bytes,
+            first_bytes,
+            parent_bytes,
+            child_bytes,
+            sibling_bytes,
+            grandchild_bytes,
+          ] = observed.1.each_ref().map(|stream| stream.1);
+          original_bytes != first_bytes
+            && parent_bytes != child_bytes
+            && parent_bytes != sibling_bytes
+            && parent_bytes != grandchild_bytes
+            && child_bytes != sibling_bytes
+            && child_bytes != grandchild_bytes
+            && sibling_bytes != grandchild_bytes
+        },
+      )
+      .map_err(Box::new)
     })
   }
 
+  /// Mixed-width reads and the buffers observed before and after depletion.
+  type PassThroughReads = (u32, u64, [u8; 4], [u8; 4]);
+
   #[test]
-  fn passthrough_rng_behaves_properly() -> Result<(), TestFailure> {
+  fn passthrough_rng_behaves_properly() -> Equality<PassThroughReads, PassThroughReads> {
     let mut rng = TestRng::from_seed(RngAlgorithm::PassThrough, &[
       0xDE, 0xC0, 0x12, 0x34, 0x56, 0x78, 0xFE, 0xCA, 0xEF, 0xBE, 0xAD, 0xDE, 0x01, 0x02, 0x03,
     ]);
-
+    let first = rng.next_u32();
+    let second = rng.next_u64();
+    let mut tail = [0; 4];
+    rng.fill_bytes(&mut tail);
+    let mut depleted = [0; 4];
+    rng.fill_bytes(&mut depleted);
     ensure_eq(
-      &0x3412_C0DE_u32,
-      &rng.next_u32(),
-      "the first dword replays the buffer little-endian",
-    )?;
-    ensure_eq(&0xDEAD_BEEF_CAFE_7856_u64, &rng.next_u64(), "the next qword continues the buffer")?;
+      (first, second, tail, depleted),
+      (0x3412_C0DE, 0xDEAD_BEEF_CAFE_7856, [1, 2, 3, 0], [0; 4]),
+      "PassThrough replays little-endian values then zero-pads its depleted buffer",
+    )
+    .map_err(Box::new)
+    .map(drop)
+  }
 
-    let mut buf = [0_u8; 4];
-    rng.fill_bytes(&mut buf[0..4]);
-    ensure([1, 2, 3, 0] == buf, "fill_bytes drains the tail and zero-pads")?;
-    rng.fill_bytes(&mut buf[0..4]);
-    ensure([0, 0, 0, 0] == buf, "a depleted buffer yields zeros")
+  /// The three public reading forms of a fixed seeded stream.
+  type StableReads = ([u32; 4], [u64; 4], [u8; 16]);
+
+  /// Observe the same seed through each public reading form.
+  fn stable_reads(algorithm: RngAlgorithm, seed: &[u8]) -> StableReads {
+    let mut rng_u32 = TestRng::from_seed(algorithm, seed);
+    let mut rng_u64 = TestRng::from_seed(algorithm, seed);
+    let mut rng_fill = TestRng::from_seed(algorithm, seed);
+    let dwords = from_fn(|_| rng_u32.next_u32());
+    let qwords = from_fn(|_| rng_u64.next_u64());
+    let mut fill = [0; 16];
+    rng_fill.fill_bytes(&mut fill);
+    (dwords, qwords, fill)
   }
 
   #[test]
-  fn seeded_xorshift_output_is_stable() -> Result<(), TestFailure> {
+  fn seeded_xorshift_output_is_stable() -> Equality<StableReads, StableReads> {
     let seed = [
       0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
     ];
-    let mut rng_u32 = TestRng::from_seed(RngAlgorithm::XorShift, &seed);
-    let mut rng_u64 = TestRng::from_seed(RngAlgorithm::XorShift, &seed);
-    let mut rng_fill = TestRng::from_seed(RngAlgorithm::XorShift, &seed);
-
-    ensure(
-      [471_271_404, 722_341_711, 1_880_555_887, 252_576_780]
-        == [rng_u32.next_u32(), rng_u32.next_u32(), rng_u32.next_u32(), rng_u32.next_u32()],
-      "the seeded xorshift u32 stream is stable",
-    )?;
-    ensure(
-      [
-        3_102_434_025_752_954_860, 1_084_809_011_709_542_767, 17_342_619_095_589_341_798, 5_127_465_042_768_897_837,
-      ] == [rng_u64.next_u64(), rng_u64.next_u64(), rng_u64.next_u64(), rng_u64.next_u64()],
-      "the seeded xorshift u64 stream is stable",
-    )?;
-
-    let mut fill = [0_u8; 16];
-    rng_fill.fill_bytes(&mut fill);
-    ensure(
-      [236, 7, 23, 28, 79, 15, 14, 43, 111, 1, 23, 112, 12, 4, 14, 15] == fill,
-      "the seeded xorshift fill_bytes output is stable",
+    ensure_eq(
+      stable_reads(RngAlgorithm::XorShift, &seed),
+      (
+        [471_271_404, 722_341_711, 1_880_555_887, 252_576_780],
+        [
+          3_102_434_025_752_954_860, 1_084_809_011_709_542_767, 17_342_619_095_589_341_798, 5_127_465_042_768_897_837,
+        ],
+        [236, 7, 23, 28, 79, 15, 14, 43, 111, 1, 23, 112, 12, 4, 14, 15],
+      ),
+      "the seeded XorShift stream is stable across reading forms",
     )
+    .map_err(Box::new)
+    .map(drop)
   }
 
   #[test]
-  fn seeded_chacha_output_is_stable() -> Result<(), TestFailure> {
+  fn seeded_chacha_output_is_stable() -> Equality<StableReads, StableReads> {
     let seed = [
       0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
       0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
     ];
-    let mut rng_u32 = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
-    let mut rng_u64 = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
-    let mut rng_fill = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
-
-    ensure(
-      [2_100_034_873, 1_780_073_945, 1_996_733_837, 1_229_642_936]
-        == [rng_u32.next_u32(), rng_u32.next_u32(), rng_u32.next_u32(), rng_u32.next_u32()],
-      "the seeded chacha u32 stream is stable",
-    )?;
-    ensure(
-      [
-        7_645_359_380_336_737_593, 5_281_276_197_874_154_893, 14_729_830_432_180_286_858, 10_530_800_043_416_210_610,
-      ] == [rng_u64.next_u64(), rng_u64.next_u64(), rng_u64.next_u64(), rng_u64.next_u64()],
-      "the seeded chacha u64 stream is stable",
-    )?;
-
-    let mut fill = [0_u8; 16];
-    rng_fill.fill_bytes(&mut fill);
-    ensure(
-      [57, 253, 43, 125, 217, 197, 25, 106, 141, 189, 3, 119, 184, 220, 74, 73] == fill,
-      "the seeded chacha fill_bytes output is stable",
+    ensure_eq(
+      stable_reads(RngAlgorithm::ChaCha, &seed),
+      (
+        [2_100_034_873, 1_780_073_945, 1_996_733_837, 1_229_642_936],
+        [
+          7_645_359_380_336_737_593, 5_281_276_197_874_154_893, 14_729_830_432_180_286_858, 10_530_800_043_416_210_610,
+        ],
+        [57, 253, 43, 125, 217, 197, 25, 106, 141, 189, 3, 119, 184, 220, 74, 73],
+      ),
+      "the seeded ChaCha stream is stable across reading forms",
     )
+    .map_err(Box::new)
+    .map(drop)
   }
 
   #[test]
-  fn derived_child_rng_output_is_stable() -> Result<(), TestFailure> {
+  fn derived_child_rng_output_is_stable() -> Equality<[u32; 4], [u32; 4]> {
     let seed = [
       0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
       0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
@@ -981,15 +1025,17 @@ mod test {
     let mut parent = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
     let mut child = parent.gen_rng();
 
-    ensure(
-      [357_635_273, 1_295_757_006, 1_334_659_017, 3_423_482_104]
-        == [child.next_u32(), child.next_u32(), child.next_u32(), child.next_u32()],
+    ensure_eq(
+      [child.next_u32(), child.next_u32(), child.next_u32(), child.next_u32()],
+      [357_635_273, 1_295_757_006, 1_334_659_017, 3_423_482_104],
       "the derived child rng stream is stable",
     )
+    .map_err(Box::new)
+    .map(drop)
   }
 
   #[test]
-  fn recorder_bytes_used_matches_emitted_bytes() -> Result<(), TestFailure> {
+  fn recorder_bytes_used_matches_emitted_bytes() -> Check<Recording> {
     let seed = [
       0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
       0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
@@ -1000,77 +1046,97 @@ mod test {
     let mut fill = [0_u8; 16];
     rng.fill_bytes(&mut fill);
 
-    let mut expected = Vec::new();
-    expected.extend_from_slice(&first.to_le_bytes());
-    expected.extend_from_slice(&second.to_le_bytes());
-    expected.extend_from_slice(&fill);
-
-    let bytes_used = ensure_some(rng.bytes_used(), "recorder exposes emitted bytes")?;
-    ensure(expected == bytes_used, "the recorder replays exactly the bytes it emitted")
-  }
-
-  #[test]
-  fn try_from_bytes_accepts_correct_seed_lengths() -> Result<(), TestFailure> {
-    ensure_all(&[
-      (
-        Seed::try_from_bytes(RngAlgorithm::XorShift, &[0; 16]).is_ok(),
-        "a 16-byte XorShift seed is accepted",
-      ),
-      (
-        Seed::try_from_bytes(RngAlgorithm::ChaCha, &[0; 32]).is_ok(),
-        "a 32-byte ChaCha seed is accepted",
-      ),
-      (
-        Seed::try_from_bytes(RngAlgorithm::Recorder, &[0; 32]).is_ok(),
-        "a 32-byte Recorder seed is accepted",
-      ),
-      (
-        Seed::try_from_bytes(RngAlgorithm::PassThrough, &[]).is_ok(),
-        "PassThrough accepts any seed length, including empty",
-      ),
-    ])
-  }
-
-  #[test]
-  fn try_from_bytes_rejects_wrong_seed_lengths() -> Result<(), TestFailure> {
-    let xorshift = Seed::try_from_bytes(RngAlgorithm::XorShift, &[0; 15]).err();
-    let chacha = Seed::try_from_bytes(RngAlgorithm::ChaCha, &[0; 31]).err();
-    let recorder = Seed::try_from_bytes(RngAlgorithm::Recorder, &[0; 33]).err();
-    let render = |error: super::SeedLengthError| error.to_string();
-    ensure_eq(
-      &"XorShift requires a 16-byte seed, got 15 bytes".to_owned(),
-      &ensure_some(xorshift, "a 15-byte XorShift seed is rejected").map(render)?,
-      "the XorShift length error reports the required and actual sizes",
-    )?;
-    ensure_eq(
-      &"ChaCha requires a 32-byte seed, got 31 bytes".to_owned(),
-      &ensure_some(chacha, "a 31-byte ChaCha seed is rejected").map(render)?,
-      "the ChaCha length error reports the required and actual sizes",
-    )?;
-    ensure_eq(
-      &"Recorder requires a 32-byte seed, got 33 bytes".to_owned(),
-      &ensure_some(recorder, "a 33-byte Recorder seed is rejected").map(render)?,
-      "the Recorder length error reports the required and actual sizes",
+    let bytes_used = rng.bytes_used();
+    ensure_that(
+      (rng, first, second, fill, bytes_used),
+      "the recorder retains exactly the bytes emitted by every reading form",
+      |observed| {
+        observed.4.as_ref().is_some_and(|bytes| {
+          bytes.iter().copied().eq(
+            observed
+              .1
+              .to_le_bytes()
+              .into_iter()
+              .chain(observed.2.to_le_bytes())
+              .chain(observed.3),
+          )
+        })
+      },
     )
+    .map_err(Box::new)
+    .map(drop)
+  }
+
+  /// Complete exact-length seed construction outcomes.
+  type SeedResults<const N: usize> = [Result<Seed, SeedLengthError>; N];
+
+  #[test]
+  fn try_from_bytes_accepts_correct_seed_lengths() -> Equality<SeedResults<4>, SeedResults<4>> {
+    ensure_eq(
+      [
+        Seed::try_from_bytes(RngAlgorithm::XorShift, &[0; 16]),
+        Seed::try_from_bytes(RngAlgorithm::ChaCha, &[0; 32]),
+        Seed::try_from_bytes(RngAlgorithm::Recorder, &[0; 32]),
+        Seed::try_from_bytes(RngAlgorithm::PassThrough, &[]),
+      ],
+      [
+        Ok(Seed::XorShift([0; 16])),
+        Ok(Seed::ChaCha([0; 32])),
+        Ok(Seed::Recorder([0; 32])),
+        Ok(Seed::PassThrough(None, [].into())),
+      ],
+      "exact-length seeds preserve their algorithm and bytes; PassThrough also accepts empty seeds",
+    )
+    .map_err(Box::new)
+    .map(drop)
   }
 
   #[test]
-  fn persistence_parser_rejects_malformed_payloads() -> Result<(), TestFailure> {
-    ensure_all(&[
-      (
-        Seed::from_persistence("cc abc").is_none(),
-        "an odd-length base16 payload is rejected",
-      ),
-      (Seed::from_persistence("cc").is_none(), "a missing ChaCha payload is rejected"),
-      (
-        Seed::from_persistence("xs 1 2 3").is_none(),
-        "a short XorShift dword list is rejected",
-      ),
-      (Seed::from_persistence("").is_none(), "an empty line parses to no seed"),
-      (
-        Seed::from_persistence("pt").is_some(),
-        "a bare PassThrough key parses as the empty seed",
-      ),
-    ])
+  fn try_from_bytes_rejects_wrong_seed_lengths() -> Check<SeedResults<3>> {
+    let subject = [
+      Seed::try_from_bytes(RngAlgorithm::XorShift, &[0; 15]),
+      Seed::try_from_bytes(RngAlgorithm::ChaCha, &[0; 31]),
+      Seed::try_from_bytes(RngAlgorithm::Recorder, &[0; 33]),
+    ];
+    let matches_length = |result: &Result<Seed, SeedLengthError>,
+                          (algorithm, required, actual, message): (&'static str, usize, usize, &'static str)| {
+      let Err(ref error) = *result else {
+        return false;
+      };
+      *error
+        == SeedLengthError {
+          algorithm,
+          required,
+          actual,
+        }
+        && error.to_string() == message
+    };
+    ensure_that(
+      subject,
+      "length errors preserve and render the required and supplied sizes",
+      |results| {
+        results
+          .iter()
+          .zip([
+            ("XorShift", 16, 15, "XorShift requires a 16-byte seed, got 15 bytes"),
+            ("ChaCha", 32, 31, "ChaCha requires a 32-byte seed, got 31 bytes"),
+            ("Recorder", 32, 33, "Recorder requires a 32-byte seed, got 33 bytes"),
+          ])
+          .all(|(result, expected)| matches_length(result, expected))
+      },
+    )
+    .map_err(Box::new)
+    .map(drop)
+  }
+
+  #[test]
+  fn persistence_parser_rejects_malformed_payloads() -> Equality<ParsedSeeds, ParsedSeeds> {
+    ensure_eq(
+      ["cc abc", "cc", "xs 1 2 3", "", "pt"].map(Seed::from_persistence),
+      [None, None, None, None, Some(Seed::PassThrough(None, [].into()))],
+      "malformed payloads are rejected while a bare PassThrough key denotes an empty seed",
+    )
+    .map_err(Box::new)
+    .map(drop)
   }
 }

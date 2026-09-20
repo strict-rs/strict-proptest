@@ -87,7 +87,7 @@ proptest! {
 # fn main() { test_frob(); }
 ```
 
-Note that `prop_assume!` only exists inside the `proptest!` macro surface. In a strict property test (`proptest::strict::ensure_property`), the same precondition belongs in the strategy as a `prop_filter`, so unwanted inputs are skipped at generation time and an over-strict filter surfaces as `TestFailure::PropertyAborted` — see the Strict property tests chapter.
+Note that `prop_assume!` only exists inside the `proptest!` macro surface. In a strict property test (`proptest::strict::ensure_property`), the same precondition belongs in the strategy as a `prop_filter`, so unwanted inputs are skipped at generation time and an over-strict filter surfaces as `PropertyCause::Aborted` — see the Strict property tests chapter.
 
 While useful, filtering has a lot of disadvantages:
 

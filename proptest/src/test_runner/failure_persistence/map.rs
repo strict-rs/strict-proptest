@@ -59,47 +59,59 @@ impl FailurePersistence for MapFailurePersistence {
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
+  use strict_test_support::ComparisonFailure;
+  use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_some;
+  use strict_test_support::ensure_that;
 
   use super::*;
   use crate::test_runner::failure_persistence::tests::*;
 
+  /// Native seeds returned by the persistence backend.
+  type Seeds = Vec<PersistedSeed>;
+  /// Backend state and observations for the saved, missing, and unrelated sources.
+  type Recovery = (MapFailurePersistence, [Seeds; 3]);
+
   #[test]
-  fn initial_map_is_empty() -> Result<(), TestFailure> {
-    ensure(
-      MapFailurePersistence::default().load_persisted_failures2(HI_PATH).is_empty(),
+  fn initial_map_is_empty() -> Result<(), ComparisonFailure<Seeds, Seeds>> {
+    ensure_eq(
+      MapFailurePersistence::default().load_persisted_failures2(HI_PATH),
+      Vec::new(),
       "a fresh map has no persisted failures",
     )
+    .map(drop)
   }
 
   #[test]
-  fn seeds_recoverable() -> Result<(), TestFailure> {
+  fn seeds_recoverable() -> Result<(), PredicateFailure<Recovery>> {
     let mut persistence = MapFailurePersistence::default();
     persistence.save_persisted_failure2(HI_PATH, INC_SEED, &"");
-    let restored = persistence.load_persisted_failures2(HI_PATH);
-    ensure_eq(&1, &restored.len(), "one saved seed is restored")?;
-    let first = ensure_some(restored.first(), "the restored list has a head")?;
-    ensure(INC_SEED == *first, "the restored seed equals the saved one")?;
-
-    ensure(
-      persistence.load_persisted_failures2(None).is_empty(),
-      "a missing source restores nothing",
-    )?;
-    ensure(
-      persistence.load_persisted_failures2(UNREL_PATH).is_empty(),
-      "an unrelated source restores nothing",
+    let restored = [
+      persistence.load_persisted_failures2(HI_PATH),
+      persistence.load_persisted_failures2(None),
+      persistence.load_persisted_failures2(UNREL_PATH),
+    ];
+    ensure_that(
+      (persistence, restored),
+      "only the source used to save a seed restores it",
+      |observed| {
+        let [ref saved, ref missing, ref unrelated] = observed.1;
+        saved == &[INC_SEED] && missing.is_empty() && unrelated.is_empty()
+      },
     )
+    .map(drop)
   }
 
   #[test]
-  fn seeds_deduplicated() -> Result<(), TestFailure> {
+  fn seeds_deduplicated() -> Result<(), ComparisonFailure<Seeds, [PersistedSeed; 1]>> {
     let mut persistence = MapFailurePersistence::default();
     persistence.save_persisted_failure2(HI_PATH, INC_SEED, &"");
     persistence.save_persisted_failure2(HI_PATH, INC_SEED, &"");
-    let restored = persistence.load_persisted_failures2(HI_PATH);
-    ensure_eq(&1, &restored.len(), "identical seeds are deduplicated")
+    ensure_eq(
+      persistence.load_persisted_failures2(HI_PATH),
+      [INC_SEED],
+      "identical seeds are deduplicated",
+    )
+    .map(drop)
   }
 }

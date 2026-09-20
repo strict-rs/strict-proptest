@@ -410,13 +410,12 @@ error!(
 // but not `#[proptest(strategy = <expr>)]`.
 // This does not apply to the top level type declaration.
 fatal!(
-    cant_set_param_but_not_strat(self_ty: &syn::Type, item_kind: &str),
-    E0011,
-    "Cannot set `#[proptest(params = <type>)]` on {0} while not providing a \
-     strategy for the {0} to use it since `<{1} as Arbitrary<'a>>::Strategy` \
-     may require a different type than the one provided in `<type>`.",
-    item_kind,
-    quote! { #self_ty }
+  cant_set_param_but_not_strat(self_ty: &syn::Type, item_kind: &str),
+  E0011,
+  "Cannot set `#[proptest(params = <type>)]` on {0} while not providing a strategy for the {0} to use it since `<{1} as \
+   Arbitrary<'a>>::Strategy` may require a different type than the one provided in `<type>`.",
+  item_kind,
+  quote! { #self_ty }
 );
 
 // Happens when `#[proptest(filter = "<expr>")]` is set on `item_kind`,
@@ -460,31 +459,24 @@ error!(
 // Happens when `<modifier>` in `#[proptest(<modifier>)]` is set more than
 // once.
 error!(
-    set_again(meta: &syn::Meta),
-    E0017,
-    "The attribute modifier `{}` inside `#[proptest(..)]` has already been \
-     set. To fix the error, please remove at least one such modifier.",
-    meta.path().into_token_stream()
+  set_again(meta: &syn::Meta),
+  E0017,
+  "The attribute modifier `{}` inside `#[proptest(..)]` has already been set. To fix the error, please remove at least one such modifier.",
+  meta.path().into_token_stream()
 );
 
 // Happens when `<modifier>` in `#[proptest(<modifier>)]` is unknown to
 // us but we can make an educated guess as to what the user meant.
 error!(
-    did_you_mean(found: &str, expected: &str),
-    E0018,
-    "Unknown attribute modifier `{}` inside #[proptest(..)] is not allowed. \
-     Did you mean to use `{}` instead?",
-    found,
-    expected
+  did_you_mean(found: &str, expected: &str),
+  E0018, "Unknown attribute modifier `{}` inside #[proptest(..)] is not allowed. Did you mean to use `{}` instead?", found, expected
 );
 
 // TODO: `unkown_modifier` is misspelled
 // Happens when `<modifier>` in `#[proptest(<modifier>)]` is unknown to us.
 error!(
-    unkown_modifier(modifier: &str),
-    E0018,
-    "Unknown attribute modifier `{}` inside `#[proptest(..)]` is not allowed.",
-    modifier
+  unkown_modifier(modifier: &str),
+  E0018, "Unknown attribute modifier `{}` inside `#[proptest(..)]` is not allowed.", modifier
 );
 
 // Happens when `#[proptest(no_params)]` is malformed.
@@ -505,13 +497,11 @@ error!(
 
 // Happens when `#[proptest(weight..)]` is malformed.
 error!(
-    weight_malformed(meta: &syn::Meta),
-    E0021,
-    "The attribute modifier `{0}` inside `#[proptest(..)]` must have the \
-    format `#[proptest({0} = <integer>)]` where `<integer>` is an integer that \
-    fits within a `u32`. An example: `#[proptest({0} = 2)]` to set a relative \
-    weight of 2.",
-    meta.path().into_token_stream()
+  weight_malformed(meta: &syn::Meta),
+  E0021,
+  "The attribute modifier `{0}` inside `#[proptest(..)]` must have the format `#[proptest({0} = <integer>)]` where `<integer>` is an \
+   integer that fits within a `u32`. An example: `#[proptest({0} = 2)]` to set a relative weight of 2.",
+  meta.path().into_token_stream()
 );
 
 // Happens when both `#[proptest(params = "<type>")]` and
@@ -551,64 +541,60 @@ fatal!(
 // or `#[proptest(value = "<expr>")]` is malformed. In other words, `<expr>`
 // is not a valid Rust expression.
 error!(
-    strategy_malformed(meta: &syn::Meta),
-    E0026,
-    "The attribute modifier `{0}` inside `#[proptest(..)]` must have the \
-     format `#[proptest({0} = \"<expr>\")]` where `<expr>` is a valid Rust \
-     expression.",
-    meta.path().into_token_stream()
+  strategy_malformed(meta: &syn::Meta),
+  E0026,
+  "The attribute modifier `{0}` inside `#[proptest(..)]` must have the format `#[proptest({0} = \"<expr>\")]` where `<expr>` is a valid \
+   Rust expression.",
+  meta.path().into_token_stream()
 );
 
 // Happens when `#[proptest(filter..)]` is malformed.
 // For example, `<expr>` inside `#[proptest(filter = "<expr>")]` or
 // is malformed. In other words, `<expr>` is not a valid Rust expression.
 error!(
-    filter_malformed(meta: &syn::Meta),
-    E0027,
-    "The attribute modifier `{0}` inside `#[proptest(..)]` must have the \
-     format `#[proptest({0} = \"<expr>\")]` where `<expr>` is a valid Rust \
-     expression.",
-    meta.path().into_token_stream()
+  filter_malformed(meta: &syn::Meta),
+  E0027,
+  "The attribute modifier `{0}` inside `#[proptest(..)]` must have the format `#[proptest({0} = \"<expr>\")]` where `<expr>` is a valid \
+   Rust expression.",
+  meta.path().into_token_stream()
 );
 
 // Any attributes on a skipped variant has no effect - so we emit this error
 // to the user so that they are aware.
 error!(
-    skipped_variant_has_weight(item_kind: &str),
-    E0028,
-    "A variant has been skipped. Setting `#[proptest(weight = <value>)]` on \
-     the {} is meaningless and is not allowed.",
-    item_kind
+  skipped_variant_has_weight(item_kind: &str),
+  E0028, "A variant has been skipped. Setting `#[proptest(weight = <value>)]` on the {} is meaningless and is not allowed.", item_kind
 );
 
 // Any attributes on a skipped variant has no effect - so we emit this error
 // to the user so that they are aware.
 error!(
-    skipped_variant_has_param(item_kind: &str),
-    E0028,
-    "A variant has been skipped. Setting `#[proptest(no_param)]` or \
-    `#[proptest(params(<type>))]` on the {} is meaningless and is not allowed.",
-    item_kind
+  skipped_variant_has_param(item_kind: &str),
+  E0028,
+  "A variant has been skipped. Setting `#[proptest(no_param)]` or `#[proptest(params(<type>))]` on the {} is meaningless and is not \
+   allowed.",
+  item_kind
 );
 
 // Any attributes on a skipped variant has no effect - so we emit this error
 // to the user so that they are aware.
 error!(
-    skipped_variant_has_strat(item_kind: &str),
-    E0028,
-    "A variant has been skipped. Setting `#[proptest(value = \"<expr>\")]` or \
-     `#[proptest(strategy = \"<expr>\")]` on the {} is meaningless and is not \
-     allowed.",
-    item_kind
+  skipped_variant_has_strat(item_kind: &str),
+  E0028,
+  "A variant has been skipped. Setting `#[proptest(value = \"<expr>\")]` or `#[proptest(strategy = \"<expr>\")]` on the {} is meaningless \
+   and is not allowed.",
+  item_kind
 );
 
 // Any attributes on a skipped variant has no effect - so we emit this error
 // to the user so that they are aware. Unfortunately, there's no way to
 // emit a warning to the user, so we emit an error instead.
-error!(skipped_variant_has_filter(item_kind: &str), E0028,
-    "A variant has been skipped. Setting `#[proptest(filter = \"<expr>\")]` or \
-    on the {} is meaningless and is not allowed.",
-    item_kind);
+error!(
+  skipped_variant_has_filter(item_kind: &str),
+  E0028,
+  "A variant has been skipped. Setting `#[proptest(filter = \"<expr>\")]` or on the {} is meaningless and is not allowed.",
+  item_kind
+);
 
 // There's only one way to produce a specific unit variant, so setting
 // `#[proptest(strategy = "<expr>")]` or `#[proptest(value = "<expr>")]`
@@ -704,22 +690,21 @@ error!(
 // the params can't be used. TODO: reduce this to a warning once we can
 // emit warnings.
 error!(
-    cant_set_param_and_regex(item_kind: &str),
-    E0035,
-    "Cannot set #[proptest(regex = \"<string>\")] and \
-     `#[proptest(params = <type>)]` on {0} because the latter is a logic bug \
-     since `params` cannot be used in `<string>`.",
-    item_kind
+  cant_set_param_and_regex(item_kind: &str),
+  E0035,
+  "Cannot set #[proptest(regex = \"<string>\")] and `#[proptest(params = <type>)]` on {0} because the latter is a logic bug since \
+   `params` cannot be used in `<string>`.",
+  item_kind
 );
 
 #[cfg(test)]
 mod tests {
   #[test]
-  fn test_mk_err_msg_format() -> Result<(), ::strict_test_support::TestFailure> {
+  fn test_mk_err_msg_format() -> Result<(), ::strict_test_support::ComparisonFailure<String, &'static str>> {
     ::strict_test_support::ensure_eq(
-            &mk_err_msg!(E0001, "This is a sample error message."),
-            &"[proptest_derive, E0001] during #[derive(Arbitrary)]:\nThis is a sample error message. Please see: https://proptest-rs.github.io/proptest/proptest-derive/errors.html#e0001 for more information.".to_owned(),
+            mk_err_msg!(E0001, "This is a sample error message."),
+            "[proptest_derive, E0001] during #[derive(Arbitrary)]:\nThis is a sample error message. Please see: https://proptest-rs.github.io/proptest/proptest-derive/errors.html#e0001 for more information.",
             "the composed error message carries the code, banner, and doc link",
-        )
+        ).map(drop)
   }
 }

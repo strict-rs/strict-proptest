@@ -290,11 +290,12 @@ impl<S: Strategy, R: Strategy, F: Fn(S::Value) -> R> Strategy for IndFlattenMap<
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_some;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
+  use crate::std_facade::Box;
+  use crate::std_facade::Vec;
   use crate::strategy::check_strategy_sanity;
   use crate::strategy::just::Just;
   use crate::test_runner::Config;
@@ -304,48 +305,56 @@ mod test {
   use crate::test_runner::TestRng;
   use crate::test_runner::runner_test_config;
 
-  #[test]
-  fn test_flat_map() -> Result<(), TestFailure> {
-    // Pick random integer A, then random integer B which is ±5 of A and
-    // assert that B <= A if A > 10000. Shrinking should always converge to
-    // A=10001, B=10002.
-    let input = (0..65536).prop_flat_map(|first| (Just(first), (first - 5..first + 5)));
+  /// Generation results followed by the native run-one result for each dependent pair.
+  type DependentRuns = Vec<Result<Result<bool, TestError<(i32, i32)>>, Reason>>;
 
-    let mut failures = 0;
+  #[test]
+  fn test_flat_map() -> Result<(), PredicateFailure<DependentRuns>> {
+    let input = (0_i32..65536).prop_flat_map(|first| (Just(first), first.saturating_sub(5)..first.saturating_add(5)));
     let mut runner = TestRunner::new_with_rng(
       Config {
-        max_shrink_iters: u32::MAX - 1,
+        max_shrink_iters: u32::MAX.saturating_sub(1),
         ..runner_test_config()
       },
       TestRng::deterministic_rng(RngAlgorithm::default()),
     );
-    for _ in 0..1000 {
-      let case = ensure_some(input.new_tree(&mut runner).ok(), "flat_map strategy generates a value tree")?;
-      let result = runner.run_one(case, |(first, second)| match (first, second) {
-        (left, right) if left <= 10000 || right <= left => Ok(()),
-        _ => Err(TestCaseError::fail("fail")),
-      });
-
-      match result {
-        Ok(_) => {}
-        Err(TestError::Fail(_, falsified)) => {
-          failures += 1;
-          ensure((10001, 10002) == falsified, "shrinking converges to the minimal dependent pair")?;
-        }
-        _ => ensure(false, "run_one yields either a success or a failed case")?,
+    let property = |(first, second)| {
+      if first <= 10000 || second <= first {
+        Ok(())
+      } else {
+        Err(TestCaseError::fail("fail"))
       }
-    }
-
-    ensure(failures > 250, "enough cases falsified")
+    };
+    let runs: DependentRuns = (0..1000)
+      .map(|_| input.new_tree(&mut runner).map(|tree| runner.run_one(tree, property)))
+      .collect();
+    ensure_that(
+      runs,
+      "all failing dependent pairs minimize to (10001, 10002), with more than 250 failures",
+      |observed| {
+        observed
+          .iter()
+          .all(|run| matches!(run, Ok(Ok(_) | Err(TestError::Fail(_, (10001, 10002))))))
+          && observed
+            .iter()
+            .filter(|run| matches!(run, Ok(Err(TestError::Fail(_, _)))))
+            .count()
+            > 250
+      },
+    )
+    .map(drop)
   }
 
   #[test]
   fn test_flat_map_sanity() -> Result<(), Reason> {
-    check_strategy_sanity((0..65536).prop_flat_map(|first| (Just(first), (first - 5..first + 5))), None)
+    check_strategy_sanity(
+      (0_i32..65536).prop_flat_map(|first| (Just(first), first.saturating_sub(5)..first.saturating_add(5))),
+      None,
+    )
   }
 
   #[test]
-  fn flat_map_respects_regen_limit() -> Result<(), TestFailure> {
+  fn flat_map_respects_regen_limit() -> Result<(), impl fmt::Debug> {
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
 
@@ -366,28 +375,37 @@ mod test {
       max_flat_map_regens: 1000,
       ..runner_test_config()
     });
-    let case = ensure_some(input.new_tree(&mut runner).ok(), "nested flat_map strategy generates a value tree")?;
-    let outcome = runner.run_one(case, |_| {
-      // Only the first run fails, all others succeed
+    let property = |_| {
+      // Only the first run fails; all others succeed.
       if pass.fetch_or(true, Ordering::SeqCst) {
         Ok(())
       } else {
         Err(TestCaseError::fail("first case fails by design"))
       }
-    });
-    ensure(
-      outcome.is_err(),
-      "the deliberately-failing first case makes the bounded regen search terminate with a failure",
+    };
+    let outcome = input.new_tree(&mut runner).map(|case| runner.run_one(case, property));
+    ensure_that(
+      (runner, pass, outcome),
+      "the bounded regeneration search retains the first failing run",
+      |observed| observed.1.load(Ordering::SeqCst) && observed.2.as_ref().is_ok_and(Result::is_err),
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
   fn test_ind_flat_map_sanity() -> Result<(), Reason> {
-    check_strategy_sanity((0..65536).prop_ind_flat_map(|first| (Just(first), (first - 5..first + 5))), None)
+    check_strategy_sanity(
+      (0_i32..65536).prop_ind_flat_map(|first| (Just(first), first.saturating_sub(5)..first.saturating_add(5))),
+      None,
+    )
   }
 
   #[test]
   fn test_ind_flat_map2_sanity() -> Result<(), Reason> {
-    check_strategy_sanity((0..65536).prop_ind_flat_map2(|first| first - 5..first + 5), None)
+    check_strategy_sanity(
+      (0_i32..65536).prop_ind_flat_map2(|first| first.saturating_sub(5)..first.saturating_add(5)),
+      None,
+    )
   }
 }

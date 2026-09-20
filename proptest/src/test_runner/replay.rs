@@ -200,120 +200,95 @@ impl Replay {
 
 #[cfg(test)]
 mod tests {
+  use std::boxed::Box;
+  /// A concrete allocation retains each complete assertion subject.
+  type Check<S> = Result<(), Box<PredicateFailure<S>>>;
   use std::io::Cursor;
 
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_ok;
-  use strict_test_support::ensure_some;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
 
-  fn sample_seed() -> Seed {
-    Seed::XorShift([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
-  }
+  /// Incomplete replay bytes and the native parser outcome.
+  type PartialReplay = (Vec<u8>, io::Result<ReplayFileStatus>);
 
-  fn parse_bytes(bytes: &[u8]) -> io::Result<ReplayFileStatus> {
-    Replay::parse_from(Cursor::new(bytes.to_vec()))
-  }
+  /// Source replay, serialized bytes, write result, and complete native parse.
+  type ReplayRoundTrip = (Replay, Vec<u8>, io::Result<()>, io::Result<ReplayFileStatus>);
 
-  #[test]
-  fn valid_empty_replay_is_in_progress() -> Result<(), TestFailure> {
-    let seed = sample_seed();
+  /// Initialize a replay and retain every outcome after adding the requested steps.
+  fn replay_with_suffix(suffix: &[u8]) -> ReplayRoundTrip {
     let replay = Replay {
-      seed:  seed.clone(),
+      seed:  Seed::XorShift([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]),
       steps: Vec::new(),
     };
     let mut bytes = Vec::new();
-
-    ensure_ok(replay.init_file(&mut bytes), "replay initialization writes the header")?;
-
-    match ensure_ok(parse_bytes(&bytes), "the replay parses")? {
-      ReplayFileStatus::InProgress(parsed) => {
-        ensure(seed == parsed.seed, "the replay seed round-trips")?;
-        ensure(parsed.steps.is_empty(), "an empty step line remains an in-progress replay")
-      }
-      ReplayFileStatus::Terminated(_) => ensure(false, "empty replay is not terminated"),
-      ReplayFileStatus::Corrupt => ensure(false, "empty replay is valid"),
-    }
+    let written = replay.init_file(&mut bytes);
+    bytes.extend_from_slice(suffix);
+    let parsed = Replay::parse_from(Cursor::new(&bytes));
+    (replay, bytes, written, parsed)
   }
 
   #[test]
-  fn valid_replay_with_terminator_is_terminated() -> Result<(), TestFailure> {
-    let seed = sample_seed();
-    let mut bytes = Vec::new();
-    ensure_ok(
-      Replay {
-        seed:  seed.clone(),
-        steps: Vec::new(),
-      }
-      .init_file(&mut bytes),
-      "replay initialization writes the header",
-    )?;
-    bytes.extend_from_slice(b"+-!.");
-
-    match ensure_ok(parse_bytes(&bytes), "the terminated replay parses")? {
-      ReplayFileStatus::Terminated(parsed) => {
-        ensure(seed == parsed.seed, "the terminated replay seed round-trips")?;
-        ensure_eq(
-          &3,
-          &parsed.steps.len(),
-          "the parser stores pass, fail, and reject before the terminator",
-        )?;
-        let first_step = ensure_some(parsed.steps.first(), "the first replay step exists")?;
-        ensure(first_step.is_ok(), "the first step is a pass")?;
-        let second_step = ensure_some(parsed.steps.get(1), "the second replay step exists")?;
-        ensure(matches!(second_step, Err(TestCaseError::Fail(_))), "the second step is a failure")?;
-        let third_step = ensure_some(parsed.steps.get(2), "the third replay step exists")?;
-        ensure(matches!(third_step, Err(TestCaseError::Reject(_))), "the third step is a rejection")
-      }
-      ReplayFileStatus::InProgress(_) => ensure(false, "terminated replay is not in progress"),
-      ReplayFileStatus::Corrupt => ensure(false, "terminated replay is valid"),
-    }
+  fn valid_empty_replay_is_in_progress() -> Check<ReplayRoundTrip> {
+    ensure_that(
+      replay_with_suffix(b""),
+      "an empty replay preserves its seed and remains in progress",
+      |observed| {
+        observed.2.is_ok()
+          && matches!(observed.3, Ok(ReplayFileStatus::InProgress(ref replay)) if replay.seed == observed.0.seed && replay.steps.is_empty())
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn wrong_sentinel_is_corrupt() -> Result<(), TestFailure> {
-    ensure(
-      matches!(
-        ensure_ok(parse_bytes(b"not-proptest\nxs 1 2 3 4\n"), "the replay parser runs")?,
-        ReplayFileStatus::Corrupt
-      ),
+  fn valid_replay_with_terminator_is_terminated() -> Check<ReplayRoundTrip> {
+    ensure_that(
+      replay_with_suffix(b"+-!."),
+      "termination preserves the seed and ordered pass, fail, reject steps",
+      |observed| {
+        observed.2.is_ok()
+          && matches!(observed.3, Ok(ReplayFileStatus::Terminated(ref replay)) if replay.seed == observed.0.seed
+        && matches!(*replay.steps.as_slice(), [Ok(()), Err(TestCaseError::Fail(_)), Err(TestCaseError::Reject(_))]))
+      },
+    )
+    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn wrong_sentinel_is_corrupt() -> Check<io::Result<ReplayFileStatus>> {
+    ensure_that(
+      Replay::parse_from(Cursor::new(b"not-proptest\nxs 1 2 3 4\n")),
       "a replay without the sentinel is corrupt",
+      |parsed| matches!(*parsed, Ok(ReplayFileStatus::Corrupt)),
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn missing_seed_is_corrupt() -> Result<(), TestFailure> {
-    let mut replay_bytes = SENTINEL.as_bytes().to_vec();
-    replay_bytes.push(b'\n');
-
-    ensure(
-      matches!(
-        ensure_ok(parse_bytes(&replay_bytes), "the replay parser runs")?,
-        ReplayFileStatus::Corrupt
-      ),
-      "a replay without a seed line is corrupt",
-    )
+  fn missing_seed_is_corrupt() -> Check<PartialReplay> {
+    let mut bytes = SENTINEL.as_bytes().to_vec();
+    bytes.push(b'\n');
+    let parsed = Replay::parse_from(Cursor::new(&bytes));
+    ensure_that((bytes, parsed), "a replay without a seed line is corrupt", |observed| {
+      matches!(observed.1, Ok(ReplayFileStatus::Corrupt))
+    })
+    .map(drop)
+    .map_err(Box::new)
   }
 
   #[test]
-  fn invalid_step_character_is_corrupt() -> Result<(), TestFailure> {
-    let mut bytes = Vec::new();
-    ensure_ok(
-      Replay {
-        seed:  sample_seed(),
-        steps: Vec::new(),
-      }
-      .init_file(&mut bytes),
-      "replay initialization writes the header",
-    )?;
-    bytes.push(b'x');
-
-    ensure(
-      matches!(ensure_ok(parse_bytes(&bytes), "the replay parser runs")?, ReplayFileStatus::Corrupt),
+  fn invalid_step_character_is_corrupt() -> Check<ReplayRoundTrip> {
+    ensure_that(
+      replay_with_suffix(b"x"),
       "an unknown replay step character is corrupt",
+      |observed| observed.2.is_ok() && matches!(observed.3, Ok(ReplayFileStatus::Corrupt)),
     )
+    .map(drop)
+    .map_err(Box::new)
   }
 }

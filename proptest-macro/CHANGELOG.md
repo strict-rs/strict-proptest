@@ -3,7 +3,7 @@
 ### Breaking Changes
 
 - The minimum supported Rust version has been increased to 1.96.0.
-- `#[property_test]` now rewrites the annotated fn into a strict test: the generated wrapper returns `proptest::strict::TestResult` and drives the property through `proptest::strict::ensure_property` (deterministic `STRICT_TEST_SEED` seeding, no `proptest-regressions/` persistence) instead of constructing a `TestRunner` and panicking on failure. Property bodies must return `Result<(), TestFailure>`; a `()` (or literal `-> ()`) body is now a compile error pointing at `proptest::strict::TestResult` and an `Ok(())` body ending.
+- `#[property_test]` now preserves `Result<A, E>` bodies and aliases. The generated wrapper returns `PropertyResult<(ArgumentTypes, ...), A, E>` with a concrete counterexample tuple and argument labels, retaining native assertion evidence and failures. Unit-returning bodies produce a targeted compile error. Strict defaults select deterministic seeds and disable regression-file persistence.
 - `config = <expr>` now routes through `proptest::strict::ensure_property_with_config` with `test_name` and `source_file` forced over the given expression; without `config`, the strict defaults apply.
 
 ### Bug Fixes
@@ -12,6 +12,8 @@
 - An internal code-generation parse failure now falls back to a `compile_error!` diagnostic instead of panicking the proc macro.
 
 ### New Features
+
+- Added `transport = CodecType => codec_expression` for explicit typed fork execution. The wrapper preserves the concrete codec error type, constructs the codec once, and resolves its runner and signature through the selected crate path.
 
 - Added support for `proptest_path = ::path::to::proptest` on `#[property_test]`, allowing the macro to target a re-exported `proptest` crate; the strict module is resolved through that path (`<proptest_path>::strict::...`), never hard-coded.
 

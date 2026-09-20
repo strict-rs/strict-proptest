@@ -261,64 +261,62 @@ where
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_eq;
-  use strict_test_support::ensure_some;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
   use crate::std_facade::BTreeSet;
 
+  /// An assertion retains its complete concrete input.
+  type Check<S> = Result<(), PredicateFailure<S>>;
+
+  /// Both invalid range-subset constructor requests.
+  type InvalidRequests = [Result<RangeSubset<usize>, RangeSubsetError>; 2];
+
+  /// Native generated subsets, preserving generation failures.
+  type SubsetSamples = Vec<Result<Vec<usize>, Reason>>;
+  /// Fallible construction followed by the native generation result.
+  type ConstructedSubset = Result<(RangeSubset<usize>, Result<Vec<usize>, Reason>), RangeSubsetError>;
+
   #[test]
-  fn sample_range() -> Result<(), TestFailure> {
-    static INDICES: Range<usize> = 0..8;
-    let mut size_counts: [usize; 8] = [0; 8];
-    let mut value_counts: [usize; 8] = [0; 8];
-
+  fn sample_range() -> Check<SubsetSamples> {
     let mut runner = TestRunner::deterministic();
-    let input = range_subset(INDICES.clone(), 3..7);
-
-    for _ in 0..2048 {
-      let value = ensure_some(input.new_tree(&mut runner).ok(), "range_subset generates a value tree")?.current();
-      // Generated the correct number of items
-      ensure(
-        (3..7).contains(&value.len()),
-        "the subset length stays within the requested size range",
-      )?;
-      // Chose distinct items
-      ensure_eq(
-        &value.len(),
-        &value.iter().copied().collect::<BTreeSet<_>>().len(),
-        "the subset contains only distinct items",
-      )?;
-
-      if let Some(count) = size_counts.get_mut(value.len()) {
-        *count += 1;
-      }
-
-      for selected_index in value {
-        let count = ensure_some(
-          value_counts.get_mut(selected_index),
-          "range_subset only generates indices from the input range",
-        )?;
-        *count += 1;
-      }
-    }
-
-    for count in size_counts.iter().take(7).skip(3) {
-      ensure(
-        (256..1024).contains(count),
-        "each size in the requested range is chosen a plausible number of times",
-      )?;
-    }
-
-    for &index_count in &value_counts {
-      ensure(
-        (1024..1500).contains(&index_count),
-        "each index is chosen a plausible number of times",
-      )?;
-    }
-    Ok(())
+    let input = range_subset(0_usize..8, 3..7);
+    let samples: SubsetSamples = (0..2048)
+      .map(|_| input.new_tree(&mut runner).map(|tree| tree.current()))
+      .collect();
+    let valid_subset = |sample: &Result<Vec<usize>, Reason>| {
+      let Ok(ref values) = *sample else {
+        return false;
+      };
+      (3..7).contains(&values.len())
+        && values.iter().all(|value| (0..8).contains(value))
+        && values.iter().collect::<BTreeSet<_>>().len() == values.len()
+    };
+    ensure_that(
+      samples,
+      "subsets preserve distinct in-range indices and the requested size and sampling frequencies",
+      |observed| {
+        observed.iter().all(valid_subset)
+          && (3..7).all(|size| {
+            (256..1024).contains(
+              &observed
+                .iter()
+                .filter(|sample| sample.as_ref().is_ok_and(|values| values.len() == size))
+                .count(),
+            )
+          })
+          && (0..8).all(|index| {
+            (1024..1500).contains(
+              &observed
+                .iter()
+                .filter(|sample| sample.as_ref().is_ok_and(|values| values.contains(&index)))
+                .count(),
+            )
+          })
+      },
+    )
+    .map(drop)
   }
 
   #[test]
@@ -327,55 +325,62 @@ mod test {
   }
 
   #[test]
-  fn try_range_subset_accepts_a_valid_request() -> Result<(), TestFailure> {
-    let strategy = ensure_some(
-      try_range_subset(0..8, 3..7).ok(),
-      "try_range_subset accepts a size range within the range length",
-    )?;
-    let mut runner = TestRunner::deterministic();
-    let value = ensure_some(strategy.new_tree(&mut runner).ok(), "the fallibly constructed strategy generates")?.current();
-    ensure((3..7).contains(&value.len()), "the sampled subset honors the size range")
-  }
-
-  #[test]
-  fn try_range_subset_rejects_invalid_requests() -> Result<(), TestFailure> {
-    ensure(
-      matches!(try_range_subset(0..8, 2..2), Err(RangeSubsetError::EmptySizeRange(_))),
-      "try_range_subset rejects an empty size range",
-    )?;
-    ensure_eq(
-      &ensure_some(
-        try_range_subset(0..3, 1..=9).err(),
-        "try_range_subset rejects a size range beyond the range length",
-      )?,
-      &RangeSubsetError::TooLarge {
-        size_end_incl: 9,
-        len:           3,
+  fn try_range_subset_accepts_a_valid_request() -> Check<ConstructedSubset> {
+    let generated = try_range_subset(0_usize..8, 3..7).map(|strategy| {
+      let value = strategy.new_tree(&mut TestRunner::deterministic()).map(|tree| tree.current());
+      (strategy, value)
+    });
+    ensure_that(
+      generated,
+      "a valid constructed strategy generates subsets within its size range",
+      |result| {
+        result
+          .as_ref()
+          .is_ok_and(|reached| reached.1.as_ref().is_ok_and(|values| (3..7).contains(&values.len())))
       },
-      "the typed error names the requested size and range length",
     )
+    .map(drop)
   }
 
   #[test]
-  fn subset_empty_range_works() -> Result<(), TestFailure> {
-    let mut runner = TestRunner::deterministic();
-    let input = range_subset(0..0, 0..1);
-    ensure(
-      Vec::<usize>::new() == ensure_some(input.new_tree(&mut runner).ok(), "range_subset generates a value tree")?.current(),
-      "an empty index range yields the empty subset",
+  fn try_range_subset_rejects_invalid_requests() -> Check<InvalidRequests> {
+    ensure_that(
+      [try_range_subset(0_usize..8, 2..2), try_range_subset(0_usize..3, 1..=9)],
+      "invalid size requests retain distinct empty and oversized diagnostics",
+      |results| {
+        matches!(*results, [
+          Err(RangeSubsetError::EmptySizeRange(_)),
+          Err(RangeSubsetError::TooLarge {
+            size_end_incl: 9,
+            len:           3,
+          })
+        ])
+      },
     )
+    .map(drop)
   }
 
   #[test]
-  fn subset_full_range_works() -> Result<(), TestFailure> {
-    let range = 1..4;
-    let mut runner = TestRunner::deterministic();
-    let input = range_subset(range.clone(), 3);
-    let mut values = ensure_some(input.new_tree(&mut runner).ok(), "range_subset generates a value tree")?.current();
-    values.sort_unstable();
-    ensure(
-      range.collect::<Vec<usize>>() == values,
-      "a full-width subset covers the whole range",
-    )
+  fn subset_empty_range_works() -> Check<Result<Vec<usize>, Reason>> {
+    let result = range_subset(0_usize..0, 0..1)
+      .new_tree(&mut TestRunner::deterministic())
+      .map(|tree| tree.current());
+    ensure_that(result, "an empty index range yields the empty subset", |observed| {
+      observed.as_ref().is_ok_and(Vec::is_empty)
+    })
+    .map(drop)
+  }
+
+  #[test]
+  fn subset_full_range_works() -> Check<Result<Vec<usize>, Reason>> {
+    let result = range_subset(1_usize..4, 3)
+      .new_tree(&mut TestRunner::deterministic())
+      .map(|tree| tree.current());
+    ensure_that(result, "a full-width subset covers the whole range", |observed| {
+      observed
+        .as_ref()
+        .is_ok_and(|values| values.len() == 3 && values.iter().copied().collect::<BTreeSet<_>>() == (1..4).collect())
+    })
+    .map(drop)
   }
 }

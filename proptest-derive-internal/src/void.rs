@@ -154,7 +154,7 @@ impl<'ast> visit::Visit<'ast> for Uninhabited {
   //------------------------------------------------------------------
 
   // An fn(I) -> O is never uninhabited even if I or O are:
-  fn visit_type_bare_fn(&mut self, _: &'ast syn::TypeBareFn) {}
+  fn visit_type_fn_ptr(&mut self, _: &'ast syn::TypeFnPtr) {}
 
   // A macro may transform the inner type in ways we can't predict:
   fn visit_macro(&mut self, _: &'ast syn::Macro) {}
@@ -166,41 +166,43 @@ impl<'ast> visit::Visit<'ast> for Uninhabited {
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
   use syn::Type;
   use syn::parse_quote;
 
   use super::IsUninhabited as _;
 
   #[test]
-  fn literal_never_and_infallible_paths_are_uninhabited() -> Result<(), TestFailure> {
-    let never: Type = parse_quote!(!);
-    let core_infallible: Type = parse_quote!(core::convert::Infallible);
-    let absolute_core_infallible: Type = parse_quote!(::core::convert::Infallible);
-    let std_infallible: Type = parse_quote!(std::convert::Infallible);
-    let absolute_std_infallible: Type = parse_quote!(::std::convert::Infallible);
-
-    ensure(never.is_uninhabited(), "literal never is uninhabited")?;
-    ensure(core_infallible.is_uninhabited(), "core Infallible is uninhabited")?;
-    ensure(absolute_core_infallible.is_uninhabited(), "absolute core Infallible is uninhabited")?;
-    ensure(std_infallible.is_uninhabited(), "std Infallible is uninhabited")?;
-    ensure(absolute_std_infallible.is_uninhabited(), "absolute std Infallible is uninhabited")
+  fn literal_never_and_infallible_paths_are_uninhabited() -> Result<(), PredicateFailure<Vec<Type>>> {
+    ensure_that(
+      vec![
+        parse_quote!(!),
+        parse_quote!(core::convert::Infallible),
+        parse_quote!(::core::convert::Infallible),
+        parse_quote!(std::convert::Infallible),
+        parse_quote!(::std::convert::Infallible),
+        parse_quote!([core::convert::Infallible; 1]),
+      ],
+      "never, Infallible, and nonempty arrays of Infallible are uninhabited",
+      |types: &Vec<Type>| types.iter().all(Type::is_uninhabited),
+    )
+    .map(drop)
   }
 
   #[test]
-  fn inhabited_boundaries_are_not_marked_uninhabited() -> Result<(), TestFailure> {
-    let empty_array: Type = parse_quote!([core::convert::Infallible; 0]);
-    let macro_hidden: Type = parse_quote!(tymac!(core::convert::Infallible));
-    let function_signature: Type = parse_quote!(fn(core::convert::Infallible) -> core::convert::Infallible);
-    let projection: Type = parse_quote!(<core::convert::Infallible as Fun>::Prj);
-
-    ensure(!empty_array.is_uninhabited(), "empty arrays are inhabited")?;
-    ensure(!macro_hidden.is_uninhabited(), "macro-hidden types are not inspected")?;
-    ensure(!function_signature.is_uninhabited(), "function signatures are not uninhabited")?;
-    ensure(
-      !projection.is_uninhabited(),
-      "associated projections are not inspected as uninhabited",
+  fn inhabited_boundaries_are_not_marked_uninhabited() -> Result<(), PredicateFailure<Vec<Type>>> {
+    ensure_that(
+      vec![
+        parse_quote!([core::convert::Infallible; 0]),
+        parse_quote!(tymac!(core::convert::Infallible)),
+        parse_quote!(fn(core::convert::Infallible) -> core::convert::Infallible),
+        parse_quote!(fn(!) -> !),
+        parse_quote!(<core::convert::Infallible as Fun>::Prj),
+      ],
+      "arrays, macros, function pointers, and projections retain their traversal boundaries",
+      |types: &Vec<Type>| types.iter().all(|ty| !ty.is_uninhabited()),
     )
+    .map(drop)
   }
 }

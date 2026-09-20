@@ -284,38 +284,60 @@ pub fn weighted<T: Strategy>(probability_of_some: impl Into<Probability>, strate
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_some;
+  use core::ops::Range;
+
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
 
   use super::*;
+  use crate::std_facade::Vec;
   use crate::strategy::Just;
   use crate::test_runner::Reason;
 
-  fn count_some_of_1000(strategy: &OptionStrategy<Just<i32>>) -> Result<u32, TestFailure> {
+  /// Native generation outcomes underlying the sampled Some frequency.
+  type OptionSamples = Vec<NewTree<OptionStrategy<Just<i32>>>>;
+
+  fn sample_options(strategy: &OptionStrategy<Just<i32>>) -> OptionSamples {
     let mut runner = TestRunner::deterministic();
-    let mut count = 0_u32;
-    for _ in 0..1000 {
-      let generated = ensure_some(strategy.new_tree(&mut runner).ok(), "option strategy generates a value tree")?;
-      count = count.saturating_add(u32::from(generated.current().is_some()));
-    }
+    (0..1000).map(|_| strategy.new_tree(&mut runner)).collect()
+  }
 
-    Ok(count)
+  fn has_some_count(samples: &OptionSamples, expected: Range<usize>) -> bool {
+    samples.iter().all(Result::is_ok)
+      && expected.contains(
+        &samples
+          .iter()
+          .filter(|sample| sample.as_ref().is_ok_and(|tree| tree.current().is_some()))
+          .count(),
+      )
   }
 
   #[test]
-  fn probability_defaults_to_0p5() -> Result<(), TestFailure> {
-    let count = count_some_of_1000(&of(Just(42_i32)))?;
-    ensure(count > 450 && count < 550, "roughly half of the samples are Some")
+  fn probability_defaults_to_0p5() -> Result<(), PredicateFailure<OptionSamples>> {
+    ensure_that(
+      sample_options(&of(Just(42_i32))),
+      "roughly half of the samples are Some",
+      |samples| has_some_count(samples, 451..550),
+    )
+    .map(drop)
   }
 
   #[test]
-  fn probability_handled_correctly() -> Result<(), TestFailure> {
-    let mostly_some = count_some_of_1000(&weighted(0.9, Just(42_i32)))?;
-    ensure(mostly_some > 800 && mostly_some < 950, "a 0.9 weight yields mostly Some")?;
-
-    let mostly_none = count_some_of_1000(&weighted(0.1, Just(42_i32)))?;
-    ensure(mostly_none > 50 && mostly_none < 150, "a 0.1 weight yields mostly None")
+  fn probability_handled_correctly() -> Result<(), PredicateFailure<[OptionSamples; 2]>> {
+    ensure_that(
+      [
+        sample_options(&weighted(0.9, Just(42_i32))),
+        sample_options(&weighted(0.1, Just(42_i32))),
+      ],
+      "high and low Some weights produce the expected frequencies",
+      |subjects| {
+        subjects
+          .iter()
+          .zip([801..950, 51..150])
+          .all(|(sample, bounds)| has_some_count(sample, bounds))
+      },
+    )
+    .map(drop)
   }
 
   #[test]

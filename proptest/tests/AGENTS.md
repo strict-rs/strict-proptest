@@ -10,11 +10,12 @@ This directory holds consumer-side integration and compile fixtures. The `attr_m
 
 ### `attr_macro.rs` — the only true integration-test target
 
-Runtime behavior checks, gated by a file-level `#![cfg(feature = "attr-macro")]`. Every `#[property_test]` body here returns `proptest::strict::TestResult` and uses the `strict_test_support` `ensure*` helpers (a `[dev-dependencies]` entry) — a `()` body no longer compiles. Unlike the `pass/` fixtures, these actually *run* the generated strict runner:
+Runtime behavior checks, gated by a file-level `#![cfg(feature = "attr-macro")]`. Every `#[property_test]` body here returns a native `Result<A, E>` or alias and uses the `strict_test_support` `ensure*` helpers (a `[dev-dependencies]` entry) — a `()` body no longer compiles. Unlike the `pass/` fixtures, these actually *run* the generated strict runner:
 
-- `attr_macro_does_not_clobber_mutability` — the regression for issue #601: applies `#[proptest::property_test]` to `fn …(mut x: i32, (mut y, _z): (i32, i32))` and reassigns `x = 0; y = 0;` in the body, proving the macro preserves `mut` both on a plain ident argument and on an ident nested inside a tuple-destructuring pattern argument.
+- `attr_macro_does_not_clobber_mutability` — the regression for issue #601: applies `#[proptest::property_test]` to `fn …(mut x: i32, (mut y, _z): (i32, i32))` and zeroes both values with `saturating_sub` in the body, proving the macro preserves `mut` both on a plain ident argument and on an ident nested inside a tuple-destructuring pattern argument.
 - `falsifying_wrapper_surfaces_test_failure` — an `#[ignore]`d, deliberately falsifying `#[property_test]` fixture (the macro preserves pre-existing attributes, so the harness never runs it as a failing test).
-- `generated_wrapper_returns_test_failure_instead_of_panicking` — the negative-polarity proof: calls the ignored fixture's generated wrapper *directly* (it is a plain `fn() -> TestResult`), and checks the returned `Err` renders "property falsified" with the shrunk minimal counterexample (`x: 1` under the deterministic default seed). The call returning at all proves the wrapper propagates `TestFailure` rather than panicking.
+- `generated_wrapper_returns_test_failure_instead_of_panicking` — the negative-polarity proof: calls the ignored fixture's generated wrapper directly and inspects `PropertyCause::Falsified`, checking that counterexample `(1,)`, the native predicate subject `1`, and argument label `x` agree. The call returns its typed failure without panicking.
+- `generated_wrapper_retains_every_success` checks that a configured custom strategy retains three owned successful subjects and its argument label.
 
 ```sh
 cargo test -p proptest --test attr_macro --features attr-macro
@@ -36,7 +37,7 @@ trybuild builds each fixture as a standalone binary, so every one carries its ow
 Compile-pass fixtures (`pass/`), all with result-returning bodies:
 
 - `simple_example.rs` — the minimal form: default `Arbitrary`-derived strategy, body ending in an `ensure_eq`. The baseline "happy path still compiles" check.
-- `hygiene.rs` — defines a module-level `struct MyTestArgs` that collides *by name* with the macro's generated params struct (fn `my_test` → `MyTestArgs`, PascalCase + `Args`). It compiles because the macro emits its struct and `Arbitrary` impl *inside* the rewritten function body, not at module scope.
+- `hygiene.rs` — retains a consumer type named `MyTestArgs` while the wrapper exposes a concrete argument tuple; consumer names and types remain usable.
 - `with_params.rs` — the `config = proptest::test_runner::Config { cases: 10, .. }` attribute option (routed through `ensure_property_with_config`), against both non-trailing-comma and trailing-comma argument lists.
 - `custom_strategy.rs` — a `#[strategy = "[0-9]{1,8}"]` regex override on an argument.
 - `custom_proptest_path.rs` — `extern crate proptest as aliased_proptest;` + `proptest_path = ::aliased_proptest`, with the return type spelled through the alias — proves the generated code reaches the strict module through the configured path, never a hard-coded `::proptest`.
@@ -44,7 +45,7 @@ Compile-pass fixtures (`pass/`), all with result-returning bodies:
 
 Compile-fail fixtures (`fail/`), each pinning a diagnostic in its `.stderr`:
 
-- `unit_body.rs` — a `()` property body → the strict return-type rejection ("strict property tests must return `Result<(), TestFailure>` …").
+- `unit_body.rs` — a `()` property body → the strict return-type rejection ("strict property tests must return `Result<A, E>` …").
 - `explicit_unit_return.rs` — a literal `-> ()` → the same rejection, spanned on the return type.
 - `invalid_proptest_path.rs` — `proptest_path = actually::a::function()` → the options diagnostic ("argument to `proptest_path` must be a path to the proptest crate, …").
 
