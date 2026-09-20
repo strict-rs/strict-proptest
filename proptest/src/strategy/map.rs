@@ -33,23 +33,12 @@ pub struct Map<S, F> {
   pub(super) fun:    Arc<F>,
 }
 
-impl<S: fmt::Debug, F> fmt::Debug for Map<S, F> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_struct("Map")
-      .field("source", &self.source)
-      .field("fun", &"<function>")
-      .finish()
-  }
-}
+impl_debug_struct!(Map<S, F> [S: fmt::Debug] |self| {
+  source: self.source,
+  fun: "<function>",
+});
 
-impl<S: Clone, F> Clone for Map<S, F> {
-  fn clone(&self) -> Self {
-    Self {
-      source: self.source.clone(),
-      fun:    Arc::clone(&self.fun),
-    }
-  }
-}
+impl_clone_shared_fn!(Map < S, F > |self| {});
 
 impl<S: Strategy, O: fmt::Debug, F: Fn(S::Value) -> O> Strategy for Map<S, F> {
   type Tree = Map<S::Tree, F>;
@@ -108,11 +97,9 @@ impl<S, O> MapInto<S, O> {
   }
 }
 
-impl<S: fmt::Debug, O> fmt::Debug for MapInto<S, O> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_struct("MapInto").field("source", &self.source).finish()
-  }
-}
+impl_debug_struct!(MapInto<S, O> [S: fmt::Debug] |self| {
+  source: self.source,
+});
 
 impl<S: Clone, O> Clone for MapInto<S, O> {
   fn clone(&self) -> Self {
@@ -167,23 +154,12 @@ pub struct Perturb<S, F> {
   pub(super) fun:    Arc<F>,
 }
 
-impl<S: fmt::Debug, F> fmt::Debug for Perturb<S, F> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_struct("Perturb")
-      .field("source", &self.source)
-      .field("fun", &"<function>")
-      .finish()
-  }
-}
+impl_debug_struct!(Perturb<S, F> [S: fmt::Debug] |self| {
+  source: self.source,
+  fun: "<function>",
+});
 
-impl<S: Clone, F> Clone for Perturb<S, F> {
-  fn clone(&self) -> Self {
-    Self {
-      source: self.source.clone(),
-      fun:    Arc::clone(&self.fun),
-    }
-  }
-}
+impl_clone_shared_fn!(Perturb < S, F > |self| {});
 
 impl<S: Strategy, O: fmt::Debug, F: Fn(S::Value, TestRng) -> O> Strategy for Perturb<S, F> {
   type Tree = PerturbValueTree<S::Tree, F>;
@@ -214,25 +190,15 @@ pub struct PerturbValueTree<S, F> {
   rng:    TestRng,
 }
 
-impl<S: fmt::Debug, F> fmt::Debug for PerturbValueTree<S, F> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_struct("PerturbValueTree")
-      .field("source", &self.source)
-      .field("fun", &"<function>")
-      .field("rng", &self.rng)
-      .finish()
-  }
-}
+impl_debug_struct!(PerturbValueTree<S, F> [S: fmt::Debug] |self| {
+  source: self.source,
+  fun: "<function>",
+  rng: self.rng,
+});
 
-impl<S: Clone, F> Clone for PerturbValueTree<S, F> {
-  fn clone(&self) -> Self {
-    Self {
-      source: self.source.clone(),
-      fun:    Arc::clone(&self.fun),
-      rng:    self.rng.clone(),
-    }
-  }
-}
+impl_clone_shared_fn!(PerturbValueTree<S, F> |self| {
+  rng: self.rng.clone(),
+});
 
 impl<S: ValueTree, O: fmt::Debug, F: Fn(S::Value, TestRng) -> O> ValueTree for PerturbValueTree<S, F> {
   type Value = O;
@@ -256,21 +222,92 @@ impl<S: ValueTree, O: fmt::Debug, F: Fn(S::Value, TestRng) -> O> ValueTree for P
 
 #[cfg(test)]
 mod test {
+  use core::array;
   use std::collections::HashSet;
 
   use rand::Rng as _;
   #[cfg(feature = "strict-test")]
   use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_eq;
   use strict_test_support::ensure_that;
 
   use super::*;
   use crate::std_facade::Vec;
+  use crate::std_facade::format;
   use crate::strategy::just::Just;
   #[cfg(feature = "strict-test")]
   use crate::strict::ensure_property;
   #[cfg(feature = "strict-test")]
   use crate::test_runner::PropertyResult;
+  use crate::test_runner::Reason;
   use crate::test_runner::test_runner_without_persistence;
+
+  /// Generated perturbation trees and every requested observation of their values.
+  type PerturbSamples<T, const READS: usize> = Vec<Result<(T, [u32; READS]), Reason>>;
+
+  /// Sample independently seeded trees while retaining repeated reads from each one.
+  fn sample_perturb_trees<const READS: usize>(count: usize) -> PerturbSamples<impl ValueTree<Value = u32> + fmt::Debug, READS> {
+    let mut runner = test_runner_without_persistence();
+    let input = Just(1_u32).prop_perturb(|element, mut rng| element.wrapping_add(rng.next_u32()));
+    (0..count)
+      .map(|_| {
+        input.new_tree(&mut runner).map(|tree| {
+          let values = array::from_fn(|_| tree.current());
+          (tree, values)
+        })
+      })
+      .collect()
+  }
+
+  #[test]
+  fn cloned_sources_are_independent_with_a_non_clone_function() -> Result<(), impl fmt::Debug> {
+    use core::sync::atomic::AtomicU32;
+    use core::sync::atomic::Ordering;
+
+    let captured = AtomicU32::new(5);
+    let input = Just(7_u32).prop_map(move |sample| sample.saturating_add(captured.load(Ordering::Relaxed)));
+    let mut cloned = input.clone();
+    cloned.source = Just(11);
+    ensure_that(
+      (input, cloned),
+      "cloning permits a non-Clone function and gives each adapter an independent source",
+      |observed| observed.0.current() == 12 && observed.1.current() == 16,
+    )
+    .map(drop)
+  }
+
+  #[test]
+  fn debug_preserves_fields_without_requiring_closure_debug() -> Result<(), impl fmt::Debug> {
+    let input = Just(7_u8).prop_map(|sample| sample.saturating_add(1));
+    ensure_eq(
+      [format!("{input:?}"), format!("{input:#?}")],
+      [
+        "Map { source: Just(7), fun: \"<function>\" }",
+        "Map {\n    source: Just(\n        7,\n    ),\n    fun: \"<function>\",\n}",
+      ],
+      "compact and pretty diagnostics retain the source and opaque function field",
+    )
+    .map(drop)
+  }
+
+  #[test]
+  fn debug_propagates_writer_failures() -> Result<(), impl fmt::Debug> {
+    struct RejectWrites;
+
+    impl fmt::Write for RejectWrites {
+      fn write_str(&mut self, _: &str) -> fmt::Result {
+        Err(fmt::Error)
+      }
+    }
+
+    let input = Just(7_u8).prop_map(|sample| sample.saturating_add(1));
+    ensure_eq(
+      fmt::write(&mut RejectWrites, format_args!("{input:?}")),
+      Err(fmt::Error),
+      "an unavailable diagnostic sink remains a formatting failure",
+    )
+    .map(drop)
+  }
 
   #[cfg(feature = "strict-test")]
   #[test]
@@ -294,23 +331,16 @@ mod test {
 
   #[test]
   fn perturb_uses_same_rng_every_time() -> Result<(), impl fmt::Debug> {
-    let mut runner = test_runner_without_persistence();
-    let input = Just(1_u32).prop_perturb(|element, mut rng| element.wrapping_add(rng.next_u32()));
-    let samples: Vec<_> = (0..16)
-      .map(|_| {
-        input.new_tree(&mut runner).map(|tree| {
-          let values = (tree.current(), tree.current());
-          (tree, values)
-        })
-      })
-      .collect();
     ensure_that(
-      samples,
+      sample_perturb_trees::<2>(16),
       "current is stable across repeated calls on every perturb tree",
       |observed| {
-        observed
-          .iter()
-          .all(|sample| sample.as_ref().is_ok_and(|reached| reached.1.0 == reached.1.1))
+        observed.iter().all(|sample| {
+          sample.as_ref().is_ok_and(|reached| {
+            let [first, second] = reached.1;
+            first == second
+          })
+        })
       },
     )
     .map(drop)
@@ -318,25 +348,19 @@ mod test {
 
   #[test]
   fn perturb_uses_varying_random_seeds() -> Result<(), impl fmt::Debug> {
-    let mut runner = test_runner_without_persistence();
-    let input = Just(1_u32).prop_perturb(|element, mut rng| element.wrapping_add(rng.next_u32()));
-    let samples: Vec<_> = (0..64)
-      .map(|_| {
-        input.new_tree(&mut runner).map(|tree| {
-          let value = tree.current();
-          (tree, value)
-        })
-      })
-      .collect();
-    ensure_that(samples, "each of the 64 perturb trees draws a distinct seed", |observed| {
-      observed.iter().all(Result::is_ok)
-        && observed
-          .iter()
-          .filter_map(|sample| sample.as_ref().ok().map(|reached| &reached.1))
-          .collect::<HashSet<_>>()
-          .len()
-          == 64
-    })
+    ensure_that(
+      sample_perturb_trees::<1>(64),
+      "each of the 64 perturb trees draws a distinct seed",
+      |observed| {
+        observed.iter().all(Result::is_ok)
+          && observed
+            .iter()
+            .filter_map(|sample| sample.as_ref().ok().map(|reached| &reached.1))
+            .collect::<HashSet<_>>()
+            .len()
+            == 64
+      },
+    )
     .map(drop)
   }
 }

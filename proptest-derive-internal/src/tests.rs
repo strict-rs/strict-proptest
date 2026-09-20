@@ -41,6 +41,23 @@ use crate::util::PayloadFields;
 
 /// Compare native parsed expansion trees, preserving both complete subjects.
 macro_rules! test {
+  ($test_name:ident { $($input:tt)* } expands to unit variant $item:ident::$variant:ident) => {
+    test! {
+      $test_name { $($input)* } expands to {
+        impl ::proptest::arbitrary::Arbitrary for $item {
+          type Parameters = ();
+          type Strategy = fn() -> Self;
+
+          fn arbitrary_with(_top: Self::Parameters) -> Self::Strategy {
+            {
+              let () = _top;
+              { let value_fn: fn() -> _ = || $item::$variant {}; value_fn }
+            }
+          }
+        }
+      }
+    }
+  };
   ($test_name:ident { $($input:tt)* } expands to { $($expected:tt)* }) => {
     #[test]
     fn $test_name() -> Result<(), ExpansionFailure> {
@@ -251,19 +268,7 @@ test! {
         enum MyUnitVariant {
             Unit,
         }
-    } expands to {
-        impl ::proptest::arbitrary::Arbitrary for MyUnitVariant {
-            type Parameters = ();
-            type Strategy = fn() -> Self;
-
-            fn arbitrary_with(_top: Self::Parameters) -> Self::Strategy {
-                {
-                    let () = _top;
-                    { let value_fn: fn() -> _ = || MyUnitVariant::Unit {}; value_fn }
-                }
-            }
-        }
-    }
+    } expands to unit variant MyUnitVariant::Unit
 }
 
 test! {
@@ -272,23 +277,7 @@ test! {
         enum MyEmptyTupleVariant {
             EmptyTuple(),
         }
-    } expands to {
-        impl ::proptest::arbitrary::Arbitrary for MyEmptyTupleVariant {
-            type Parameters = ();
-            type Strategy = fn() -> Self;
-
-            fn arbitrary_with(_top: Self::Parameters) -> Self::Strategy {
-                {
-                    let () = _top;
-                    {
-                        let value_fn: fn() -> _ =
-                            || MyEmptyTupleVariant::EmptyTuple {};
-                        value_fn
-                    }
-                }
-            }
-        }
-    }
+    } expands to unit variant MyEmptyTupleVariant::EmptyTuple
 }
 
 test! {
@@ -297,23 +286,7 @@ test! {
         enum MyEmptyStructVariant {
             EmptyStruct {},
         }
-    } expands to {
-        impl ::proptest::arbitrary::Arbitrary for MyEmptyStructVariant {
-            type Parameters = ();
-            type Strategy = fn() -> Self;
-
-            fn arbitrary_with(_top: Self::Parameters) -> Self::Strategy {
-                {
-                    let () = _top;
-                    {
-                        let value_fn: fn() -> _ =
-                            || MyEmptyStructVariant::EmptyStruct {};
-                        value_fn
-                    }
-                }
-            }
-        }
-    }
+    } expands to unit variant MyEmptyStructVariant::EmptyStruct
 }
 
 //==============================================================================

@@ -70,15 +70,11 @@ impl<S, F> Filter<S, F> {
   }
 }
 
-impl<S: fmt::Debug, F> fmt::Debug for Filter<S, F> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_struct("Filter")
-      .field("source", &self.source)
-      .field("whence", &self.whence)
-      .field("fun", &"<function>")
-      .finish()
-  }
-}
+impl_debug_struct!(Filter<S, F> [S: fmt::Debug] |self| {
+  source: self.source,
+  whence: self.whence,
+  fun: "<function>",
+});
 
 impl<S: Strategy, F: FilterFn<S::Value> + Clone> Strategy for Filter<S, F> {
   type Tree = Filter<S::Tree, F>;
@@ -102,17 +98,7 @@ impl<S: ValueTree, F: FilterFn<S::Value>> Filter<S, F> {
 impl<S: ValueTree, F: FilterFn<S::Value>> ValueTree for Filter<S, F> {
   type Value = S::Value;
 
-  fn current(&self) -> S::Value {
-    self.source.current()
-  }
-
-  fn simplify(&mut self) -> bool {
-    self.source.simplify() && self.ensure_acceptable()
-  }
-
-  fn complicate(&mut self) -> bool {
-    self.source.complicate() && self.ensure_acceptable()
-  }
+  delegate_value_tree!(source, ensure_acceptable);
 }
 
 //==============================================================================
@@ -149,14 +135,10 @@ impl<S, F> Map<S, F> {
   }
 }
 
-impl<S: fmt::Debug, F> fmt::Debug for Map<S, F> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_struct("Map")
-      .field("source", &self.source)
-      .field("fun", &"<function>")
-      .finish()
-  }
-}
+impl_debug_struct!(Map<S, F> [S: fmt::Debug] |self| {
+  source: self.source,
+  fun: "<function>",
+});
 
 impl<S: Strategy, F: Clone + MapFn<S::Value>> Strategy for Map<S, F> {
   type Tree = Map<S::Tree, F>;
@@ -210,16 +192,15 @@ pub(crate) fn static_map<S: Strategy, O: fmt::Debug>(strat: S, fun: StaticMapFn<
 mod test {
   #[cfg(feature = "strict-test")]
   use strict_test_support::PredicateFailure;
+  #[cfg(feature = "strict-test")]
   use strict_test_support::ensure_that;
 
   use super::*;
-  use crate::std_facade::Vec;
-  use crate::strategy::traits::trace_simplifications;
+  use crate::strategy::filter::test::check_filtered_shrinking;
   #[cfg(feature = "strict-test")]
   use crate::strict::ensure_property;
   #[cfg(feature = "strict-test")]
   use crate::test_runner::PropertyResult;
-  use crate::test_runner::test_runner_without_persistence;
 
   #[test]
   fn test_static_filter() -> Result<(), impl fmt::Debug> {
@@ -233,25 +214,7 @@ mod test {
 
     let input = Filter::new(0..256_i32, "%3".into(), MyFilter);
 
-    let walks: Vec<_> = (0..256)
-      .map(|_| {
-        input
-          .new_tree(&mut test_runner_without_persistence())
-          .map(trace_simplifications)
-      })
-      .collect();
-    ensure_that(
-      walks,
-      "the static filter preserves every generated, intermediate, and final survivor",
-      |observed| {
-        observed.iter().all(|walk| {
-          walk
-            .as_ref()
-            .is_ok_and(|reached| reached.1.iter().all(|value| value.rem_euclid(3) == 0))
-        })
-      },
-    )
-    .map(drop)
+    check_filtered_shrinking(&input, |value| value.rem_euclid(3) == 0).map(drop)
   }
 
   #[cfg(feature = "strict-test")]

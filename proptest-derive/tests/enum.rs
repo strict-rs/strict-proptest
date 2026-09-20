@@ -17,13 +17,15 @@
 
 #[cfg(test)]
 mod tests {
-  use proptest::prelude::Arbitrary;
+  mod support;
+
   use proptest::prelude::any;
   use proptest::strict::ensure_property;
   use proptest::test_runner::PropertyResult;
   use proptest_derive::Arbitrary;
   use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_that;
+  use support::assert_arbitrary;
 
   #[derive(Debug, Arbitrary)]
   enum T1 {
@@ -497,16 +499,18 @@ mod tests {
     Two(u8, u8),
   }
 
+  /// Count each byte payload once, with one additional point for a nonzero byte.
+  fn byte_payload_score(payloads: &[u8]) -> usize {
+    payloads.iter().fold(0_usize, |score, payload| {
+      score.saturating_add(1).saturating_add(usize::from(*payload != 0))
+    })
+  }
+
   impl OneTwo {
-    const fn payload_score(&self) -> usize {
+    fn payload_score(&self) -> usize {
       match *self {
-        Self::One(payload) if payload.count_ones() == 0 => 1,
-        Self::One(_) => 2,
-        Self::Two(left, right) => match (left.count_ones() > 0, right.count_ones() > 0) {
-          (false, false) => 2,
-          (true, false) | (false, true) => 3,
-          (true, true) => 4,
-        },
+        Self::One(payload) => byte_payload_score(&[payload]),
+        Self::Two(left, right) => byte_payload_score(&[left, right]),
       }
     }
   }
@@ -519,16 +523,11 @@ mod tests {
   }
 
   impl ZeroOneTwo {
-    const fn payload_score(&self) -> usize {
+    fn payload_score(&self) -> usize {
       match *self {
         Self::Zero => 0,
-        Self::One(payload) if payload.count_ones() == 0 => 1,
-        Self::One(_) => 2,
-        Self::Two(left, right) => match (left.count_ones() > 0, right.count_ones() > 0) {
-          (false, false) => 2,
-          (true, false) | (false, true) => 3,
-          (true, true) => 4,
-        },
+        Self::One(payload) => byte_payload_score(&[payload]),
+        Self::Two(left, right) => byte_payload_score(&[left, right]),
       }
     }
   }
@@ -574,39 +573,8 @@ mod tests {
     )
   }
 
-  #[test]
-  fn asserting_arbitrary() {
-    fn assert_arbitrary<T: Arbitrary>() {}
-
-    assert_arbitrary::<T1>();
-    assert_arbitrary::<T2>();
-    assert_arbitrary::<T3>();
-    assert_arbitrary::<T4>();
-    assert_arbitrary::<T5>();
-    assert_arbitrary::<T6>();
-    assert_arbitrary::<T7>();
-    assert_arbitrary::<T8>();
-    assert_arbitrary::<T9>();
-    assert_arbitrary::<T10>();
-    assert_arbitrary::<T11>();
-    assert_arbitrary::<T12>();
-    assert_arbitrary::<T13>();
-    assert_arbitrary::<T14>();
-    assert_arbitrary::<T15>();
-    assert_arbitrary::<T16>();
-    assert_arbitrary::<T17>();
-    assert_arbitrary::<T18>();
-    assert_arbitrary::<T19>();
-    assert_arbitrary::<T20>();
-    assert_arbitrary::<T21>();
-    assert_arbitrary::<T22>();
-    assert_arbitrary::<T23>();
-    assert_arbitrary::<T24>();
-    assert_arbitrary::<T25>();
-    assert_arbitrary::<Alan>();
-    assert_arbitrary::<SameType>();
-    assert_arbitrary::<OneTwo>();
-    assert_arbitrary::<ZeroOneTwo>();
-    assert_arbitrary::<Nested>();
-  }
+  assert_arbitrary!(
+    T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, Alan, SameType,
+    OneTwo, ZeroOneTwo, Nested,
+  );
 }

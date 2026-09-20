@@ -33,23 +33,22 @@ macro_rules! mapfn {
     }
 }
 
-/// Emits the three `ValueTree` methods that forward to the wrapped tree held
-/// at tuple position `0`.
+/// Forward the three `ValueTree` methods to a named or tuple field.
 ///
-/// Used by newtype `ValueTree` wrappers whose only field is the inner tree, so
-/// `current`/`simplify`/`complicate` simply delegate to it.
-macro_rules! delegate_vt_0 {
-  () => {
+/// Filter adapters can require recovery after a successful source step.
+/// Recovery is never called when the source reports no change.
+macro_rules! delegate_value_tree {
+  ($field:tt $(, $recover:ident)?) => {
     fn current(&self) -> Self::Value {
-      self.0.current()
+      self.$field.current()
     }
 
     fn simplify(&mut self) -> bool {
-      self.0.simplify()
+      self.$field.simplify() $(&& self.$recover())?
     }
 
     fn complicate(&mut self) -> bool {
-      self.0.complicate()
+      self.$field.complicate() $(&& self.$recover())?
     }
   };
 }
@@ -59,7 +58,7 @@ macro_rules! delegate_vt_0 {
 ///
 /// Declares the strategy and value-tree structs, forwards `new_tree` to the
 /// inner strategy (mapping its tree into the wrapper), and delegates the
-/// value-tree methods via `delegate_vt_0!`. Used by `option`/`result`/
+/// value-tree methods via `delegate_value_tree!`. Used by `option`/`result`/
 /// `collection`/`sample`/`string` to hide their inner combinator types.
 macro_rules! opaque_strategy_wrapper {
     ($({#[$allmeta:meta]})*
@@ -94,9 +93,49 @@ macro_rules! opaque_strategy_wrapper {
         impl $($vgen)* ValueTree for $vtname $($vgen)* $($vwhere)* {
             type Value = $actualty;
 
-            delegate_vt_0!();
+            delegate_value_tree!(0);
         }
     }
+}
+
+/// Implement structured `Debug` with explicit bounds and field expressions.
+///
+/// Strategy adapters can render their source while keeping function fields
+/// opaque, without adding `Debug` bounds to closures or unrelated parameters.
+/// Field expressions retain each adapter's existing order and placeholders.
+macro_rules! impl_debug_struct {
+  ($name:ident<$($generic:ident),+> [$($bounds:tt)*] |$this:ident| {
+    $($field:ident: $value:expr),+ $(,)?
+  }) => {
+    impl<$($generic),+> $crate::std_facade::fmt::Debug for $name<$($generic),+>
+    where
+      $($bounds)*
+    {
+      fn fmt(&$this, formatter: &mut $crate::std_facade::fmt::Formatter<'_>) -> $crate::std_facade::fmt::Result {
+        formatter.debug_struct(stringify!($name))
+          $(.field(stringify!($field), &$value))+
+          .finish()
+      }
+    }
+  };
+}
+
+/// Clone an adapter's source and share its function without requiring `F: Clone`.
+/// Additional state follows the adapter's explicit field initialization rules.
+macro_rules! impl_clone_shared_fn {
+  ($name:ident<$source:ident, $function:ident> |$this:ident| {
+    $($field:ident: $value:expr),* $(,)?
+  }) => {
+    impl<$source: Clone, $function> Clone for $name<$source, $function> {
+      fn clone(&$this) -> Self {
+        Self {
+          source: $this.source.clone(),
+          fun: $crate::std_facade::Arc::clone(&$this.fun),
+          $($field: $value,)*
+        }
+      }
+    }
+  };
 }
 
 /// Unwraps a `Result`, evaluating a fallback expression on `Err`.

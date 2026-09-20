@@ -15,7 +15,8 @@
 
 #[cfg(test)]
 mod tests {
-  use proptest::prelude::Arbitrary;
+  mod support;
+
   use proptest::prelude::any;
   use proptest::prelude::any_with;
   use proptest::strategy::Just;
@@ -24,6 +25,7 @@ mod tests {
   use proptest_derive::Arbitrary;
   use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_that;
+  use support::assert_arbitrary;
 
   // TODO: An idea.
   // #[derive(Debug, Arbitrary)]
@@ -183,13 +185,5 @@ mod tests {
     })
   }
 
-  #[test]
-  fn asserting_arbitrary() {
-    fn assert_arbitrary<T: Arbitrary>() {}
-
-    assert_arbitrary::<Foo>();
-    assert_arbitrary::<Custom>();
-    assert_arbitrary::<Bobby>();
-    assert_arbitrary::<Quux>();
-  }
+  assert_arbitrary!(Foo, Custom, Bobby, Quux,);
 }

@@ -82,17 +82,10 @@ lift1!(
         (any_with::<B>(args), base).prop_map(|(first, second)| first.zip(second)).boxed()
 );
 
-impl<A: fmt::Debug + Iterator, B: fmt::Debug + Iterator> functor::ArbitraryF2<A, B> for Zip<A, B> {
-  type Parameters = ();
-
-  fn lift2_with<AS, BS>(fst: AS, snd: BS, _args: Self::Parameters) -> BoxedStrategy<Self>
-  where
-    AS: Strategy<Value = A> + 'static,
-    BS: Strategy<Value = B> + 'static,
-  {
-    (fst, snd).prop_map(|(first, second)| first.zip(second)).boxed()
-  }
-}
+lift2!([A: fmt::Debug + Iterator, B: fmt::Debug + Iterator]
+    Zip<A, B>, A, B, ();
+    fst, snd, _args => (fst, snd).prop_map(|(first, second)| first.zip(second))
+);
 
 arbitrary!(
     [T,
@@ -112,17 +105,10 @@ lift1!([fmt::Debug + 'static + Iterator<Item = T>,
         (any_with::<B>(args), base).prop_map(|(first, second)| first.chain(second)).boxed()
 );
 
-impl<T, A: fmt::Debug + Iterator<Item = T>, B: fmt::Debug + Iterator<Item = T>> functor::ArbitraryF2<A, B> for Chain<A, B> {
-  type Parameters = ();
-
-  fn lift2_with<AS, BS>(fst: AS, snd: BS, _args: Self::Parameters) -> BoxedStrategy<Self>
-  where
-    AS: Strategy<Value = A> + 'static,
-    BS: Strategy<Value = B> + 'static,
-  {
-    (fst, snd).prop_map(|(first, second)| first.chain(second)).boxed()
-  }
-}
+lift2!([T, A: fmt::Debug + Iterator<Item = T>, B: fmt::Debug + Iterator<Item = T>]
+    Chain<A, B>, A, B, ();
+    fst, snd, _args => (fst, snd).prop_map(|(first, second)| first.chain(second))
+);
 
 /// Implements `Arbitrary` (and the matching `lift1!`) for an iterator adapter
 /// built from an inner iterator plus a `usize` argument.

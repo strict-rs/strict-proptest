@@ -104,11 +104,21 @@ mod tests {
     Attributes(#[from] PredicateFailure<Vec<(Attribute, bool)>>),
   }
 
+  /// Parse a function and check its complete argument-extraction outcome.
+  fn check_extraction(
+    source: &str,
+    context: &'static str,
+    predicate: impl FnOnce(&Extraction) -> bool,
+  ) -> Result<Extraction, ExtractionFailure> {
+    ensure_that(strip_args(syn::parse_str(source)?), context, predicate)
+      .map_err(Box::new)
+      .map_err(ExtractionFailure::Extraction)
+  }
+
   #[test]
   fn strip_args_works() -> Result<(), ExtractionFailure> {
-    let function = syn::parse_str("fn foo(mut i: i32, (x, y): (u8, u8)) -> Alias { check(i, x, y) }")?;
-    ensure_that(
-      strip_args(function),
+    check_extraction(
+      "fn foo(mut i: i32, (x, y): (u8, u8)) -> Alias { check(i, x, y) }",
       "stripping retains function return, parameter order, patterns and types",
       |result| {
         let Ok((ref stripped, ref args)) = *result else {
@@ -129,24 +139,16 @@ mod tests {
       },
     )
     .map(drop)
-    .map_err(Box::new)
-    .map_err(ExtractionFailure::Extraction)
   }
 
   #[test]
   fn strip_args_reports_self() -> Result<(), ExtractionFailure> {
-    ensure_that(
-      strip_args(syn::parse_str("fn foo(self) {}")?),
-      "receiver extraction emits its targeted diagnostic",
-      |result| {
-        result
-          .as_ref()
-          .is_err_and(|error| error.to_string().contains("`self` parameters are forbidden"))
-      },
-    )
+    check_extraction("fn foo(self) {}", "receiver extraction emits its targeted diagnostic", |result| {
+      result
+        .as_ref()
+        .is_err_and(|error| error.to_string().contains("`self` parameters are forbidden"))
+    })
     .map(drop)
-    .map_err(Box::new)
-    .map_err(ExtractionFailure::Extraction)
   }
 
   #[test]
@@ -188,28 +190,22 @@ mod tests {
 
   #[test]
   fn strip_strategy_works() -> Result<(), ExtractionFailure> {
-    let function = syn::parse_str("fn foo(#[strategy = 123] #[retained] x: i32) {}")?;
-    ensure_that(
-      strip_args(function),
+    check_extraction(
+      "fn foo(#[strategy = 123] #[retained] x: i32) {}",
       "strategy extraction keeps unrelated attributes and the native expression",
       |result| {
         let Ok((_, ref args)) = *result else {
           return false;
         };
-        args.len() == 1
-          && args.first().is_some_and(|arg| {
-            arg.pat_ty.attrs.len() == 1
-              && arg
-                .pat_ty
-                .attrs
-                .first()
-                .is_some_and(|attribute| attribute.path().is_ident("retained"))
-              && matches!(arg.strategy, Some(Expr::Lit(_)))
-          })
+        let [ref arg] = *args.as_slice() else {
+          return false;
+        };
+        let [ref attribute] = *arg.pat_ty.attrs.as_slice() else {
+          return false;
+        };
+        attribute.path().is_ident("retained") && matches!(arg.strategy, Some(Expr::Lit(_)))
       },
     )
     .map(drop)
-    .map_err(Box::new)
-    .map_err(ExtractionFailure::Extraction)
   }
 }

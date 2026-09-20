@@ -692,26 +692,19 @@ macro_rules! prop_assert {
 /// ```
 #[macro_export]
 macro_rules! prop_assert_eq {
-    ($left:expr, $right:expr $(,) ?) => {{
-        let left = $left;
-        let right = $right;
-        $crate::prop_assert!(
-            left == right,
-            "assertion failed: `(left == right)` \
-             \n  left: `{:?}`,\n right: `{:?}`",
-            left, right);
-    }};
+    ($left:expr, $right:expr $(,) ?) => {
+        $crate::proptest_helper!(@_ASSERT_CMP == ($left, $right)
+            ["assertion failed: `(left == right)` \
+              \n  left: `{:?}`,\n right: `{:?}`"])
+    };
 
-    ($left:expr, $right:expr, $fmt:tt $($args:tt)*) => {{
-        let left = $left;
-        let right = $right;
-        $crate::prop_assert!(
-            left == right,
-            concat!(
+    ($left:expr, $right:expr, $fmt:tt $($args:tt)*) => {
+        $crate::proptest_helper!(@_ASSERT_CMP == ($left, $right)
+            [concat!(
                 "assertion failed: `(left == right)` \
-                 \n  left: `{:?}`, \n right: `{:?}`: ", $fmt),
-            left, right $($args)*);
-    }};
+                 \n  left: `{:?}`, \n right: `{:?}`: ", $fmt)]
+            $($args)*)
+    };
 }
 
 /// Similar to `assert_ne!` from std, but returns a test failure instead of
@@ -740,29 +733,31 @@ macro_rules! prop_assert_eq {
 /// ```
 #[macro_export]
 macro_rules! prop_assert_ne {
-    ($left:expr, $right:expr $(,) ?) => {{
-        let left = $left;
-        let right = $right;
-        $crate::prop_assert!(
-            left != right,
-            "assertion failed: `(left != right)`\
-             \n  left: `{:?}`,\n right: `{:?}`",
-            left, right);
-    }};
+    ($left:expr, $right:expr $(,) ?) => {
+        $crate::proptest_helper!(@_ASSERT_CMP != ($left, $right)
+            ["assertion failed: `(left != right)`\
+              \n  left: `{:?}`,\n right: `{:?}`"])
+    };
 
-    ($left:expr, $right:expr, $fmt:tt $($args:tt)*) => {{
-        let left = $left;
-        let right = $right;
-        $crate::prop_assert!(left != right, concat!(
+    ($left:expr, $right:expr, $fmt:tt $($args:tt)*) => {
+        $crate::proptest_helper!(@_ASSERT_CMP != ($left, $right)
+            [concat!(
                 "assertion failed: `(left != right)`\
-                 \n  left: `{:?}`,\n right: `{:?}`: ", $fmt),
-            left, right $($args)*);
-    }};
+                 \n  left: `{:?}`,\n right: `{:?}`: ", $fmt)]
+            $($args)*)
+    };
 }
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! proptest_helper {
+    // Evaluate operands once, in order, and format only a failed comparison.
+    (@_ASSERT_CMP $operator:tt ($left:expr, $right:expr)
+     [$($format:tt)*] $($args:tt)*) => {{
+        let left = $left;
+        let right = $right;
+        $crate::prop_assert!(left $operator right, $($format)*, left, right $($args)*);
+    }};
     (@_COMPOSE $items:tt $attrs:tt $vis:vis fn $name:ident $params:tt
      ($($var:pat in $strategy:expr),+ $(,)?)
      -> $return_type:ty $body:block) => {
@@ -1234,6 +1229,13 @@ mod test {
     union
   }
 
+  /// Exercise each static union arity with its original constant alternatives.
+  macro_rules! sample_static_oneof {
+    ($count:literal; $($value:expr),+ $(,)?) => {
+      sample_oneof($count, assert_static_oneof(prop_oneof![$(Just($value),)+]))
+    };
+  }
+
   prop_compose! {
       /// These are docs!
       fn two_ints(relative: i32)(low in 0..relative, high in relative..)
@@ -1551,16 +1553,10 @@ mod test {
   fn oneof_static_counts_through_five() -> Check<[ArmSamples; 5]> {
     let samples = [
       sample_oneof(1, prop_oneof![Just(0_i32)]),
-      sample_oneof(2, assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32),])),
-      sample_oneof(3, assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32), Just(2_i32),])),
-      sample_oneof(
-        4,
-        assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32), Just(2_i32), Just(3_i32),]),
-      ),
-      sample_oneof(
-        5,
-        assert_static_oneof(prop_oneof![Just(0_i32), Just(1_i32), Just(2_i32), Just(3_i32), Just(4_i32),]),
-      ),
+      sample_static_oneof!(2; 0_i32, 1_i32),
+      sample_static_oneof!(3; 0_i32, 1_i32, 2_i32),
+      sample_static_oneof!(4; 0_i32, 1_i32, 2_i32, 3_i32),
+      sample_static_oneof!(5; 0_i32, 1_i32, 2_i32, 3_i32, 4_i32),
     ];
     ensure_that(samples, "each static union generates all of its arms", |observed| {
       observed.iter().all(covers_arms)
@@ -1572,71 +1568,11 @@ mod test {
   #[test]
   fn oneof_static_counts_six_through_ten() -> Check<[ArmSamples; 5]> {
     let samples = [
-      sample_oneof(
-        6,
-        assert_static_oneof(prop_oneof![
-          Just(0_i32),
-          Just(1_i32),
-          Just(2_i32),
-          Just(3_i32),
-          Just(4_i32),
-          Just(5_i32),
-        ]),
-      ),
-      sample_oneof(
-        7,
-        assert_static_oneof(prop_oneof![
-          Just(0_i32),
-          Just(1_i32),
-          Just(2_i32),
-          Just(3_i32),
-          Just(4_i32),
-          Just(5_i32),
-          Just(6_i32),
-        ]),
-      ),
-      sample_oneof(
-        8,
-        assert_static_oneof(prop_oneof![
-          Just(0_i32),
-          Just(1_i32),
-          Just(2_i32),
-          Just(3_i32),
-          Just(4_i32),
-          Just(5_i32),
-          Just(6_i32),
-          Just(7_i32),
-        ]),
-      ),
-      sample_oneof(
-        9,
-        assert_static_oneof(prop_oneof![
-          Just(0_i32),
-          Just(1_i32),
-          Just(2_i32),
-          Just(3_i32),
-          Just(4_i32),
-          Just(5_i32),
-          Just(6_i32),
-          Just(7_i32),
-          Just(8_i32),
-        ]),
-      ),
-      sample_oneof(
-        10,
-        assert_static_oneof(prop_oneof![
-          Just(0_i32),
-          Just(1_i32),
-          Just(2_i32),
-          Just(3_i32),
-          Just(4_i32),
-          Just(5_i32),
-          Just(6_i32),
-          Just(7_i32),
-          Just(8_i32),
-          Just(9_i32),
-        ]),
-      ),
+      sample_static_oneof!(6; 0_i32, 1_i32, 2_i32, 3_i32, 4_i32, 5_i32),
+      sample_static_oneof!(7; 0_i32, 1_i32, 2_i32, 3_i32, 4_i32, 5_i32, 6_i32),
+      sample_static_oneof!(8; 0_i32, 1_i32, 2_i32, 3_i32, 4_i32, 5_i32, 6_i32, 7_i32),
+      sample_static_oneof!(9; 0_i32, 1_i32, 2_i32, 3_i32, 4_i32, 5_i32, 6_i32, 7_i32, 8_i32),
+      sample_static_oneof!(10; 0_i32, 1_i32, 2_i32, 3_i32, 4_i32, 5_i32, 6_i32, 7_i32, 8_i32, 9_i32),
     ];
     ensure_that(samples, "each static union generates all of its arms", |observed| {
       observed.iter().all(covers_arms)
@@ -1743,11 +1679,22 @@ mod ownership_tests {
 mod closure_tests {
   use core::fmt::Debug;
 
+  use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_that;
 
   use crate::std_facade::Box;
   use crate::test_runner::TestCaseError;
   use crate::test_runner::runner_test_config;
+
+  /// Complete callback results retained by the closure syntax assertions.
+  type ClosureChecks<E, const N: usize> = Result<[Result<(), E>; N], PredicateFailure<[Result<(), E>; N]>>;
+
+  /// Check all declared forms without losing their individual runner outcomes.
+  fn check_closure_results<E, const N: usize>(results: [Result<(), E>; N]) -> ClosureChecks<E, N> {
+    ensure_that(results, "every declared closure form succeeds", |observed| {
+      observed.iter().all(Result::is_ok)
+    })
+  }
 
   #[test]
   fn test_simple() -> Result<(), impl Debug> {
@@ -1768,13 +1715,9 @@ mod closure_tests {
     let result_4 = __proptest_internal!(|(y in 0..100,)| {
         let _: (i32, i32) = (x, y);
     });
-    ensure_that(
-      [result_1, result_2, result_3, result_4],
-      "every declared closure form succeeds",
-      |results| results.iter().all(Result::is_ok),
-    )
-    .map(drop)
-    .map_err(Box::new)
+    check_closure_results([result_1, result_2, result_3, result_4])
+      .map(drop)
+      .map_err(Box::new)
   }
 
   #[test]
@@ -1796,11 +1739,7 @@ mod closure_tests {
 
         let _: (usize, &Foo) = (accept_units(x, y), &second_foo);
     });
-    ensure_that([result_1, result_2], "every declared closure form succeeds", |results| {
-      results.iter().all(Result::is_ok)
-    })
-    .map(drop)
-    .map_err(Box::new)
+    check_closure_results([result_1, result_2]).map(drop).map_err(Box::new)
   }
 
   #[test]
@@ -1826,11 +1765,7 @@ mod closure_tests {
     let result_2 = __proptest_internal!(|(x in 0_u32..10, y in 10_u32..20,)| {
         let _: (u32, u32) = (x, y);
     });
-    ensure_that([result_1, result_2], "every declared closure form succeeds", |results| {
-      results.iter().all(Result::is_ok)
-    })
-    .map(drop)
-    .map_err(Box::new)
+    check_closure_results([result_1, result_2]).map(drop).map_err(Box::new)
   }
 
   #[test]
@@ -1861,13 +1796,9 @@ mod closure_tests {
     });
     let result_9 = __proptest_internal!(conf, |(_x: u32, _y: u32,)| {});
     let result_10 = __proptest_internal!(conf, move |(_x: u32, _y: u32,)| {});
-    ensure_that(
-      [
-        result_1, result_2, result_3, result_4, result_5, result_6, result_7, result_8, result_9, result_10,
-      ],
-      "every declared closure form succeeds",
-      |results| results.iter().all(Result::is_ok),
-    )
+    check_closure_results([
+      result_1, result_2, result_3, result_4, result_5, result_6, result_7, result_8, result_9, result_10,
+    ])
     .map(drop)
     .map_err(Box::new)
   }

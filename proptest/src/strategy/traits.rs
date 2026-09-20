@@ -10,8 +10,6 @@
 use crate::std_facade::Arc;
 use crate::std_facade::Box;
 use crate::std_facade::Rc;
-#[cfg(test)]
-use crate::std_facade::Vec;
 use crate::std_facade::fmt;
 use crate::std_facade::format;
 use crate::std_facade::vec;
@@ -1108,14 +1106,6 @@ where
     check_sanity_state(state, sanity_options)?;
   }
   Ok(())
-}
-
-/// Retain every observed value, including the read after terminal simplification.
-#[cfg(test)]
-pub(super) fn trace_simplifications<V: ValueTree>(tree: V) -> (V, Vec<V::Value>) {
-  let (reached, mut values) = super::trace_shrink_steps(tree);
-  values.push(reached.current());
-  (reached, values)
 }
 
 #[cfg(test)]

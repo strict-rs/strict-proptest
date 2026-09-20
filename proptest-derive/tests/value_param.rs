@@ -17,15 +17,14 @@
 
 #[cfg(test)]
 mod tests {
-  use proptest::prelude::*;
-  use proptest::strict::ensure_property;
-  use proptest::test_runner::PropertyResult;
-  use proptest_derive::Arbitrary;
-  use strict_test_support::PredicateFailure;
-  use strict_test_support::ensure_that;
+  mod cases;
+  mod properties;
+  mod support;
 
-  /// Each assertion retains the complete generated value.
-  type Checked<T> = PropertyResult<T, T, PredicateFailure<T>>;
+  use cases::derived_properties;
+  use proptest::prelude::*;
+  use proptest_derive::Arbitrary;
+  use support::assert_arbitrary;
 
   #[derive(Debug, Arbitrary)]
   enum T0 {
@@ -69,78 +68,58 @@ mod tests {
   #[derive(Debug, Arbitrary)]
   struct T5(#[proptest(params = "u8", value = "add(params)")] u8);
 
-  #[test]
-  fn asserting_arbitrary() {
-    fn assert_arbitrary<T: Arbitrary>() {}
+  assert_arbitrary!(T0, T1, T2, T3, T4, T5,);
 
-    assert_arbitrary::<T0>();
-    assert_arbitrary::<T1>();
-    assert_arbitrary::<T2>();
-    assert_arbitrary::<T3>();
-    assert_arbitrary::<T4>();
-    assert_arbitrary::<T5>();
-  }
-
-  #[test]
-  fn t0_test() -> Checked<T0> {
-    ensure_property(&any_with::<T0>(4), "the value expression halves the param", |generated| {
-      ensure_that(generated, "the value expression halves the param", |sample| {
-        matches!(sample, T0::V0(2))
-      })
-    })
-  }
-
-  #[test]
-  fn t1_test() -> Checked<T1> {
-    ensure_property(&any_with::<T1>(4), "the value expression doubles the param", |generated| {
-      ensure_that(generated, "the value expression doubles the param", |sample| {
+  derived_properties! {
+    t0_test(
+      T0, any_with::<T0>(4),
+      "the value expression halves the param",
+      "the value expression halves the param",
+      |sample| matches!(sample, T0::V0(2)),
+    );
+    t1_test(
+      T1, any_with::<T1>(4),
+      "the value expression doubles the param",
+      "the value expression doubles the param",
+      |sample| {
         matches!(sample, T1::V0 {
           field: 8
         })
-      })
-    })
-  }
-
-  #[test]
-  fn t2_test_true() -> Checked<T2> {
-    ensure_property(&any_with::<T2>(4), "the power-of-two check holds for four", |generated| {
-      ensure_that(generated, "the power-of-two check holds for four", |sample| {
-        matches!(sample, T2::V0(true))
-      })
-    })
-  }
-
-  #[test]
-  fn t2_test_false() -> Checked<T2> {
-    ensure_property(&any_with::<T2>(10), "the power-of-two check fails for ten", |generated| {
-      ensure_that(generated, "the power-of-two check fails for ten", |sample| {
-        matches!(sample, T2::V0(false))
-      })
-    })
-  }
-
-  #[test]
-  fn t3_test() -> Checked<T3> {
-    ensure_property(&any_with::<T3>(4), "the value expression squares the param", |generated| {
-      ensure_that(generated, "the value expression squares the param", |sample| {
+      },
+    );
+    t2_test_true(
+      T2, any_with::<T2>(4),
+      "the power-of-two check holds for four",
+      "the power-of-two check holds for four",
+      |sample| matches!(sample, T2::V0(true)),
+    );
+    t2_test_false(
+      T2, any_with::<T2>(10),
+      "the power-of-two check fails for ten",
+      "the power-of-two check fails for ten",
+      |sample| matches!(sample, T2::V0(false)),
+    );
+    t3_test(
+      T3, any_with::<T3>(4),
+      "the value expression squares the param",
+      "the value expression squares the param",
+      |sample| {
         matches!(sample, T3::V0 {
           field: 16
         })
-      })
-    })
-  }
-
-  #[test]
-  fn t4_test() -> Checked<T4> {
-    ensure_property(&any_with::<T4>(4), "the value expression subtracts three", |generated| {
-      ensure_that(generated, "the value expression subtracts three", |sample| sample.field == 1)
-    })
-  }
-
-  #[test]
-  fn t5_test() -> Checked<T5> {
-    ensure_property(&any_with::<T5>(4), "the fn-call value adds one", |generated| {
-      ensure_that(generated, "the fn-call value adds one", |sample| sample.0 == 5)
-    })
+      },
+    );
+    t4_test(
+      T4, any_with::<T4>(4),
+      "the value expression subtracts three",
+      "the value expression subtracts three",
+      |sample| sample.field == 1,
+    );
+    t5_test(
+      T5, any_with::<T5>(4),
+      "the fn-call value adds one",
+      "the fn-call value adds one",
+      |sample| sample.0 == 5,
+    );
   }
 }

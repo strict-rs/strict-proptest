@@ -16,16 +16,14 @@
 
 #[cfg(test)]
 mod tests {
-  use proptest::prelude::Arbitrary;
-  use proptest::prelude::any;
-  use proptest::strict::ensure_property;
-  use proptest::test_runner::PropertyResult;
-  use proptest_derive::Arbitrary;
-  use strict_test_support::PredicateFailure;
-  use strict_test_support::ensure_that;
+  mod cases;
+  mod properties;
+  mod support;
 
-  /// Each assertion retains the complete generated value.
-  type Checked<T> = PropertyResult<T, T, PredicateFailure<T>>;
+  use cases::derived_properties;
+  use proptest::prelude::any;
+  use proptest_derive::Arbitrary;
+  use support::assert_arbitrary;
 
   #[derive(Debug, Arbitrary)]
   struct T0 {
@@ -114,125 +112,78 @@ mod tests {
     plus_one: usize,
   }
 
-  #[test]
-  fn t0_fixed_fields() -> Checked<T0> {
-    ensure_property(&any::<T0>(), "every value spelling pins its struct field", |generated| {
-      ensure_that(generated, "every value spelling pins its struct field", |sample| {
-        (sample.field, sample.bar, sample.baz, sample.quux, sample.wibble, sample.wobble) == (42, 24, 48, 1337, 7331, 7)
-      })
-    })
-  }
-
-  #[test]
-  fn t1_field_always_24() -> Checked<T1> {
-    ensure_property(&any::<T1>(), "a tuple-struct value pins its field", |generated| {
-      ensure_that(generated, "a tuple-struct value pins its field", |sample| sample.0 == 24)
-    })
-  }
-
-  #[test]
-  fn t2_v1_always_1337() -> Checked<T2> {
-    ensure_property(&any::<T2>(), "a struct-variant value pins its field", |generated| {
-      ensure_that(generated, "a struct-variant value pins its field", |sample| match *sample {
+  derived_properties! {
+    t0_fixed_fields(
+      T0, any::<T0>(),
+      "every value spelling pins its struct field",
+      "every value spelling pins its struct field",
+      |sample| (sample.field, sample.bar, sample.baz, sample.quux, sample.wibble, sample.wobble) == (42, 24, 48, 1337, 7331, 7),
+    );
+    t1_field_always_24(
+      T1, any::<T1>(),
+      "a tuple-struct value pins its field",
+      "a tuple-struct value pins its field",
+      |sample| sample.0 == 24,
+    );
+    t2_v1_always_1337(
+      T2, any::<T2>(),
+      "a struct-variant value pins its field",
+      "a struct-variant value pins its field",
+      |sample| match *sample {
         T2::V0 => true,
         T2::V1 {
           field,
         } => field == 1337,
-      })
-    })
-  }
-
-  #[test]
-  fn t3_v1_always_7331() -> Checked<T3> {
-    ensure_property(&any::<T3>(), "a tuple-variant value pins its field", |generated| {
-      ensure_that(generated, "a tuple-variant value pins its field", |sample| match *sample {
+      },
+    );
+    t3_v1_always_7331(
+      T3, any::<T3>(),
+      "a tuple-variant value pins its field",
+      "a tuple-variant value pins its field",
+      |sample| match *sample {
         T3::V0 => true,
         T3::V1(field) => field == 7331,
-      })
-    })
-  }
-
-  #[test]
-  fn t4_v1_always_1337() -> Checked<T4> {
-    ensure_property(
-      &any::<T4>(),
+      },
+    );
+    t4_v1_always_1337(
+      T4, any::<T4>(),
       "a field-level value inside a struct variant pins the field",
-      |generated| {
-        ensure_that(
-          generated,
-          "a field-level value inside a struct variant pins the field",
-          |sample| match *sample {
-            T4::V0 => true,
-            T4::V1 {
-              field,
-            } => field == 6,
-          },
-        )
+      "a field-level value inside a struct variant pins the field",
+      |sample| match *sample {
+        T4::V0 => true,
+        T4::V1 {
+          field,
+        } => field == 6,
       },
-    )
-  }
-
-  #[test]
-  fn t5_v1_always_7331() -> Checked<T5> {
-    ensure_property(
-      &any::<T5>(),
+    );
+    t5_v1_always_7331(
+      T5, any::<T5>(),
       "a field-level value inside a tuple variant pins the field",
-      |generated| {
-        ensure_that(
-          generated,
-          "a field-level value inside a tuple variant pins the field",
-          |sample| match *sample {
-            T5::V0 => true,
-            T5::V1(field) => field == 9,
-          },
-        )
+      "a field-level value inside a tuple variant pins the field",
+      |sample| match *sample {
+        T5::V0 => true,
+        T5::V1(field) => field == 9,
       },
-    )
-  }
-
-  #[test]
-  fn t6_alpha_beta() -> Checked<T6> {
-    ensure_property(&any::<T6>(), "value and strategy fields coexist on one struct", |generated| {
-      ensure_that(generated, "value and strategy fields coexist on one struct", |sample| {
-        sample.alpha == "alpha" && sample.beta < 100
-      })
-    })
-  }
-
-  #[test]
-  fn call_fun_always_42() -> Checked<CallFun> {
-    ensure_property(&any::<CallFun>(), "fn-path value spellings call the function", |generated| {
-      ensure_that(generated, "fn-path value spellings call the function", |sample| {
-        (sample.foo, sample.bar) == (42, 42)
-      })
-    })
-  }
-
-  #[test]
-  fn value_fn_name_collision_resolves_to_user_fn() -> Checked<ValueFnCollision> {
-    ensure_property(
-      &any::<ValueFnCollision>(),
+    );
+    t6_alpha_beta(
+      T6, any::<T6>(),
+      "value and strategy fields coexist on one struct",
+      "value and strategy fields coexist on one struct",
+      |sample| sample.alpha == "alpha" && sample.beta < 100,
+    );
+    call_fun_always_42(
+      CallFun, any::<CallFun>(),
+      "fn-path value spellings call the function",
+      "fn-path value spellings call the function",
+      |sample| (sample.foo, sample.bar) == (42, 42),
+    );
+    value_fn_name_collision_resolves_to_user_fn(
+      ValueFnCollision, any::<ValueFnCollision>(),
       "both value_fn expressions resolve to the user function",
-      |generated| {
-        ensure_that(generated, "both value_fn expressions resolve to the user function", |sample| {
-          (sample.field, sample.plus_one) == (7788, 7789)
-        })
-      },
-    )
+      "both value_fn expressions resolve to the user function",
+      |sample| (sample.field, sample.plus_one) == (7788, 7789),
+    );
   }
 
-  #[test]
-  fn asserting_arbitrary() {
-    fn assert_arbitrary<T: Arbitrary>() {}
-
-    assert_arbitrary::<T0>();
-    assert_arbitrary::<T1>();
-    assert_arbitrary::<T2>();
-    assert_arbitrary::<T3>();
-    assert_arbitrary::<T4>();
-    assert_arbitrary::<T5>();
-    assert_arbitrary::<T6>();
-    assert_arbitrary::<CallFun>();
-    assert_arbitrary::<ValueFnCollision>();
-  }
+  assert_arbitrary!(T0, T1, T2, T3, T4, T5, T6, CallFun, ValueFnCollision,);
 }

@@ -77,25 +77,15 @@ impl<S, F> Filter<S, F> {
   }
 }
 
-impl<S: fmt::Debug, F> fmt::Debug for Filter<S, F> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_struct("Filter")
-      .field("source", &self.source)
-      .field("whence", &self.whence)
-      .field("fun", &"<function>")
-      .finish()
-  }
-}
+impl_debug_struct!(Filter<S, F> [S: fmt::Debug] |self| {
+  source: self.source,
+  whence: self.whence,
+  fun: "<function>",
+});
 
-impl<S: Clone, F> Clone for Filter<S, F> {
-  fn clone(&self) -> Self {
-    Self {
-      source: self.source.clone(),
-      whence: "unused".into(),
-      fun:    Arc::clone(&self.fun),
-    }
-  }
-}
+impl_clone_shared_fn!(Filter<S, F> |self| {
+  whence: "unused".into(),
+});
 
 impl<S: Strategy, F: Fn(&S::Value) -> bool> Strategy for Filter<S, F> {
   type Tree = Filter<S::Tree, F>;
@@ -122,21 +112,12 @@ impl<S: ValueTree, F: Fn(&S::Value) -> bool> Filter<S, F> {
 impl<S: ValueTree, F: Fn(&S::Value) -> bool> ValueTree for Filter<S, F> {
   type Value = S::Value;
 
-  fn current(&self) -> S::Value {
-    self.source.current()
-  }
-
-  fn simplify(&mut self) -> bool {
-    self.source.simplify() && self.ensure_acceptable()
-  }
-
-  fn complicate(&mut self) -> bool {
-    self.source.complicate() && self.ensure_acceptable()
-  }
+  delegate_value_tree!(source, ensure_acceptable);
 }
 
 #[cfg(test)]
-mod test {
+pub(super) mod test {
+  use strict_test_support::PredicateFailure;
   use strict_test_support::ensure_that;
 
   use super::*;
@@ -144,32 +125,46 @@ mod test {
   use crate::std_facade::Vec;
   use crate::strategy::Just;
   use crate::strategy::statics;
-  use crate::strategy::traits::trace_simplifications;
+  use crate::strategy::trace_shrink_steps;
   use crate::test_runner::Config;
   use crate::test_runner::test_runner_without_persistence;
 
-  #[test]
-  fn test_filter() -> Result<(), impl fmt::Debug> {
-    let input = (0..256_i32).prop_filter("%3", |&candidate| 0 == candidate.rem_euclid(3));
+  /// A complete shrink walk, or the native generation failure.
+  type FilterWalk<S> = Result<(<S as Strategy>::Tree, Vec<<S as Strategy>::Value>), Reason>;
+
+  /// All sampled filter walks retained on either assertion outcome.
+  type CheckedFilterWalks<S> = Result<Vec<FilterWalk<S>>, Box<PredicateFailure<Vec<FilterWalk<S>>>>>;
+
+  /// Check generated values and every reached shrink state against a predicate.
+  pub(in crate::strategy) fn check_filtered_shrinking<S: Strategy>(
+    input: &S,
+    accepts: impl Fn(&S::Value) -> bool,
+  ) -> CheckedFilterWalks<S> {
     let walks: Vec<_> = (0..256)
       .map(|_| {
-        input
-          .new_tree(&mut test_runner_without_persistence())
-          .map(trace_simplifications)
+        input.new_tree(&mut test_runner_without_persistence()).map(|tree| {
+          let (reached, mut values) = trace_shrink_steps(tree);
+          values.push(reached.current());
+          (reached, values)
+        })
       })
       .collect();
     ensure_that(
       walks,
       "generation and every shrink state preserve the filter contract",
       |observed| {
-        observed.iter().all(|walk| {
-          walk
-            .as_ref()
-            .is_ok_and(|reached| reached.1.iter().all(|value| value.rem_euclid(3) == 0))
-        })
+        observed
+          .iter()
+          .all(|walk| walk.as_ref().is_ok_and(|reached| reached.1.iter().all(&accepts)))
       },
     )
-    .map(drop)
+    .map_err(Box::new)
+  }
+
+  #[test]
+  fn test_filter() -> Result<(), impl fmt::Debug> {
+    let input = (0..256_i32).prop_filter("%3", |&candidate| 0 == candidate.rem_euclid(3));
+    check_filtered_shrinking(&input, |value| value.rem_euclid(3) == 0).map(drop)
   }
 
   #[test]

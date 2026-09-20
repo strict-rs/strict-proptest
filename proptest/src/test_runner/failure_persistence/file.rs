@@ -7,11 +7,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use core::any::Any;
 use core::fmt::Debug;
 use std::borrow::Cow;
 use std::borrow::ToOwned as _;
-use std::boxed::Box;
 use std::env;
 use std::format;
 use std::fs;
@@ -147,17 +145,7 @@ impl FailurePersistence for FileFailurePersistence {
     }
   }
 
-  fn box_clone(&self) -> Box<dyn FailurePersistence> {
-    Box::new(*self)
-  }
-
-  fn eq(&self, other: &dyn FailurePersistence) -> bool {
-    other.as_any().downcast_ref::<Self>().is_some_and(|x| x == self)
-  }
-
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
+  persistence_object!(self => *self);
 }
 
 /// Ensure that the source file to use for resolving the location of the persisted
@@ -452,12 +440,23 @@ mod tests {
 
   /// Captured subprocess preparation, request, status, and complete output.
   type Capture = Result<(CapturedBinary, Result<String, FromUtf8Error>), TestFailure>;
-  /// Run the real fixture and retain its native output and stderr decoding result.
-  fn capture_with_stderr(test_name: &'static str) -> Capture {
-    capture_ignored_test(test_name).map(|captured| {
+  /// Check a real child run and all expected diagnostics, retaining its complete capture.
+  fn check_captured_stderr(test_name: &'static str, messages: &[&str]) -> Result<Capture, Box<PredicateFailure<Capture>>> {
+    let capture = capture_ignored_test(test_name).map(|captured| {
       let stderr = String::from_utf8(captured.output.stderr.clone());
       (captured, stderr)
+    });
+    ensure_that(capture, "the child passes and emits every expected warning", |observed| {
+      let Ok(ref reached) = *observed else {
+        return false;
+      };
+      reached.0.output.status.success()
+        && reached
+          .1
+          .as_ref()
+          .is_ok_and(|stderr| messages.iter().all(|message| stderr.contains(message)))
     })
+    .map_err(Box::new)
   }
   /// Complete assertion subjects remain concrete and allocated on failure.
   type Check<S> = Result<(), Box<PredicateFailure<S>>>;
@@ -466,27 +465,12 @@ mod tests {
 
   #[test]
   fn persistence_file_location_resolved_correctly() -> Check<Capture> {
-    ensure_that(
-      capture_with_stderr(PERSISTENCE_LOCATION_CHILD),
-      "the child passes and emits each path-resolution warning",
-      |capture| {
-        let Ok(ref reached) = *capture else {
-          return false;
-        };
-        reached.0.output.status.success()
-          && reached.1.as_ref().is_ok_and(|stderr| {
-            [
-              "FileFailurePersistence::WithSource set, but no source file known",
-              "FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs",
-              "FileFailurePersistence::SourceParallel set, but no source file known",
-            ]
-            .iter()
-            .all(|message| stderr.contains(message))
-          })
-      },
-    )
+    check_captured_stderr(PERSISTENCE_LOCATION_CHILD, &[
+      "FileFailurePersistence::WithSource set, but no source file known",
+      "FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs",
+      "FileFailurePersistence::SourceParallel set, but no source file known",
+    ])
     .map(drop)
-    .map_err(Box::new)
   }
 
   /// Resolved and expected persistence locations for every path strategy.
@@ -624,22 +608,7 @@ mod tests {
 
   #[test]
   fn torn_or_garbage_lines_are_skipped_on_read() -> Check<Capture> {
-    ensure_that(
-      capture_with_stderr(TORN_LINES_CHILD),
-      "the child passes and emits the unparsable-line warning",
-      |capture| {
-        let Ok(ref reached) = *capture else {
-          return false;
-        };
-        reached.0.output.status.success()
-          && reached
-            .1
-            .as_ref()
-            .is_ok_and(|stderr| stderr.contains("unparsable line, ignoring"))
-      },
-    )
-    .map(drop)
-    .map_err(Box::new)
+    check_captured_stderr(TORN_LINES_CHILD, &["unparsable line, ignoring"]).map(drop)
   }
 
   #[test]

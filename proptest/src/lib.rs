@@ -86,30 +86,22 @@ pub use proptest_macro::property_test;
 
 #[cfg(test)]
 mod tests {
+  /// Generate a compile-diagnostic suite with feature-gated passing properties.
+  macro_rules! compile_suite {
+    ($name:ident, $pass:literal, $fail:literal) => {
+      #[test]
+      fn $name() -> Result<(), trybuild::TryBuildError> {
+        let mut cases = trybuild::TestCases::new();
+        #[cfg(feature = "strict-test")]
+        cases.pass($pass);
+        cases.compile_fail($fail);
+        cases.run()
+      }
+    };
+  }
+
   #[cfg(feature = "attr-macro")]
-  #[test]
-  fn compile_tests() -> Result<(), trybuild::TryBuildError> {
-    let mut cases = trybuild::TestCases::new();
-    cases.pass("tests/pass/*.rs");
-    cases.compile_fail("tests/fail/*.rs");
-    cases.run()
-  }
-
-  #[test]
-  fn sugar_macro_compile_tests() -> Result<(), trybuild::TryBuildError> {
-    let mut cases = trybuild::TestCases::new();
-    #[cfg(feature = "strict-test")]
-    cases.pass("tests/sugar/pass/*.rs");
-    cases.compile_fail("tests/sugar/fail/*.rs");
-    cases.run()
-  }
-
-  #[test]
-  fn prelude_compile_tests() -> Result<(), trybuild::TryBuildError> {
-    let mut cases = trybuild::TestCases::new();
-    #[cfg(feature = "strict-test")]
-    cases.pass("tests/prelude/pass/*.rs");
-    cases.compile_fail("tests/prelude/fail/*.rs");
-    cases.run()
-  }
+  compile_suite!(compile_tests, "tests/pass/*.rs", "tests/fail/*.rs");
+  compile_suite!(sugar_macro_compile_tests, "tests/sugar/pass/*.rs", "tests/sugar/fail/*.rs");
+  compile_suite!(prelude_compile_tests, "tests/prelude/pass/*.rs", "tests/prelude/fail/*.rs");
 }

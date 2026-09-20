@@ -115,15 +115,24 @@ mod tests {
   /// Full parser outcome, including every recoverable diagnostic.
   type Observation = Result<Options, syn::Error>;
 
+  /// Parse accepted option syntax and retain its complete result through the check.
+  fn check_options(
+    source: &str,
+    context: &'static str,
+    predicate: impl FnOnce(&Options) -> bool,
+  ) -> Result<Observation, Box<PredicateFailure<Observation>>> {
+    ensure_that(syn::parse_str(source), context, |result: &Observation| {
+      result.as_ref().is_ok_and(predicate)
+    })
+    .map_err(Box::new)
+  }
+
   #[test]
   fn simple_parse_example() -> Result<(), Box<PredicateFailure<Observation>>> {
-    ensure_that(
-      syn::parse_str("config = (), random = 123, proptest_path = ::foo::bar"),
+    check_options(
+      "config = (), random = 123, proptest_path = ::foo::bar",
       "options retain configuration, one recoverable error, and the complete crate path",
-      |result: &Observation| {
-        let Ok(ref options) = *result else {
-          return false;
-        };
+      |options| {
         options.config.is_some()
           && options.errors.len() == 1
           && options.proptest_path.as_ref().is_some_and(|path| {
@@ -132,33 +141,24 @@ mod tests {
       },
     )
     .map(drop)
-    .map_err(Box::new)
   }
 
   #[test]
   fn invalid_proptest_path() -> Result<(), Box<PredicateFailure<Observation>>> {
-    ensure_that(
-      syn::parse_str("proptest_path = actually::a::function()"),
+    check_options(
+      "proptest_path = actually::a::function()",
       "an expression cannot silently become a crate path",
-      |result: &Observation| {
-        result
-          .as_ref()
-          .is_ok_and(|options| options.proptest_path.is_none() && options.errors.len() == 1)
-      },
+      |options| options.proptest_path.is_none() && options.errors.len() == 1,
     )
     .map(drop)
-    .map_err(Box::new)
   }
 
   #[test]
   fn transport_preserves_type_and_constructor() -> Result<(), Box<PredicateFailure<Observation>>> {
-    ensure_that(
-      syn::parse_str("transport = Codec<u32> => Codec::new(7), config = configured(),"),
+    check_options(
+      "transport = Codec<u32> => Codec::new(7), config = configured(),",
       "transport keeps its declared type and independently evaluated constructor",
-      |result: &Observation| {
-        let Ok(ref options) = *result else {
-          return false;
-        };
+      |options| {
         options.errors.is_empty()
           && options.config.is_some()
           && options.transport.as_ref().is_some_and(|transport| {
@@ -169,7 +169,6 @@ mod tests {
       },
     )
     .map(drop)
-    .map_err(Box::new)
   }
 
   #[test]

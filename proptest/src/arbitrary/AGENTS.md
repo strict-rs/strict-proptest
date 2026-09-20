@@ -50,7 +50,7 @@ These exist so a typical impl is one line. They encode the subsystem's contract,
 
 `ArbitraryF1<A>` / `ArbitraryF2<A, B>` lift base strategies to unary (`Box`, `Vec`, `Option`) / binary (`Result`, `HashMap`) type constructors — each with `type Parameters: Default`, a required `lift1_with`/`lift2_with`, and a provided `lift1`/`lift2` that defaults the params. They return `BoxedStrategy<Self>` (a deliberate boxing cost, since they predate stable `-> impl Trait`; impls just end in `.boxed()`). They exist *mainly for `proptest-derive`* to map over container types when deriving recursive types, and are intentionally not conveniently exported (stability note: prefer e.g. `proptest::collection::vec`).
 
-The `lift1!` macro (defined here) generates `ArbitraryF1` impls in four forms: a full hand-written body, a params-defaulted body, a `prop_map`-via-mapper body, and a `prop_map_into` default. There is **no** `lift2!`; every `ArbitraryF2` impl is hand-written.
+The `lift1!` macro (defined here) generates `ArbitraryF1` impls in four forms: a full hand-written body, a params-defaulted body, a `prop_map`-via-mapper body, and a `prop_map_into` default. The internal `lift2!` macro shares the `ArbitraryF2` method and boxing boundary for binary iterator and map constructors; callers supply their complete generic bounds, input types, parameters, and construction expression.
 
 ## Direct impls (primitives, arrays, tuples, sample)
 

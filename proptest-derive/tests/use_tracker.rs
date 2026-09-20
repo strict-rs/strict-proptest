@@ -17,12 +17,14 @@
 
 #[cfg(test)]
 mod tests {
+  mod support;
+
   use std::marker::PhantomData;
 
-  use proptest::prelude::Arbitrary;
   use proptest_derive::Arbitrary;
   use strict_test_support::ComparisonFailure;
   use strict_test_support::ensure_eq;
+  use support::assert_arbitrary;
 
   #[derive(Debug)]
   struct NotArbitrary;
@@ -55,10 +57,7 @@ mod tests {
     ensure_eq(foo.into_parts(), (1, 2), "the non-phantom fields round-trip without a bound on U").map(drop)
   }
 
-  #[test]
-  fn asserting_arbitrary() {
-    fn assert_arbitrary<T: Arbitrary>() {}
-
-    assert_arbitrary::<Foo<i32, i32, NotArbitrary>>();
-  }
+  assert_arbitrary!(
+    Foo<i32, i32, NotArbitrary>,
+  );
 }

@@ -13,7 +13,7 @@
 //! strategy which generates arrays of that size drawing elements from the
 //! corresponding input strategies.
 //!
-//! See also [`UniformArrayStrategy`](struct.UniformArrayStrategy.html) for
+//! See also [`UniformArrayStrategy`] for
 //! easily making a strategy for an array drawn from one strategy.
 //!
 //! General implementations are available for sizes 1 through 32.
@@ -100,7 +100,7 @@ pub struct ArrayValueTree<T> {
 /// All values within the new strategy are generated using the given
 /// strategy.
 ///
-/// See [`UniformArrayStrategy`](struct.UniformArrayStrategy.html) for
+/// See [`UniformArrayStrategy`] for
 /// example usage.
 pub fn uniform<S: Strategy, const N: usize>(strategy: S) -> UniformArrayStrategy<S, [S::Value; N]> {
   UniformArrayStrategy {
@@ -122,7 +122,7 @@ macro_rules! small_array {
     /// strategy. The length of the array corresponds to the suffix of the
     /// name of this function.
     ///
-    /// See [`UniformArrayStrategy`](struct.UniformArrayStrategy.html) for
+    /// See [`UniformArrayStrategy`] for
     /// example usage.
     pub const fn $uni<S: Strategy>(strategy: S) -> UniformArrayStrategy<S, [S::Value; $n]> {
       UniformArrayStrategy {

@@ -100,160 +100,115 @@ type MapErr<T, E> = statics::Map<E, WrapErr<<T as Strategy>::Value, <E as Strate
 /// through `WrapOk` so its generated values arrive as `Ok`.
 type MapOk<T, E> = statics::Map<T, WrapOk<<T as Strategy>::Value, <E as Strategy>::Value>>;
 
-opaque_strategy_wrapper! {
-    /// Strategy which generates `Result`s using `Ok` and `Err` values from two
-    /// delegate strategies.
-    ///
-    /// Shrinks to `Err`.
-    #[derive(Clone)]
-    pub struct MaybeOk[<T, E>][where T : Strategy, E : Strategy]
-        (TupleUnion<(WeightedStrategy<MapErr<T, E>>, WeightedStrategy<MapOk<T, E>>)>)
-        -> MaybeOkValueTree<T, E>;
-    /// `ValueTree` type corresponding to `MaybeOk`.
-    pub struct MaybeOkValueTree[<T, E>][where T : Strategy, E : Strategy]
+/// Define one Result strategy family with its earlier branch as the shrink target.
+/// The two public families retain distinct wrappers and opposite branch orders.
+macro_rules! result_union {
+  (
+    $strategy:ident,
+    $tree:ident;
+    $uniform:ident,
+    $(#[$weighted_meta:meta])*
+    $weighted:ident($probability:ident);
+    ($ok_strategy:ident, $err_strategy:ident);
+    [
+      $earlier:ident =>
+      $earlier_map:ident($earlier_strategy:ident, $earlier_wrap:ident),
+      $later:ident =>
+      $later_map:ident($later_strategy:ident, $later_wrap:ident)
+    ]
+  ) => {
+    opaque_strategy_wrapper! {
+      /// Strategy which generates `Result`s using `Ok` and `Err` values from two
+      /// delegate strategies.
+      #[doc = ""]
+      #[doc = concat!("Shrinks to `", stringify!($earlier), "`.")]
+      #[derive(Clone)]
+      pub struct $strategy[<T, E>][where T: Strategy, E: Strategy]
+        (TupleUnion<(WeightedStrategy<$earlier_map<T, E>>, WeightedStrategy<$later_map<T, E>>)>)
+        -> $tree<T, E>;
+      #[doc = concat!("`ValueTree` type corresponding to `", stringify!($strategy), "`.")]
+      pub struct $tree[<T, E>][where T: Strategy, E: Strategy]
         (TupleUnionValueTree<(
-            Option<LazyValueTree<statics::Map<E, WrapErr<T::Value, E::Value>>>>,
-            Option<LazyValueTree<statics::Map<T, WrapOk<T::Value, E::Value>>>>,
+          Option<LazyValueTree<$earlier_map<T, E>>>,
+          Option<LazyValueTree<$later_map<T, E>>>,
         ), TupleUnionActive2<
-            <statics::Map<E, WrapErr<T::Value, E::Value>> as Strategy>::Tree,
-            <statics::Map<T, WrapOk<T::Value, E::Value>> as Strategy>::Tree,
+          <$earlier_map<T, E> as Strategy>::Tree,
+          <$later_map<T, E> as Strategy>::Tree,
         >>)
         -> Result<T::Value, E::Value>;
-}
+    }
 
-opaque_strategy_wrapper! {
-    /// Strategy which generates `Result`s using `Ok` and `Err` values from two
-    /// delegate strategies.
+    impl<T: Strategy + fmt::Debug, E: Strategy + fmt::Debug> fmt::Debug for $strategy<T, E> {
+      fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, concat!(stringify!($strategy), "({:?})"), self.0)
+      }
+    }
+
+    impl<T: Strategy, E: Strategy> Clone for $tree<T, E>
+    where
+      T::Tree: Clone,
+      E::Tree: Clone,
+    {
+      fn clone(&self) -> Self {
+        Self(self.0.clone())
+      }
+    }
+
+    impl<T: Strategy, E: Strategy> fmt::Debug for $tree<T, E>
+    where
+      T::Tree: fmt::Debug,
+      E::Tree: fmt::Debug,
+    {
+      fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, concat!(stringify!($tree), "({:?})"), self.0)
+      }
+    }
+
+    /// Create a strategy for `Result`s where `Ok` values are taken from
+    /// `ok_strategy` and `Err` values are taken from `err_strategy`.
     ///
-    /// Shrinks to `Ok`.
-    #[derive(Clone)]
-    pub struct MaybeErr[<T, E>][where T : Strategy, E : Strategy]
-        (TupleUnion<(WeightedStrategy<MapOk<T, E>>, WeightedStrategy<MapErr<T, E>>)>)
-        -> MaybeErrValueTree<T, E>;
-    /// `ValueTree` type corresponding to `MaybeErr`.
-    pub struct MaybeErrValueTree[<T, E>][where T : Strategy, E : Strategy]
-        (TupleUnionValueTree<(
-            Option<LazyValueTree<statics::Map<T, WrapOk<T::Value, E::Value>>>>,
-            Option<LazyValueTree<statics::Map<E, WrapErr<T::Value, E::Value>>>>,
-        ), TupleUnionActive2<
-            <statics::Map<T, WrapOk<T::Value, E::Value>> as Strategy>::Tree,
-            <statics::Map<E, WrapErr<T::Value, E::Value>> as Strategy>::Tree,
-        >>)
-        -> Result<T::Value, E::Value>;
+    /// `Ok` and `Err` are chosen with equal probability.
+    #[doc = ""]
+    #[doc = concat!("Generated values shrink to `", stringify!($earlier), "`.")]
+    pub fn $uniform<T: Strategy, E: Strategy>($ok_strategy: T, $err_strategy: E) -> $strategy<T, E> {
+      $weighted(0.5, $ok_strategy, $err_strategy)
+    }
+
+    /// Create a strategy for `Result`s where `Ok` values are taken from
+    /// `ok_strategy` and `Err` values are taken from `err_strategy`.
+    #[doc = ""]
+    #[doc = concat!("`", stringify!($probability), "` is the probability (between 0.0 and 1.0, exclusive)")]
+    #[doc = concat!("that `", stringify!($later), "` is initially chosen.")]
+    #[doc = ""]
+    #[doc = concat!("Generated values shrink to `", stringify!($earlier), "`.")]
+    $(#[$weighted_meta])*
+    pub fn $weighted<T: Strategy, E: Strategy>($probability: impl Into<Probability>, $ok_strategy: T, $err_strategy: E) -> $strategy<T, E> {
+      $strategy(binary_union(
+        $probability.into().into(),
+        statics::Map::new($earlier_strategy, $earlier_wrap(PhantomData, PhantomData)),
+        statics::Map::new($later_strategy, $later_wrap(PhantomData, PhantomData)),
+      ))
+    }
+  };
 }
 
-// These need to exist for the same reason as the one on `OptionStrategy`
-impl<T: Strategy + fmt::Debug, E: Strategy + fmt::Debug> fmt::Debug for MaybeOk<T, E> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "MaybeOk({:?})", self.0)
-  }
-}
-impl<T: Strategy + fmt::Debug, E: Strategy + fmt::Debug> fmt::Debug for MaybeErr<T, E> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "MaybeErr({:?})", self.0)
-  }
+result_union! {
+  MaybeOk, MaybeOkValueTree;
+  maybe_ok, maybe_ok_weighted(probability_of_ok);
+  (ok_strategy, err_strategy);
+  [Err => MapErr(err_strategy, WrapErr), Ok => MapOk(ok_strategy, WrapOk)]
 }
 
-impl<T: Strategy, E: Strategy> Clone for MaybeOkValueTree<T, E>
-where
-  T::Tree: Clone,
-  E::Tree: Clone,
-{
-  fn clone(&self) -> Self {
-    Self(self.0.clone())
-  }
-}
-
-impl<T: Strategy, E: Strategy> fmt::Debug for MaybeOkValueTree<T, E>
-where
-  T::Tree: fmt::Debug,
-  E::Tree: fmt::Debug,
-{
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "MaybeOkValueTree({:?})", self.0)
-  }
-}
-
-impl<T: Strategy, E: Strategy> Clone for MaybeErrValueTree<T, E>
-where
-  T::Tree: Clone,
-  E::Tree: Clone,
-{
-  fn clone(&self) -> Self {
-    Self(self.0.clone())
-  }
-}
-
-impl<T: Strategy, E: Strategy> fmt::Debug for MaybeErrValueTree<T, E>
-where
-  T::Tree: fmt::Debug,
-  E::Tree: fmt::Debug,
-{
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "MaybeErrValueTree({:?})", self.0)
-  }
-}
-
-/// Create a strategy for `Result`s where `Ok` values are taken from
-/// `ok_strategy` and `Err` values are taken from `err_strategy`.
-///
-/// `Ok` and `Err` are chosen with equal probability.
-///
-/// Generated values shrink to `Err`.
-pub fn maybe_ok<T: Strategy, E: Strategy>(ok_strategy: T, err_strategy: E) -> MaybeOk<T, E> {
-  maybe_ok_weighted(0.5, ok_strategy, err_strategy)
-}
-
-/// Create a strategy for `Result`s where `Ok` values are taken from
-/// `ok_strategy` and `Err` values are taken from `err_strategy`.
-///
-/// `probability_of_ok` is the probability (between 0.0 and 1.0, exclusive)
-/// that `Ok` is initially chosen.
-///
-/// Generated values shrink to `Err`.
-pub fn maybe_ok_weighted<T: Strategy, E: Strategy>(
-  probability_of_ok: impl Into<Probability>,
-  ok_strategy: T,
-  err_strategy: E,
-) -> MaybeOk<T, E> {
-  MaybeOk(binary_union(
-    probability_of_ok.into().into(),
-    statics::Map::new(err_strategy, WrapErr(PhantomData, PhantomData)),
-    statics::Map::new(ok_strategy, WrapOk(PhantomData, PhantomData)),
-  ))
-}
-
-/// Create a strategy for `Result`s where `Ok` values are taken from
-/// `ok_strategy` and `Err` values are taken from `err_strategy`.
-///
-/// `Ok` and `Err` are chosen with equal probability.
-///
-/// Generated values shrink to `Ok`.
-pub fn maybe_err<T: Strategy, E: Strategy>(ok_strategy: T, err_strategy: E) -> MaybeErr<T, E> {
-  maybe_err_weighted(0.5, ok_strategy, err_strategy)
-}
-
-/// Create a strategy for `Result`s where `Ok` values are taken from
-/// `ok_strategy` and `Err` values are taken from `err_strategy`.
-///
-/// `probability_of_ok` is the probability (between 0.0 and 1.0, exclusive)
-/// that `Err` is initially chosen.
-///
-/// Generated values shrink to `Ok`.
-#[allow(
-  clippy::single_call_fn,
-  reason = "the Err-weighted Result strategy that the maybe_err combinator delegates to"
-)]
-pub fn maybe_err_weighted<T: Strategy, E: Strategy>(
-  probability_of_err: impl Into<Probability>,
-  ok_strategy: T,
-  err_strategy: E,
-) -> MaybeErr<T, E> {
-  MaybeErr(binary_union(
-    probability_of_err.into().into(),
-    statics::Map::new(ok_strategy, WrapOk(PhantomData, PhantomData)),
-    statics::Map::new(err_strategy, WrapErr(PhantomData, PhantomData)),
-  ))
+result_union! {
+  MaybeErr, MaybeErrValueTree;
+  maybe_err,
+  #[allow(
+    clippy::single_call_fn,
+    reason = "the Err-weighted Result strategy that the maybe_err combinator delegates to"
+  )]
+  maybe_err_weighted(probability_of_err);
+  (ok_strategy, err_strategy);
+  [Ok => MapOk(ok_strategy, WrapOk), Err => MapErr(err_strategy, WrapErr)]
 }
 
 #[cfg(test)]

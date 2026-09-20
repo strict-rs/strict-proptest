@@ -224,36 +224,21 @@ macro_rules! supported_int_any {
 
 /// Draws a fully arbitrary integer for a type the RNG cannot sample directly.
 ///
-/// Falls back to a raw `next_u64` word cast to the target type, used for
-/// `usize`/`isize` on 64-bit targets.
-#[cfg(target_pointer_width = "64")]
-macro_rules! unsupported_int_any {
-  ($runner:ident, $typ:ty) => {
-    <$typ>::from_ne_bytes($runner.rng().next_u64().to_ne_bytes())
-  };
-}
-
-/// Draws a fully arbitrary integer for a type the RNG cannot sample directly.
-///
-/// Falls back to a raw `next_u32` word cast to the target type, used for
-/// `usize`/`isize` on 32-bit targets.
-#[cfg(target_pointer_width = "32")]
-macro_rules! unsupported_int_any {
-  ($runner:ident, $typ:ty) => {
-    <$typ>::from_ne_bytes($runner.rng().next_u32().to_ne_bytes())
-  };
-}
-
-/// Draws a fully arbitrary integer for a type the RNG cannot sample directly.
-///
-/// Falls back to the low two bytes of a raw `next_u32` word, used for
-/// `usize`/`isize` on 16-bit targets.
-#[cfg(target_pointer_width = "16")]
+/// Uses a word with the target pointer width and preserves its native bytes.
+/// On 16-bit targets, only the low two bytes of a `next_u32` word are used.
 macro_rules! unsupported_int_any {
   ($runner:ident, $typ:ty) => {
     <$typ>::from_ne_bytes({
+      #[cfg(target_pointer_width = "64")]
+      let bytes = $runner.rng().next_u64().to_ne_bytes();
+      #[cfg(target_pointer_width = "32")]
       let bytes = $runner.rng().next_u32().to_ne_bytes();
-      [bytes[0], bytes[1]]
+      #[cfg(target_pointer_width = "16")]
+      let bytes = {
+        let [first, second, ..] = $runner.rng().next_u32().to_ne_bytes();
+        [first, second]
+      };
+      bytes
     })
   };
 }
@@ -350,7 +335,14 @@ macro_rules! numeric_api {
       }
     }
 
-    impl Strategy for ::core::ops::RangeTo<$typ> {
+    numeric_api!(@upper_bounds $sample_mode, $typ, $sample_typ;
+      RangeTo, $uniform;
+      RangeToInclusive, $incl;
+    );
+  };
+  (@upper_bounds $sample_mode:ident, $typ:ident, $sample_typ:ty;
+   $($range:ident, $uniform:ident;)+) => {
+    $(impl Strategy for ::core::ops::$range<$typ> {
       type Tree = BinarySearch;
       type Value = $typ;
 
@@ -361,287 +353,219 @@ macro_rules! numeric_api {
           self.end,
         ))
       }
+    })+
+  };
+}
+
+/// Defines the common strategy surface for one integer type.
+///
+/// The selected shrinker supplies its signed or unsigned search arithmetic;
+/// module wiring, initial state, generation, and range strategies are shared.
+macro_rules! integer_bin_search {
+    ($shrink:ident, $typ:ident) => {
+        integer_bin_search!(@with_mode
+            $shrink,
+            generic,
+            $typ,
+            supported_int_any,
+            sample_uniform,
+            sample_uniform_incl
+        );
+    };
+    ($shrink:ident, $typ:ident, $int_any:ident, $uniform:ident, $incl:ident) => {
+        integer_bin_search!(@with_mode $shrink, plain, $typ, $int_any, $uniform, $incl);
+    };
+    (@with_mode
+        $shrink:ident,
+        $sample_mode:ident,
+        $typ:ident,
+        $int_any: ident,
+        $uniform: ident,
+        $incl: ident
+    ) => {
+        #[doc = concat!(
+            "Strategies and shrinkers for `",
+            stringify!($typ),
+            "` values."
+        )]
+        pub mod $typ {
+            integer_rng_import!($sample_mode);
+
+            use crate::strategy::*;
+            use crate::test_runner::TestRunner;
+
+            int_any!($typ, $int_any);
+
+            /// Shrinks an integer towards 0, using binary search to find
+            /// boundary points.
+            #[derive(Clone, Copy, Debug)]
+            pub struct BinarySearch {
+                lo: $typ,
+                curr: $typ,
+                hi: $typ,
+            }
+            impl BinarySearch {
+                /// Creates a new binary searcher starting at the given value.
+                #[allow(clippy::single_call_fn, reason = "seed the integer binary-search shrinker at its initial generated value")]
+                pub const fn new(start: $typ) -> Self {
+                    BinarySearch {
+                        lo: 0,
+                        curr: start,
+                        hi: start,
+                    }
+                }
+
+                $shrink!(@methods $typ);
+            }
+
+            impl ValueTree for BinarySearch {
+                type Value = $typ;
+
+                fn current(&self) -> $typ {
+                    self.curr
+                }
+
+                fn simplify(&mut self) -> bool {
+                    if !$shrink!(@can_shrink self) {
+                        return false;
+                    }
+
+                    self.hi = self.curr;
+                    self.reposition()
+                }
+
+                fn complicate(&mut self) -> bool {
+                    if !$shrink!(@can_shrink self) {
+                        return false;
+                    }
+
+                    self.lo = $shrink!(@next_lower self);
+                    self.reposition()
+                }
+            }
+            numeric_api!(@with_mode $sample_mode, $typ, $typ, 1, $uniform, $incl);
+        }
+    };
+}
+
+/// Implements signed shrinking, tracking magnitude across the sign boundary.
+macro_rules! signed_integer_bin_search {
+  (@methods $typ:ident) => {
+    /// Creates a new binary searcher which will not produce values
+    /// on the other side of `lo` or `hi` from `start`. `lo` is
+    /// inclusive, `hi` is exclusive.
+    fn new_clamped(lo: $typ, start: $typ, hi: $typ) -> Self {
+      use core::cmp::max;
+      use core::cmp::min;
+
+      BinarySearch {
+        lo:   if start < 0 {
+          min(0, hi.saturating_sub(1))
+        } else {
+          max(0, lo)
+        },
+        hi:   start,
+        curr: start,
+      }
     }
 
-    impl Strategy for ::core::ops::RangeToInclusive<$typ> {
-      type Tree = BinarySearch;
-      type Value = $typ;
+    const fn reposition(&mut self) -> bool {
+      // Won't ever overflow since lo starts at 0 and advances
+      // towards hi.
+      let interval = self.hi.wrapping_sub(self.lo);
+      let new_mid = self.lo.wrapping_add(interval.wrapping_div(2));
 
-      fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-        Ok(BinarySearch::new_clamped(
-          <$typ>::MIN,
-          sample_uniform_value!($sample_mode, $incl, $sample_typ, runner, <$typ>::MIN, self.end,)?.into(),
-          self.end,
-        ))
+      if new_mid == self.curr {
+        false
+      } else {
+        self.curr = new_mid;
+        true
       }
+    }
+
+    const fn magnitude_greater(lhs: $typ, rhs: $typ) -> bool {
+      if 0 == lhs {
+        false
+      } else if lhs < 0 {
+        lhs < rhs
+      } else {
+        lhs > rhs
+      }
+    }
+  };
+  (@can_shrink $tree:ident) => {
+    BinarySearch::magnitude_greater($tree.hi, $tree.lo)
+  };
+  (@next_lower $tree:ident) => {
+    if $tree.hi < 0 {
+      $tree.curr.saturating_sub(1)
+    } else {
+      $tree.curr.saturating_add(1)
     }
   };
 }
 
-/// Defines the complete strategy submodule for one signed integer type.
+/// Implements unsigned shrinking toward zero or a clamped lower bound.
 ///
-/// Emits the type's `pub mod` containing its `Any`/`ANY`, the toward-zero
-/// `BinarySearch` value tree (whose shrinking tracks magnitude across the sign
-/// boundary), and the `numeric_api!` range implementations.
-macro_rules! signed_integer_bin_search {
-    ($typ:ident) => {
-        signed_integer_bin_search!(@with_mode
-            generic,
-            $typ,
-            supported_int_any,
-            sample_uniform,
-            sample_uniform_incl
-        );
-    };
-    ($typ:ident, $int_any: ident, $uniform: ident, $incl: ident) => {
-        signed_integer_bin_search!(@with_mode plain, $typ, $int_any, $uniform, $incl);
-    };
-    (@with_mode
-        $sample_mode:ident,
-        $typ:ident,
-        $int_any: ident,
-        $uniform: ident,
-        $incl: ident
-    ) => {
-        #[doc = concat!(
-            "Strategies and shrinkers for `",
-            stringify!($typ),
-            "` values."
-        )]
-        pub mod $typ {
-            integer_rng_import!($sample_mode);
-
-            use crate::strategy::*;
-            use crate::test_runner::TestRunner;
-
-            int_any!($typ, $int_any);
-
-            /// Shrinks an integer towards 0, using binary search to find
-            /// boundary points.
-            #[derive(Clone, Copy, Debug)]
-            pub struct BinarySearch {
-                lo: $typ,
-                curr: $typ,
-                hi: $typ,
-            }
-            impl BinarySearch {
-                /// Creates a new binary searcher starting at the given value.
-                #[allow(clippy::single_call_fn, reason = "seed the signed-integer binary-search shrinker at its initial generated value")]
-                pub const fn new(start: $typ) -> Self {
-                    BinarySearch {
-                        lo: 0,
-                        curr: start,
-                        hi: start,
-                    }
-                }
-
-                /// Creates a new binary searcher which will not produce values
-                /// on the other side of `lo` or `hi` from `start`. `lo` is
-                /// inclusive, `hi` is exclusive.
-                fn new_clamped(lo: $typ, start: $typ, hi: $typ) -> Self {
-                    use core::cmp::{max, min};
-
-                    BinarySearch {
-                        lo: if start < 0 {
-                            min(0, hi.saturating_sub(1))
-                        } else {
-                            max(0, lo)
-                        },
-                        hi: start,
-                        curr: start,
-                    }
-                }
-
-                const fn reposition(&mut self) -> bool {
-                    // Won't ever overflow since lo starts at 0 and advances
-                    // towards hi.
-                    let interval = self.hi.wrapping_sub(self.lo);
-                    let new_mid =
-                        self.lo.wrapping_add(interval.wrapping_div(2));
-
-                    if new_mid == self.curr {
-                        false
-                    } else {
-                        self.curr = new_mid;
-                        true
-                    }
-                }
-
-                const fn magnitude_greater(lhs: $typ, rhs: $typ) -> bool {
-                    if 0 == lhs {
-                        false
-                    } else if lhs < 0 {
-                        lhs < rhs
-                    } else {
-                        lhs > rhs
-                    }
-                }
-            }
-            impl ValueTree for BinarySearch {
-                type Value = $typ;
-
-                fn current(&self) -> $typ {
-                    self.curr
-                }
-
-                fn simplify(&mut self) -> bool {
-                    if !BinarySearch::magnitude_greater(self.hi, self.lo) {
-                        return false;
-                    }
-
-                    self.hi = self.curr;
-                    self.reposition()
-                }
-
-                fn complicate(&mut self) -> bool {
-                    if !BinarySearch::magnitude_greater(self.hi, self.lo) {
-                        return false;
-                    }
-
-                    self.lo = if self.hi < 0 {
-                        self.curr.saturating_sub(1)
-                    } else {
-                        self.curr.saturating_add(1)
-                    };
-
-                    self.reposition()
-                }
-            }
-
-            numeric_api!(@with_mode $sample_mode, $typ, $typ, 1, $uniform, $incl);
-        }
-    };
-}
-
-/// Defines the complete strategy submodule for one unsigned integer type.
-///
-/// Like `signed_integer_bin_search!` but for unsigned types: the `BinarySearch`
-/// shrinks toward `0` (or a clamped lower bound) and adds `new_above`.
+/// Adds the unsigned-only `new_above` constructor to the common search surface.
 macro_rules! unsigned_integer_bin_search {
-    ($typ:ident) => {
-        unsigned_integer_bin_search!(@with_mode
-            generic,
-            $typ,
-            supported_int_any,
-            sample_uniform,
-            sample_uniform_incl
-        );
-    };
-    ($typ:ident, $int_any: ident, $uniform: ident, $incl: ident) => {
-        unsigned_integer_bin_search!(@with_mode plain, $typ, $int_any, $uniform, $incl);
-    };
-    (@with_mode
-        $sample_mode:ident,
-        $typ:ident,
-        $int_any: ident,
-        $uniform: ident,
-        $incl: ident
-    ) => {
-        #[doc = concat!(
-            "Strategies and shrinkers for `",
-            stringify!($typ),
-            "` values."
-        )]
-        pub mod $typ {
-            integer_rng_import!($sample_mode);
+  (@methods $typ:ident) => {
+    /// Creates a new binary searcher which will not search below
+    /// the given `lo` value.
+    const fn new_clamped(lo: $typ, start: $typ, _hi: $typ) -> Self {
+      BinarySearch {
+        lo,
+        curr: start,
+        hi: start,
+      }
+    }
 
-            use crate::strategy::*;
-            use crate::test_runner::TestRunner;
+    /// Creates a new binary searcher which will not search below
+    /// the given `lo` value.
+    #[allow(
+      clippy::single_call_fn,
+      reason = "clamp the unsigned binary-search shrinker so it never searches below a floor value"
+    )]
+    pub const fn new_above(lo: $typ, start: $typ) -> Self {
+      BinarySearch::new_clamped(lo, start, start)
+    }
 
-            int_any!($typ, $int_any);
+    const fn reposition(&mut self) -> bool {
+      let interval = self.hi.saturating_sub(self.lo);
+      let new_mid = self.lo.saturating_add(interval.div_euclid(2));
 
-            /// Shrinks an integer towards 0, using binary search to find
-            /// boundary points.
-            #[derive(Clone, Copy, Debug)]
-            pub struct BinarySearch {
-                lo: $typ,
-                curr: $typ,
-                hi: $typ,
-            }
-            impl BinarySearch {
-                /// Creates a new binary searcher starting at the given value.
-                #[allow(clippy::single_call_fn, reason = "seed the unsigned-integer binary-search shrinker at its initial generated value")]
-                pub const fn new(start: $typ) -> Self {
-                    BinarySearch {
-                        lo: 0,
-                        curr: start,
-                        hi: start,
-                    }
-                }
-
-                /// Creates a new binary searcher which will not search below
-                /// the given `lo` value.
-                const fn new_clamped(lo: $typ, start: $typ, _hi: $typ) -> Self {
-                    BinarySearch {
-                        lo,
-                        curr: start,
-                        hi: start,
-                    }
-                }
-
-                /// Creates a new binary searcher which will not search below
-                /// the given `lo` value.
-                #[allow(clippy::single_call_fn, reason = "clamp the unsigned binary-search shrinker so it never searches below a floor value")]
-                pub const fn new_above(lo: $typ, start: $typ) -> Self {
-                    BinarySearch::new_clamped(lo, start, start)
-                }
-
-                const fn reposition(&mut self) -> bool {
-                    let interval = self.hi.saturating_sub(self.lo);
-                    let new_mid =
-                        self.lo.saturating_add(interval.div_euclid(2));
-
-                    if new_mid == self.curr {
-                        false
-                    } else {
-                        self.curr = new_mid;
-                        true
-                    }
-                }
-            }
-            impl ValueTree for BinarySearch {
-                type Value = $typ;
-
-                fn current(&self) -> $typ {
-                    self.curr
-                }
-
-                fn simplify(&mut self) -> bool {
-                    if self.hi <= self.lo {
-                        return false;
-                    }
-
-                    self.hi = self.curr;
-                    self.reposition()
-                }
-
-                fn complicate(&mut self) -> bool {
-                    if self.hi <= self.lo {
-                        return false;
-                    }
-
-                    self.lo = self.curr.saturating_add(1);
-                    self.reposition()
-                }
-            }
-
-            numeric_api!(@with_mode $sample_mode, $typ, $typ, 1, $uniform, $incl);
-        }
-    };
+      if new_mid == self.curr {
+        false
+      } else {
+        self.curr = new_mid;
+        true
+      }
+    }
+  };
+  (@can_shrink $tree:ident) => {
+    $tree.hi > $tree.lo
+  };
+  (@next_lower $tree:ident) => {
+    $tree.curr.saturating_add(1)
+  };
 }
 
-signed_integer_bin_search!(i8);
-signed_integer_bin_search!(i16);
-signed_integer_bin_search!(i32);
-signed_integer_bin_search!(i64);
-signed_integer_bin_search!(i128);
-signed_integer_bin_search!(isize, unsupported_int_any, isize_sample_uniform, isize_sample_uniform_incl);
-unsigned_integer_bin_search!(u8);
-unsigned_integer_bin_search!(u16);
-unsigned_integer_bin_search!(u32);
-unsigned_integer_bin_search!(u64);
-unsigned_integer_bin_search!(u128);
-unsigned_integer_bin_search!(usize, unsupported_int_any, usize_sample_uniform, usize_sample_uniform_incl);
+integer_bin_search!(signed_integer_bin_search, i8);
+integer_bin_search!(signed_integer_bin_search, i16);
+integer_bin_search!(signed_integer_bin_search, i32);
+integer_bin_search!(signed_integer_bin_search, i64);
+integer_bin_search!(signed_integer_bin_search, i128);
+integer_bin_search!(
+  signed_integer_bin_search, isize, unsupported_int_any, isize_sample_uniform, isize_sample_uniform_incl
+);
+integer_bin_search!(unsigned_integer_bin_search, u8);
+integer_bin_search!(unsigned_integer_bin_search, u16);
+integer_bin_search!(unsigned_integer_bin_search, u32);
+integer_bin_search!(unsigned_integer_bin_search, u64);
+integer_bin_search!(unsigned_integer_bin_search, u128);
+integer_bin_search!(
+  unsigned_integer_bin_search, usize, unsupported_int_any, usize_sample_uniform, usize_sample_uniform_incl
+);
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

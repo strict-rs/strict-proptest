@@ -7,11 +7,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use core::any::Any;
-
 use crate::std_facade::BTreeMap;
 use crate::std_facade::BTreeSet;
-use crate::std_facade::Box;
 use crate::std_facade::Vec;
 use crate::std_facade::fmt;
 use crate::test_runner::failure_persistence::FailurePersistence;
@@ -44,17 +41,7 @@ impl FailurePersistence for MapFailurePersistence {
     let _inserted = set.insert(seed);
   }
 
-  fn box_clone(&self) -> Box<dyn FailurePersistence> {
-    Box::new(self.clone())
-  }
-
-  fn eq(&self, other: &dyn FailurePersistence) -> bool {
-    other.as_any().downcast_ref::<Self>().is_some_and(|x| x == self)
-  }
-
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
+  persistence_object!(self => self.clone());
 }
 
 #[cfg(test)]

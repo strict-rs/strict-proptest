@@ -547,6 +547,36 @@ pub(super) mod tests {
     .map_err(Box::new)
   }
 
+  /// Check an interrupted child against the complete transported prefix.
+  fn check_interruption(
+    observation: Observation,
+    context: &'static str,
+    expected: impl Fn(&Interruption) -> bool,
+  ) -> Result<Observation, Box<PredicateFailure<Observation>>> {
+    ensure_that(observation, context, |observed| {
+      let Err(ref report) = observed.0 else {
+        return false;
+      };
+      observed.1 == 0
+        && matches!(report.cause, PropertyCause::Interrupted {
+            counterexample: 5,
+            ref interruption,
+            ..
+          } if expected(interruption))
+        && report.established_failure.is_none()
+        && report.finalization.is_empty()
+        && report.run.evaluations.iter().any(
+          |record| matches!(record.outcome, EvaluationOutcome::Returned(Ok(ref subject)) if subject.value < 5 && subject.process != id()),
+        )
+        && report
+          .run
+          .evaluations
+          .iter()
+          .all(|record| !matches!(record.outcome, EvaluationOutcome::Returned(Err(_))))
+    })
+    .map_err(Box::new)
+  }
+
   #[test]
   fn transports_successes_without_parent_invocation() -> Check {
     let config = Config {
@@ -609,54 +639,39 @@ pub(super) mod tests {
       }
       Ok(Subject::new(value))
     });
-    ensure_that(
+    check_interruption(
       result,
       "timeouts retain the minimized case without an invented assertion error",
-      |observed| {
-        let Err(ref report) = observed.0 else {
-          return false;
-        };
-        observed.1 == 0
-          && matches!(report.cause, PropertyCause::Interrupted {
-            counterexample: 5,
-            interruption: Interruption::TimedOut {
-              timeout_ms: 200
-            },
-            ..
-          })
+      |interruption| {
+        matches!(*interruption, Interruption::TimedOut {
+          timeout_ms: 200
+        })
       },
     )
     .map(drop)
-    .map_err(Box::new)
   }
 
-  #[test]
-  fn retains_prefix_and_established_pair_on_codec_failure() -> Check {
-    let codec = NumberCodec {
-      reject_encode: Some(5),
-      ..NumberCodec::default()
+  /// Exercise both codec directions with the same retained-prefix contract.
+  macro_rules! codec_failure_case {
+    ($name:ident, $field:ident, $failure:ident) => {
+      #[test]
+      fn $name() -> Check {
+        let codec = NumberCodec {
+          $field: Some(5),
+          ..NumberCodec::default()
+        };
+        check_codec_failure(
+          configuration(concat!(module_path!(), "::", stringify!($name))),
+          codec,
+          &CodecFailure::$failure(5),
+        )
+        .map(drop)
+      }
     };
-    check_codec_failure(
-      configuration(concat!(module_path!(), "::retains_prefix_and_established_pair_on_codec_failure")),
-      codec,
-      &CodecFailure::Encode(5),
-    )
-    .map(drop)
   }
 
-  #[test]
-  fn decoding_failure_retains_the_established_native_pair() -> Check {
-    let codec = NumberCodec {
-      reject_decode: Some(5),
-      ..NumberCodec::default()
-    };
-    check_codec_failure(
-      configuration(concat!(module_path!(), "::decoding_failure_retains_the_established_native_pair")),
-      codec,
-      &CodecFailure::Decode(5),
-    )
-    .map(drop)
-  }
+  codec_failure_case!(retains_prefix_and_established_pair_on_codec_failure, reject_encode, Encode);
+  codec_failure_case!(decoding_failure_retains_the_established_native_pair, reject_decode, Decode);
 
   #[test]
   fn missing_test_name_rejects_fork_before_callback_admission() -> Check {
@@ -697,32 +712,11 @@ pub(super) mod tests {
         Ok(Subject::new(value))
       },
     );
-    ensure_that(
+    check_interruption(
       result,
       "caught child panics retain the minimized case and diagnostic while the parent only replays",
-      |observed| {
-        let Err(ref report) = observed.0 else {
-          return false;
-        };
-        observed.1 == 0
-          && matches!(report.cause, PropertyCause::Interrupted {
-              counterexample: 5,
-              interruption: Interruption::Panicked(ref reason),
-              ..
-            } if reason.message() == "transported panic")
-          && report.established_failure.is_none()
-          && report.finalization.is_empty()
-          && report.run.evaluations.iter().any(
-            |record| matches!(record.outcome, EvaluationOutcome::Returned(Ok(ref subject)) if subject.value < 5 && subject.process != id()),
-          )
-          && report
-            .run
-            .evaluations
-            .iter()
-            .all(|record| !matches!(record.outcome, EvaluationOutcome::Returned(Err(_))))
-      },
+      |interruption| matches!(*interruption, Interruption::Panicked(ref reason) if reason.message() == "transported panic"),
     )
     .map(drop)
-    .map_err(Box::new)
   }
 }

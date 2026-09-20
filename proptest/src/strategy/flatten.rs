@@ -105,22 +105,17 @@ where
   }
 }
 
-impl<S> fmt::Debug for FlattenValueTree<S>
-where
+impl_debug_struct!(FlattenValueTree<S> [
   S: ValueTree + fmt::Debug,
   S::Value: Strategy,
   <S::Value as Strategy>::Tree: fmt::Debug,
-{
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_struct("FlattenValueTree")
-      .field("meta", &self.meta)
-      .field("current", &self.current)
-      .field("final_complication", &self.final_complication)
-      .field("runner", &self.runner)
-      .field("complicate_regen_remaining", &self.complicate_regen_remaining)
-      .finish()
-  }
-}
+] |self| {
+  meta: self.meta,
+  current: self.current,
+  final_complication: self.final_complication,
+  runner: self.runner,
+  complicate_regen_remaining: self.complicate_regen_remaining,
+});
 
 impl<S: ValueTree> FlattenValueTree<S>
 where
@@ -257,23 +252,12 @@ pub struct IndFlattenMap<S, F> {
   pub(super) fun:    Arc<F>,
 }
 
-impl<S: fmt::Debug, F> fmt::Debug for IndFlattenMap<S, F> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_struct("IndFlattenMap")
-      .field("source", &self.source)
-      .field("fun", &"<function>")
-      .finish()
-  }
-}
+impl_debug_struct!(IndFlattenMap<S, F> [S: fmt::Debug] |self| {
+  source: self.source,
+  fun: "<function>",
+});
 
-impl<S: Clone, F> Clone for IndFlattenMap<S, F> {
-  fn clone(&self) -> Self {
-    Self {
-      source: self.source.clone(),
-      fun:    Arc::clone(&self.fun),
-    }
-  }
-}
+impl_clone_shared_fn!(IndFlattenMap < S, F > |self| {});
 
 impl<S: Strategy, R: Strategy, F: Fn(S::Value) -> R> Strategy for IndFlattenMap<S, F> {
   type Tree = TupleValueTree<(S::Tree, R::Tree)>;

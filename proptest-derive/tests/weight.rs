@@ -15,8 +15,10 @@
 
 #[cfg(test)]
 mod tests {
-  use proptest::prelude::Arbitrary;
+  mod support;
+
   use proptest_derive::Arbitrary;
+  use support::assert_arbitrary;
 
   #[derive(Debug, Arbitrary)]
   enum T1 {
@@ -46,13 +48,5 @@ mod tests {
     V2,
   }
 
-  #[test]
-  fn asserting_arbitrary() {
-    fn assert_arbitrary<T: Arbitrary>() {}
-
-    assert_arbitrary::<T1>();
-    assert_arbitrary::<T2>();
-    assert_arbitrary::<T3>();
-    assert_arbitrary::<T4>();
-  }
+  assert_arbitrary!(T1, T2, T3, T4,);
 }

@@ -49,25 +49,15 @@ impl<S, F> FilterMap<S, F> {
   }
 }
 
-impl<S: fmt::Debug, F> fmt::Debug for FilterMap<S, F> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_struct("FilterMap")
-      .field("source", &self.source)
-      .field("whence", &self.whence)
-      .field("fun", &"<function>")
-      .finish()
-  }
-}
+impl_debug_struct!(FilterMap<S, F> [S: fmt::Debug] |self| {
+  source: self.source,
+  whence: self.whence,
+  fun: "<function>",
+});
 
-impl<S: Clone, F> Clone for FilterMap<S, F> {
-  fn clone(&self) -> Self {
-    Self {
-      source: self.source.clone(),
-      whence: self.whence.clone(),
-      fun:    Arc::clone(&self.fun),
-    }
-  }
-}
+impl_clone_shared_fn!(FilterMap<S, F> |self| {
+  whence: self.whence.clone(),
+});
 
 impl<S: Strategy, F: Fn(S::Value) -> Option<O>, O> Strategy for FilterMap<S, F>
 where
@@ -121,16 +111,12 @@ where
   }
 }
 
-impl<V: fmt::Debug, F, O> fmt::Debug for FilterMapValueTree<V, F, O> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_struct("FilterMapValueTree")
-      .field("source", &self.source)
-      .field("current", &"<current>")
-      .field("stalled", &self.stalled)
-      .field("fun", &"<function>")
-      .finish()
-  }
-}
+impl_debug_struct!(FilterMapValueTree<V, F, O> [V: fmt::Debug] |self| {
+  source: self.source,
+  current: "<current>",
+  stalled: self.stalled,
+  fun: "<function>",
+});
 
 impl<V: ValueTree, F: Fn(V::Value) -> Option<O>, O> FilterMapValueTree<V, F, O>
 where
@@ -197,37 +183,15 @@ where
 
 #[cfg(test)]
 mod test {
-  use strict_test_support::ensure_that;
-
   use super::*;
-  use crate::std_facade::Vec;
-  use crate::strategy::traits::trace_simplifications;
-  use crate::test_runner::test_runner_without_persistence;
+  use crate::strategy::filter::test::check_filtered_shrinking;
 
   #[test]
   fn test_filter_map() -> Result<(), impl fmt::Debug> {
     let input = (0..256_i32).prop_filter_map("%3 + 1", |candidate| {
       (candidate.rem_euclid(3) == 0).then_some(candidate.saturating_add(1))
     });
-    let walks: Vec<_> = (0..256)
-      .map(|_| {
-        input
-          .new_tree(&mut test_runner_without_persistence())
-          .map(trace_simplifications)
-      })
-      .collect();
-    ensure_that(
-      walks,
-      "generation and every shrink state preserve the filter contract",
-      |observed| {
-        observed.iter().all(|walk| {
-          walk
-            .as_ref()
-            .is_ok_and(|reached| reached.1.iter().all(|value| value.saturating_sub(1).rem_euclid(3) == 0))
-        })
-      },
-    )
-    .map(drop)
+    check_filtered_shrinking(&input, |value| value.saturating_sub(1).rem_euclid(3) == 0).map(drop)
   }
 
   #[test]

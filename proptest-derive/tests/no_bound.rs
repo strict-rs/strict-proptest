@@ -15,10 +15,12 @@
 
 #[cfg(test)]
 mod tests {
+  mod support;
+
   use std::marker::PhantomData;
 
-  use proptest::prelude::Arbitrary;
   use proptest_derive::Arbitrary;
+  use support::assert_arbitrary;
 
   #[derive(Debug)]
   struct NotArbitrary;
@@ -55,12 +57,9 @@ mod tests {
   #[derive(Debug, Arbitrary)]
   struct T6(T5<NotArbitrary, NotArbitrary, NotArbitrary>);
 
-  #[test]
-  fn asserting_arbitrary() {
-    fn assert_arbitrary<T: Arbitrary>() {}
-
+  assert_arbitrary!(
     // assert_arbitrary::<T2>();
     // assert_arbitrary::<T4>();
-    assert_arbitrary::<T6>();
-  }
+    T6,
+  );
 }

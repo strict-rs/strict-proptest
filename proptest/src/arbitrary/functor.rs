@@ -219,3 +219,127 @@ macro_rules! lift1 {
             $crate::strategy::Strategy::prop_map_into(base));
     };
 }
+
+/// Generate a binary lifting implementation with caller-owned type bounds,
+/// parameters, and strategy construction. Boxing stays at the trait boundary.
+macro_rules! lift2 {
+    ([$($bounds:tt)*] $typ:ty, $first:ty, $second:ty, $params:ty;
+     $fst:ident, $snd:ident, $args:ident => $logic:expr) => {
+        impl<$($bounds)*> $crate::arbitrary::functor::ArbitraryF2<$first, $second> for $typ {
+            type Parameters = $params;
+
+            fn lift2_with<AS, BS>($fst: AS, $snd: BS, $args: Self::Parameters)
+                -> $crate::strategy::BoxedStrategy<Self>
+            where
+                AS: $crate::strategy::Strategy<Value = $first> + 'static,
+                BS: $crate::strategy::Strategy<Value = $second> + 'static,
+            {
+                $crate::strategy::Strategy::boxed($logic)
+            }
+        }
+    };
+}
+
+#[cfg(test)]
+mod tests {
+  #[cfg(feature = "std")]
+  use core::hash::BuildHasherDefault;
+  use core::iter::Chain;
+  use core::iter::Zip;
+
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
+
+  use super::ArbitraryF2 as _;
+  use crate::std_facade::BTreeMap;
+  #[cfg(feature = "std")]
+  use crate::std_facade::HashMap;
+  use crate::std_facade::Vec;
+  use crate::std_facade::btree_map;
+  #[cfg(feature = "std")]
+  use crate::std_facade::hash_map;
+  use crate::strategy::Just;
+  use crate::strategy::Strategy;
+  use crate::strategy::ValueTree as _;
+  use crate::test_runner::Config;
+  use crate::test_runner::Reason;
+  use crate::test_runner::TestRunner;
+
+  /// A complete generated sequence or its native generation failure.
+  type Sample<T> = Result<Vec<T>, Reason>;
+
+  /// Terminal assertion retaining every generated sequence and native rejection.
+  type SampleCheck<T, const N: usize> = Result<(), PredicateFailure<[Sample<T>; N]>>;
+
+  /// Generate one lifted container and retain its yielded items or rejection.
+  fn generated_items<S: Strategy>(strategy: &S) -> Sample<<S::Value as IntoIterator>::Item>
+  where
+    S::Value: IntoIterator,
+  {
+    let mut runner = TestRunner::new(Config {
+      max_local_rejects: 8,
+      failure_persistence: None,
+      ..Config::default()
+    });
+    strategy.new_tree(&mut runner).map(|tree| tree.current().into_iter().collect())
+  }
+
+  #[test]
+  fn zip_lifting_stops_at_the_shorter_input() -> SampleCheck<(u8, u16), 2> {
+    let observed = [
+      generated_items(&Zip::lift2(Just([1_u8, 2].into_iter()), Just([10_u16].into_iter()))),
+      generated_items(&Zip::lift2(Just([1_u8].into_iter()), Just([].into_iter()))),
+    ];
+    ensure_that(observed, "zip pairs inputs in order and never yields an unpaired item", |samples| {
+      let [short, empty] = samples.each_ref();
+      short.as_ref().is_ok_and(|items| items.as_slice() == [(1, 10)]) && empty.as_ref().is_ok_and(Vec::is_empty)
+    })
+    .map(drop)
+  }
+
+  #[test]
+  fn chain_lifting_keeps_both_inputs_in_order() -> SampleCheck<u8, 2> {
+    let observed = [
+      generated_items(&Chain::lift2(Just([1_u8, 2].into_iter()), Just([3_u8].into_iter()))),
+      generated_items(&Chain::lift2(Just([].into_iter()), Just([3_u8].into_iter()))),
+    ];
+    ensure_that(observed, "chain preserves both sequences even when the first is empty", |samples| {
+      let [both, tail] = samples.each_ref();
+      both.as_ref().is_ok_and(|items| items.as_slice() == [1, 2, 3]) && tail.as_ref().is_ok_and(|items| items.as_slice() == [3])
+    })
+    .map(drop)
+  }
+
+  /// Exercise the same size and collision contract for maps and their owning iterators.
+  macro_rules! map_lifting_test {
+    ($name:ident, $map:ty) => {
+      #[test]
+      fn $name() -> SampleCheck<(u8, u16), 3> {
+        let observed = [0_usize, 1, 2].map(|size| generated_items(&<$map>::lift2_with(Just(7_u8), Just(11_u16), size.into())));
+        ensure_that(
+          observed,
+          "map lifting keeps entries and rejects impossible unique-key counts",
+          |samples| {
+            let [empty, one, collision] = samples.each_ref();
+            empty.as_ref().is_ok_and(Vec::is_empty)
+              && one.as_ref().is_ok_and(|entries| entries.as_slice() == [(7, 11)])
+              && collision.is_err()
+          },
+        )
+        .map(drop)
+      }
+    };
+  }
+
+  map_lifting_test!(btree_map_lifting_preserves_size, BTreeMap<u8, u16>);
+  map_lifting_test!(btree_map_iterator_lifting_preserves_size, btree_map::IntoIter<u8, u16>);
+
+  #[cfg(feature = "std")]
+  map_lifting_test!(hash_map_iterator_lifting_preserves_size, hash_map::IntoIter<u8, u16>);
+
+  #[cfg(feature = "std")]
+  map_lifting_test!(
+    custom_hasher_map_lifting_preserves_size,
+    HashMap<u8, u16, BuildHasherDefault<hash_map::DefaultHasher>>
+  );
+}

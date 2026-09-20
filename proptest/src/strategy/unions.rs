@@ -363,20 +363,13 @@ where
   }
 }
 
-impl<T: Strategy> fmt::Debug for UnionValueTree<T>
-where
-  T::Tree: fmt::Debug,
-{
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_struct("UnionValueTree")
-      .field("options", &self.options)
-      .field("current", &self.current)
-      .field("pick", &self.pick)
-      .field("min_pick", &self.min_pick)
-      .field("prev", &self.prev)
-      .finish()
-  }
-}
+impl_debug_struct!(UnionValueTree<T> [T: Strategy, T::Tree: fmt::Debug] |self| {
+  options: self.options,
+  current: self.current,
+  pick: self.pick,
+  min_pick: self.min_pick,
+  prev: self.prev,
+});
 
 /// Take an initialized lazy tuple slot, leaving `None` once the tree has moved
 /// into the active branch.

@@ -15,9 +15,11 @@
 
 #[cfg(test)]
 mod tests {
+  mod support;
+
+  use support::assert_arbitrary;
   extern crate core as real_core;
 
-  use proptest::prelude::Arbitrary;
   use proptest::prelude::any;
   use proptest::strict::ensure_property;
   use proptest::test_runner::PropertyResult;
@@ -67,11 +69,5 @@ mod tests {
     })
   }
 
-  #[test]
-  fn asserting_arbitrary() {
-    fn assert_arbitrary<T: Arbitrary>() {}
-
-    assert_arbitrary::<Ty1>();
-    assert_arbitrary::<Ty2>();
-  }
+  assert_arbitrary!(Ty1, Ty2,);
 }

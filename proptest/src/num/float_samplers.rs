@@ -46,97 +46,61 @@ trait SamplerIndex<F>: Sized {
   fn into_usize_count(self) -> usize;
 }
 
-#[cfg(all(feature = "f16", not(feature = "alt-stable")))]
-impl IntoSamplerFloat<f16> for u16 {
-  fn into_sampler_float(self) -> f16 {
-    f16::from_bits(f16_bits_from_sampler_index(self))
-  }
+/// Share conversion trait wiring while preserving each float's rounding and
+/// each integer's checked or infallible count conversion.
+macro_rules! sampler_conversions {
+  ($float:ty, $integer:ty; $index:ident => $to_float:expr; $value:ident => $to_index:expr; $count:ident => $to_count:expr) => {
+    impl IntoSamplerFloat<$float> for $integer {
+      fn into_sampler_float(self) -> $float {
+        let $index = self;
+        $to_float
+      }
+    }
+
+    impl SamplerIndex<$float> for $integer {
+      fn from_sampler_float($value: $float) -> Self {
+        $to_index
+      }
+
+      #[cfg(all(test, feature = "strict-test"))]
+      fn from_usize_index(index: usize) -> Self {
+        Self::try_from(index).unwrap_or(Self::MAX)
+      }
+
+      #[cfg(all(test, feature = "strict-test"))]
+      fn into_usize_count(self) -> usize {
+        let $count = self;
+        $to_count
+      }
+    }
+  };
 }
+
+#[cfg(all(feature = "f16", not(feature = "alt-stable")))]
+sampler_conversions!(f16, u16;
+  index => f16::from_bits(f16_bits_from_sampler_index(index));
+  float => sampler_index_from_f16_bits(float.to_bits());
+  count => usize::from(count)
+);
 
 #[cfg(feature = "alt-stable")]
-impl IntoSamplerFloat<half::f16> for u16 {
-  fn into_sampler_float(self) -> half::f16 {
-    half::f16::from_bits(f16_bits_from_sampler_index(self))
-  }
-}
+sampler_conversions!(half::f16, u16;
+  index => half::f16::from_bits(f16_bits_from_sampler_index(index));
+  float => sampler_index_from_f16_bits(float.to_bits());
+  count => usize::from(count)
+);
 
-#[cfg(all(feature = "f16", not(feature = "alt-stable")))]
-impl SamplerIndex<f16> for u16 {
-  fn from_sampler_float(float: f16) -> Self {
-    sampler_index_from_f16_bits(float.to_bits())
-  }
+sampler_conversions!(f32, u32;
+  index => index.to_f32().unwrap_or(f32::INFINITY);
+  float => float.to_u32().unwrap_or(Self::MAX);
+  count => usize::try_from(count).unwrap_or(usize::MAX)
+);
 
-  #[cfg(all(test, feature = "strict-test"))]
-  fn from_usize_index(index: usize) -> Self {
-    Self::try_from(index).unwrap_or(Self::MAX)
-  }
-
-  #[cfg(all(test, feature = "strict-test"))]
-  fn into_usize_count(self) -> usize {
-    usize::from(self)
-  }
-}
-
-#[cfg(feature = "alt-stable")]
-impl SamplerIndex<half::f16> for u16 {
-  fn from_sampler_float(float: half::f16) -> Self {
-    sampler_index_from_f16_bits(float.to_bits())
-  }
-
-  #[cfg(all(test, feature = "strict-test"))]
-  fn from_usize_index(index: usize) -> Self {
-    Self::try_from(index).unwrap_or(Self::MAX)
-  }
-
-  #[cfg(all(test, feature = "strict-test"))]
-  fn into_usize_count(self) -> usize {
-    usize::from(self)
-  }
-}
-
-impl IntoSamplerFloat<f32> for u32 {
-  fn into_sampler_float(self) -> f32 {
-    self.to_f32().unwrap_or(f32::INFINITY)
-  }
-}
-
-impl SamplerIndex<f32> for u32 {
-  fn from_sampler_float(float: f32) -> Self {
-    float.to_u32().unwrap_or(Self::MAX)
-  }
-
-  #[cfg(all(test, feature = "strict-test"))]
-  fn from_usize_index(index: usize) -> Self {
-    Self::try_from(index).unwrap_or(Self::MAX)
-  }
-
-  #[cfg(all(test, feature = "strict-test"))]
-  fn into_usize_count(self) -> usize {
-    usize::try_from(self).unwrap_or(usize::MAX)
-  }
-}
-
-impl IntoSamplerFloat<f64> for u64 {
-  fn into_sampler_float(self) -> f64 {
-    self.to_f64().unwrap_or(f64::INFINITY)
-  }
-}
-
-impl SamplerIndex<f64> for u64 {
-  fn from_sampler_float(float: f64) -> Self {
-    float.to_u64().unwrap_or(Self::MAX)
-  }
-
-  #[cfg(all(test, feature = "strict-test"))]
-  fn from_usize_index(index: usize) -> Self {
-    Self::try_from(index).unwrap_or(Self::MAX)
-  }
-
-  #[cfg(all(test, feature = "strict-test"))]
-  fn into_usize_count(self) -> usize {
-    usize::try_from(self).unwrap_or(usize::MAX)
-  }
-}
+sampler_conversions!(f64, u64;
+  index => index.to_f64().unwrap_or(f64::INFINITY);
+  float => float.to_u64().unwrap_or(Self::MAX);
+  count => usize::try_from(count).unwrap_or(usize::MAX)
+);
 
 /// Convert a nonnegative sampler index into an IEEE 754 half-precision value.
 #[cfg(any(all(feature = "f16", not(feature = "alt-stable")), feature = "alt-stable"))]
@@ -771,23 +735,41 @@ macro_rules! float_sampler {
 
                 /// All sampled intervals retain their native index and endpoints.
                 #[cfg(feature = "strict-test")]
-                type IntervalSamples = ([$typ; 2], [prop::sample::Index; 32], IntervalCollection, [Option<[$typ; 2]>; 32]);
+                type IntervalSamples<T> = ([$typ; 2], [prop::sample::Index; 32], IntervalCollection, [Option<T>; 32]);
                 /// Concrete input of interval-sampling properties.
                 #[cfg(feature = "strict-test")]
                 type IntervalInput = ([$typ; 2], [prop::sample::Index; 32]);
 
+                /// Draw indices only from bounds with enough intervals for the observation.
+                #[cfg(feature = "strict-test")]
+                fn interval_inputs(minimum_count: $int_typ, context: &'static str) -> impl Strategy<Value = IntervalInput> {
+                    (bounds(), any::<[prop::sample::Index; 32]>())
+                        .prop_filter(context, move |&(bounds, _)| split_interval(bounds).count > minimum_count)
+                }
+
+                /// Retain the requested bounds and indices alongside each sampled interval.
+                #[cfg(feature = "strict-test")]
+                fn sample_intervals<T>(
+                    (bounds, indices): IntervalInput,
+                    reserved_tail: usize,
+                    observe: impl Fn([$typ; 2], &IntervalCollection, $int_typ) -> T,
+                ) -> IntervalSamples<T> {
+                    let intervals = split_interval(bounds);
+                    let size = sampler_count_to_usize::<$typ, $int_typ>(intervals.count.saturating_sub(1))
+                        .saturating_sub(reserved_tail);
+                    let sampled = indices.map(|index| index.index(size).map(|index| {
+                        let sampler_index = sampler_index_from_usize::<$typ, $int_typ>(index);
+                        observe(intervals.get(sampler_index), &intervals, sampler_index)
+                    }));
+                    (bounds, indices, intervals, sampled)
+                }
+
                 #[cfg(feature = "strict-test")]
                 #[test]
-                fn split_intervals_are_the_same_size() -> Property<IntervalInput, IntervalSamples> {
-                    let inputs = (bounds(), any::<[prop::sample::Index; 32]>())
-                        .prop_filter("the bounds must split into at least two intervals", |&(bounds, _)| split_interval(bounds).count > 1);
-                    crate::strict::ensure_property(&inputs, "split intervals share one width", |(bounds, indices)| {
-                        let intervals = split_interval(bounds);
-                        let size = sampler_count_to_usize::<$typ, $int_typ>(intervals.count.saturating_sub(1));
-                        let sampled = indices.map(|index| index.index(size).map(|index| {
-                            intervals.get(sampler_index_from_usize::<$typ, $int_typ>(index))
-                        }));
-                        ensure_that((bounds, indices, intervals, sampled), "every sampled interval has the same width", |observed| {
+                fn split_intervals_are_the_same_size() -> Property<IntervalInput, IntervalSamples<[$typ; 2]>> {
+                    let inputs = interval_inputs(1, "the bounds must split into at least two intervals");
+                    crate::strict::ensure_property(&inputs, "split intervals share one width", |input| {
+                        ensure_that(sample_intervals(input, 0, |interval, _, _| interval), "every sampled interval has the same width", |observed| {
                             observed.3.first().copied().flatten().is_some_and(|[low, high]| observed.3.iter().all(|sample| {
                                 sample.is_some_and(|[other_low, other_high]| float_bits_equal(high - low, other_high - other_low))
                             }))
@@ -795,23 +777,15 @@ macro_rules! float_sampler {
                     })
                 }
 
-                /// Adjacent interval observations, including any invalid sample index.
-                #[cfg(feature = "strict-test")]
-                type AdjacentSamples = ([$typ; 2], [prop::sample::Index; 32], IntervalCollection, [Option<[[$typ; 2]; 2]>; 32]);
-
                 #[cfg(feature = "strict-test")]
                 #[test]
-                fn split_intervals_are_consecutive() -> Property<IntervalInput, AdjacentSamples> {
-                    let inputs = (bounds(), any::<[prop::sample::Index; 32]>())
-                        .prop_filter("the bounds must split into at least three intervals", |&(bounds, _)| split_interval(bounds).count > 2);
-                    crate::strict::ensure_property(&inputs, "split intervals are consecutive", |(bounds, indices)| {
-                        let intervals = split_interval(bounds);
-                        let size = sampler_count_to_usize::<$typ, $int_typ>(intervals.count.saturating_sub(1)).saturating_sub(1);
-                        let sampled = indices.map(|index| index.index(size).map(|index| {
-                            let index = sampler_index_from_usize::<$typ, $int_typ>(index);
-                            [intervals.get(index), intervals.get(index.saturating_add(1))]
-                        }));
-                        ensure_that((bounds, indices, intervals, sampled), "adjacent intervals share a bound in one direction", |observed| {
+                fn split_intervals_are_consecutive() -> Property<IntervalInput, IntervalSamples<[[$typ; 2]; 2]>> {
+                    let inputs = interval_inputs(2, "the bounds must split into at least three intervals");
+                    crate::strict::ensure_property(&inputs, "split intervals are consecutive", |input| {
+                        let observed = sample_intervals(input, 1, |interval, intervals, index| {
+                            [interval, intervals.get(index.saturating_add(1))]
+                        });
+                        ensure_that(observed, "adjacent intervals share a bound in one direction", |observed| {
                             observed.3.iter().all(|sample| sample.is_some_and(|[[_, high], [low, _]]| float_bits_equal(high, low)))
                                 || observed.3.iter().all(|sample| sample.is_some_and(|[[low, _], [_, high]]| float_bits_equal(low, high)))
                         }).map_err(Box::new)

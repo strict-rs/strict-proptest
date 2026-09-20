@@ -236,7 +236,7 @@ impl<T: BitSetLike> Strategy for BitSetStrategy<T> {
 /// produce a new value, it selects a size, then uniformly selects that many
 /// bits from within the bit range.
 ///
-/// Shrinking happens as with [`BitSetStrategy`](struct.BitSetStrategy.html).
+/// Shrinking happens as with [`BitSetStrategy`].
 #[derive(Clone, Debug)]
 #[must_use = "strategies do nothing unless used"]
 pub struct SampledBitSetStrategy<T: BitSetLike> {
@@ -656,6 +656,14 @@ mod test {
     (strategy, samples)
   }
 
+  /// Inspect every generated value, rejecting failed draws without discarding their evidence.
+  fn all_sample_values<S: Strategy>(samples: &Samples<S>, predicate: impl Fn(S::Value) -> bool) -> bool {
+    samples
+      .1
+      .iter()
+      .all(|sample| sample.as_ref().is_ok_and(|tree| predicate(tree.current())))
+  }
+
   /// Observe every native bitset visited while simplifying each generated tree.
   fn shrinks<T: BitSetLike>(strategy: impl Strategy<Tree = BitSetValueTree<T>>, count: usize) -> Shrinks<T> {
     let mut runner = TestRunner::deterministic();
@@ -763,12 +771,7 @@ mod test {
     ensure_that(
       samples(u32::between(4, 8), 256),
       "generated bits stay within the requested range",
-      |observed| {
-        observed
-          .1
-          .iter()
-          .all(|sample| sample.as_ref().is_ok_and(|tree| tree.current() & !0xf0_u32 == 0))
-      },
+      |observed| all_sample_values(observed, |value| value & !0xf0_u32 == 0),
     )
     .map(drop)
     .map_err(Box::new)
@@ -833,10 +836,7 @@ mod test {
       samples(bool_vec::masked(vec![true, false, true, false]), 32),
       "the mask length is preserved and both mask bits are generated",
       |observed| {
-        observed
-          .1
-          .iter()
-          .all(|sample| sample.as_ref().is_ok_and(|tree| tree.current().len() == 4))
+        all_sample_values(observed, |value| value.len() == 4)
           && [0, 2].into_iter().all(|bit| {
             observed
               .1
@@ -906,10 +906,7 @@ mod test {
       samples(u32::sampled(4..8, 10..20), 2048),
       "sampled sizes and bits obey their ranges with roughly uniform selection",
       |observed| {
-        let valid = observed
-          .1
-          .iter()
-          .all(|sample| sample.as_ref().is_ok_and(|tree| valid_bits(tree.current())));
+        let valid = all_sample_values(observed, valid_bits);
         let counts = [4, 5, 6, 7].map(|width| {
           observed
             .1
@@ -966,12 +963,7 @@ mod test {
     ensure_that(
       samples(u128::between(64, 128), 256),
       "generated u128 values have no low bits set",
-      |observed| {
-        observed
-          .1
-          .iter()
-          .all(|sample| sample.as_ref().is_ok_and(|tree| tree.current() & u128::from(u64::MAX) == 0))
-      },
+      |observed| all_sample_values(observed, |value| value & u128::from(u64::MAX) == 0),
     )
     .map(drop)
     .map_err(Box::new)

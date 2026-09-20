@@ -18,18 +18,18 @@
 
 #[cfg(test)]
 mod tests {
+  mod properties;
+  mod support;
+
   use core::convert::Infallible;
 
-  use proptest::prelude::Arbitrary;
+  use properties::Checked;
+  use properties::check_generated;
   use proptest::prelude::any;
   use proptest::strict::ensure_property;
   use proptest::test_runner::PropertyResult;
   use proptest_derive::Arbitrary;
-  use strict_test_support::PredicateFailure;
-  use strict_test_support::ensure_that;
-
-  /// Assertions preserve each complete projected-field owner.
-  type Checked<T> = PropertyResult<T, T, PredicateFailure<T>>;
+  use support::assert_arbitrary;
 
   trait Func {
     type Out;
@@ -165,35 +165,33 @@ mod tests {
   debug!(FuncA, T14);
   debug!(FuncA, T15);
 
-  #[test]
-  fn asserting_arbitrary() {
-    fn assert_arbitrary<T: Arbitrary>() {}
+  assert_arbitrary!(
+    T0,
+    T1,
+    T2,
+    T3,
+    T4<TypeB>,
+    T5<TypeB>,
+    T6<TypeB>,
+    T7<TypeA>,
+    T8<TypeA>,
+    T9<TypeA>,
+    T10<TypeB>,
+    T11<TypeB>,
+    T12<TypeB>,
+    T13<TypeA>,
+    T14<TypeA>,
+    T15<TypeA>,
+  );
 
-    assert_arbitrary::<T0>();
-    assert_arbitrary::<T1>();
-    assert_arbitrary::<T2>();
-    assert_arbitrary::<T3>();
-
-    assert_arbitrary::<T4<TypeB>>();
-    assert_arbitrary::<T5<TypeB>>();
-    assert_arbitrary::<T6<TypeB>>();
-    assert_arbitrary::<T7<TypeA>>();
-    assert_arbitrary::<T8<TypeA>>();
-    assert_arbitrary::<T9<TypeA>>();
-
-    assert_arbitrary::<T10<TypeB>>();
-    assert_arbitrary::<T11<TypeB>>();
-    assert_arbitrary::<T12<TypeB>>();
-    assert_arbitrary::<T13<TypeA>>();
-    assert_arbitrary::<T14<TypeA>>();
-    assert_arbitrary::<T15<TypeA>>();
-  }
+  /// Context shared by every projected-field property.
+  const PROPERTY_CONTEXT: &str = "associated-type fields generate pinned values";
+  /// Assertion context shared by each pinned projected field.
+  const ASSERTION_CONTEXT: &str = "every projected value is pinned to 42";
 
   #[test]
   fn t0_field_val_42() -> Checked<T0> {
-    ensure_property(&any::<T0>(), "associated-type fields generate pinned values", |generated| {
-      ensure_that(generated, "every projected value is pinned to 42", |sample| sample.field.val == 42)
-    })
+    check_generated(&any::<T0>(), PROPERTY_CONTEXT, ASSERTION_CONTEXT, |sample| sample.field.val == 42)
   }
 
   #[test]
@@ -208,106 +206,92 @@ mod tests {
 
   #[test]
   fn t3_all_42() -> Checked<T3> {
-    ensure_property(&any::<T3>(), "associated-type fields generate pinned values", |generated| {
-      ensure_that(generated, "every projected value is pinned to 42", |sample| {
-        sample.field.iter().all(|element| element.val == 42)
-      })
+    check_generated(&any::<T3>(), PROPERTY_CONTEXT, ASSERTION_CONTEXT, |sample| {
+      sample.field.iter().all(|element| element.val == 42)
     })
   }
 
   #[test]
   fn t4_field_val_42() -> Checked<T4<TypeB>> {
-    ensure_property(&any::<T4<TypeB>>(), "associated-type fields generate pinned values", |generated| {
-      ensure_that(generated, "every projected value is pinned to 42", |sample| sample.field.val == 42)
+    check_generated(&any::<T4<TypeB>>(), PROPERTY_CONTEXT, ASSERTION_CONTEXT, |sample| {
+      sample.field.val == 42
     })
   }
 
   #[test]
   fn t5_field_val_42() -> Checked<T5<TypeB>> {
-    ensure_property(&any::<T5<TypeB>>(), "associated-type fields generate pinned values", |generated| {
-      ensure_that(generated, "every projected value is pinned to 42", |sample| sample.field.val == 42)
+    check_generated(&any::<T5<TypeB>>(), PROPERTY_CONTEXT, ASSERTION_CONTEXT, |sample| {
+      sample.field.val == 42
     })
   }
 
   #[test]
   fn t6_field_val_42() -> Checked<T6<TypeB>> {
-    ensure_property(&any::<T6<TypeB>>(), "associated-type fields generate pinned values", |generated| {
-      ensure_that(generated, "every projected value is pinned to 42", |sample| sample.field.val == 42)
+    check_generated(&any::<T6<TypeB>>(), PROPERTY_CONTEXT, ASSERTION_CONTEXT, |sample| {
+      sample.field.val == 42
     })
   }
 
   #[test]
   fn t7_field_val_42() -> Checked<T7<TypeA>> {
-    ensure_property(&any::<T7<TypeA>>(), "associated-type fields generate pinned values", |generated| {
-      ensure_that(generated, "every projected value is pinned to 42", |sample| sample.field.val == 42)
+    check_generated(&any::<T7<TypeA>>(), PROPERTY_CONTEXT, ASSERTION_CONTEXT, |sample| {
+      sample.field.val == 42
     })
   }
 
   #[test]
   fn t8_field_val_42() -> Checked<T8<TypeA>> {
-    ensure_property(&any::<T8<TypeA>>(), "associated-type fields generate pinned values", |generated| {
-      ensure_that(generated, "every projected value is pinned to 42", |sample| sample.field.val == 42)
+    check_generated(&any::<T8<TypeA>>(), PROPERTY_CONTEXT, ASSERTION_CONTEXT, |sample| {
+      sample.field.val == 42
     })
   }
 
   #[test]
   fn t9_field_val_42() -> Checked<T9<TypeA>> {
-    ensure_property(&any::<T9<TypeA>>(), "associated-type fields generate pinned values", |generated| {
-      ensure_that(generated, "every projected value is pinned to 42", |sample| sample.field.val == 42)
+    check_generated(&any::<T9<TypeA>>(), PROPERTY_CONTEXT, ASSERTION_CONTEXT, |sample| {
+      sample.field.val == 42
     })
   }
 
   #[test]
   fn t10_all_42() -> Checked<T10<TypeB>> {
-    ensure_property(&any::<T10<TypeB>>(), "associated-type fields generate pinned values", |generated| {
-      ensure_that(generated, "every projected value is pinned to 42", |sample| {
-        sample.field.iter().all(|element| element.val == 42)
-      })
+    check_generated(&any::<T10<TypeB>>(), PROPERTY_CONTEXT, ASSERTION_CONTEXT, |sample| {
+      sample.field.iter().all(|element| element.val == 42)
     })
   }
 
   #[test]
   fn t11_all_42() -> Checked<T11<TypeB>> {
-    ensure_property(&any::<T11<TypeB>>(), "associated-type fields generate pinned values", |generated| {
-      ensure_that(generated, "every projected value is pinned to 42", |sample| {
-        sample.field.iter().all(|element| element.val == 42)
-      })
+    check_generated(&any::<T11<TypeB>>(), PROPERTY_CONTEXT, ASSERTION_CONTEXT, |sample| {
+      sample.field.iter().all(|element| element.val == 42)
     })
   }
 
   #[test]
   fn t12_all_42() -> Checked<T12<TypeB>> {
-    ensure_property(&any::<T12<TypeB>>(), "associated-type fields generate pinned values", |generated| {
-      ensure_that(generated, "every projected value is pinned to 42", |sample| {
-        sample.field.iter().all(|element| element.val == 42)
-      })
+    check_generated(&any::<T12<TypeB>>(), PROPERTY_CONTEXT, ASSERTION_CONTEXT, |sample| {
+      sample.field.iter().all(|element| element.val == 42)
     })
   }
 
   #[test]
   fn t13_all_42() -> Checked<T13<TypeA>> {
-    ensure_property(&any::<T13<TypeA>>(), "associated-type fields generate pinned values", |generated| {
-      ensure_that(generated, "every projected value is pinned to 42", |sample| {
-        sample.field.iter().all(|element| element.val == 42)
-      })
+    check_generated(&any::<T13<TypeA>>(), PROPERTY_CONTEXT, ASSERTION_CONTEXT, |sample| {
+      sample.field.iter().all(|element| element.val == 42)
     })
   }
 
   #[test]
   fn t14_all_42() -> Checked<T14<TypeA>> {
-    ensure_property(&any::<T14<TypeA>>(), "associated-type fields generate pinned values", |generated| {
-      ensure_that(generated, "every projected value is pinned to 42", |sample| {
-        sample.field.iter().all(|element| element.val == 42)
-      })
+    check_generated(&any::<T14<TypeA>>(), PROPERTY_CONTEXT, ASSERTION_CONTEXT, |sample| {
+      sample.field.iter().all(|element| element.val == 42)
     })
   }
 
   #[test]
   fn t15_all_42() -> Checked<T15<TypeA>> {
-    ensure_property(&any::<T15<TypeA>>(), "associated-type fields generate pinned values", |generated| {
-      ensure_that(generated, "every projected value is pinned to 42", |sample| {
-        sample.field.iter().all(|element| element.val == 42)
-      })
+    check_generated(&any::<T15<TypeA>>(), PROPERTY_CONTEXT, ASSERTION_CONTEXT, |sample| {
+      sample.field.iter().all(|element| element.val == 42)
     })
   }
 }

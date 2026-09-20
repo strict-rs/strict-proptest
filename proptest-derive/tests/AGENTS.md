@@ -56,8 +56,10 @@ Two distinct flavors of expectation appear:
 
 Every `tests/*.rs` follows the same two-part shape, and new cases should match it:
 
-- a `#[test] fn asserting_arbitrary()` containing a local `fn assert_arbitrary<T: Arbitrary>() {}` called once per derived type — a pure compile-time check that the impl and its bounds resolve;
+- an `assert_arbitrary!(Type, ...)` invocation generating `#[test] fn asserting_arbitrary()` with one concrete trait-bound check per derived type; the inline `tests` module loads the shared macro from its natural child path, `tests/support.rs`, so Cargo does not create an extra integration-test target;
 - property tests that execute through `proptest::strict::ensure_property` and preserve native assertion outcomes for the attribute semantics (for example, `value`, `strategy`, `filter`, `regex`, or `weight`), usually via `any_with::<T>(params)` when params are involved. Only terminal tests adapt successful evidence to `()`.
+
+Predicate-based fixture properties share `tests/properties.rs`: `check_generated` retains each generated value in its native property outcome and keeps property and assertion diagnostic contexts distinct. Tests that make fallible observations retain those observations alongside the fixture in their own typed assertions.
 
 The derive is pulled in as `use proptest_derive::Arbitrary;` in every top-level integration test and revised raw-rustc fixtures. `skip.rs` and `uninhabited-pass.rs` use `core::convert::Infallible` for stable uninhabited coverage; the exact literal-`!` versions live in `run-pass-nightly/`.
 

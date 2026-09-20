@@ -101,49 +101,32 @@ arbitrary!(SocketAddr,
     ]
 );
 
+#[cfg(any(all(feature = "unstable", not(feature = "alt-stable")), feature = "alt-stable"))]
+/// Preserve the same multicast scope weights and shrinking order for both backends.
+macro_rules! multicast_scope_arbitrary {
+    ($scope:ty) => {
+        arbitrary!($scope,
+            TupleUnion<(WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>,
+                        WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>,
+                        WeightedStrategy<Just<Self>>)>;
+            prop_oneof![
+                Just(Self::InterfaceLocal),
+                Just(Self::LinkLocal),
+                Just(Self::RealmLocal),
+                Just(Self::AdminLocal),
+                Just(Self::SiteLocal),
+                Just(Self::OrganizationLocal),
+                Just(Self::Global),
+            ]
+        );
+    };
+}
+
 #[cfg(all(feature = "unstable", not(feature = "alt-stable")))]
-arbitrary!(Ipv6MulticastScope,
-    TupleUnion<(WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>,
-                WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>,
-                WeightedStrategy<Just<Self>>)>;
-    {
-        use std::net::Ipv6MulticastScope::{
-            AdminLocal, Global, InterfaceLocal, LinkLocal, OrganizationLocal,
-            RealmLocal, SiteLocal,
-        };
-        prop_oneof![
-            Just(InterfaceLocal),
-            Just(LinkLocal),
-            Just(RealmLocal),
-            Just(AdminLocal),
-            Just(SiteLocal),
-            Just(OrganizationLocal),
-            Just(Global),
-        ]
-    }
-);
+multicast_scope_arbitrary!(Ipv6MulticastScope);
 
 #[cfg(feature = "alt-stable")]
-arbitrary!(StableIpv6MulticastScope,
-    TupleUnion<(WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>,
-                WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>, WeightedStrategy<Just<Self>>,
-                WeightedStrategy<Just<Self>>)>;
-    {
-        use crate::alt_stable::Ipv6MulticastScope::{
-            AdminLocal, Global, InterfaceLocal, LinkLocal, OrganizationLocal,
-            RealmLocal, SiteLocal,
-        };
-        prop_oneof![
-            Just(InterfaceLocal),
-            Just(LinkLocal),
-            Just(RealmLocal),
-            Just(AdminLocal),
-            Just(SiteLocal),
-            Just(OrganizationLocal),
-            Just(Global),
-        ]
-    }
-);
+multicast_scope_arbitrary!(StableIpv6MulticastScope);
 
 #[cfg(test)]
 mod test {
